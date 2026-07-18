@@ -355,6 +355,37 @@
         mode: "0644"
       register: caddyfile
 
+    # Confined caddy (httpd_t) must reach tailscaled's localapi socket for
+    # ts.net certs; no boolean covers a unix-socket connect to
+    # unconfined_service_t, so ship a minimal policy module.
+    - name: Install checkpolicy (compiles the SELinux module)
+      ansible.builtin.dnf:
+        name: checkpolicy
+        state: present
+
+    - name: caddy-tailscale SELinux module source
+      ansible.builtin.copy:
+        src: caddy-tailscale.te
+        dest: /etc/caddy/caddy-tailscale.te
+        mode: "0644"
+      register: caddy_ts_te
+
+    - name: Is the caddy-tailscale module loaded?
+      ansible.builtin.shell: "semodule -l | grep -qw caddy-tailscale"
+      register: caddy_ts_mod
+      failed_when: false
+      changed_when: false
+
+    - name: Compile + load caddy-tailscale module
+      ansible.builtin.shell: |
+        set -euo pipefail
+        cd /tmp
+        checkmodule -M -m -o caddy-tailscale.mod /etc/caddy/caddy-tailscale.te
+        semodule_package -o caddy-tailscale.pp -m caddy-tailscale.mod
+        semodule -i caddy-tailscale.pp
+      when: caddy_ts_te is changed or caddy_ts_mod.rc != 0
+      changed_when: true
+
     # 8443 is already http_port_t; the other vhost ports are not, and
     # confined caddy gets EACCES binding them. 8448/8449 pre-labeled for the
     # commented-out vhosts in the Caddyfile.
@@ -415,6 +446,9 @@
     cmd: >-
       runuser -u homelab -- env XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}
       podman exec {{ item.container }} sh -c '{{ item.probe }}'
+    # podman dies if its CWD is unreadable after the uid drop, and ansible's
+    # remote cwd is ~straderb (0700) — run from a world-readable dir.
+    chdir: /tmp
   loop:
     - { container: jellyfin,       probe: "test -r /media/movies" }
     - { container: audiobookshelf, probe: "touch /audiobooks/.probe-nfs && rm /audiobooks/.probe-nfs" }

@@ -3,6 +3,12 @@
   ansible.builtin.systemd:
     daemon_reload: true
 
+- name: reload host-backstop
+  ansible.builtin.command:
+    cmd: nft -f /etc/nftables/host-backstop.nft
+  # The file ends with an include of mullvad-endpoints.nft, so the endpoint
+  # sets repopulate atomically with the reload.
+
 - name: restart vpn-netns
   ansible.builtin.systemd:
     name: vpn-netns.service

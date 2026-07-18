@@ -131,6 +131,9 @@
     src: host-backstop.nft.j2
     dest: /etc/nftables/host-backstop.nft
     mode: "0644"
+  # Without this a changed template sits on disk unloaded: the endpoint
+  # refresh only does `nft -f` when the table is ABSENT.
+  notify: reload host-backstop
   tags: [files, jail]
 
 - name: Install patch-window helper
@@ -417,6 +420,20 @@
   register: jail_membership
   changed_when: false
   failed_when: "'all-in-jail' not in jail_membership.stdout"
+  tags: [verify]
+
+# End-to-end through socket-activation, proxyd, the veth, and the container
+# — a green jail with dead proxies passed every earlier gate (the backstop
+# output chain silently EPERM'd the proxy backends once).
+- name: "GATE: UI proxies answer on the LAN IP"
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:{{ item }}"
+    status_code: [200, 301, 302, 303, 401, 403]
+  loop: [8080, 9696, 8989, 7878]
+  register: proxy_gate
+  retries: 3
+  delay: 5
+  until: proxy_gate is not failed
   tags: [verify]
 
 - name: "GATE: Mullvad confirmed from inside a container"

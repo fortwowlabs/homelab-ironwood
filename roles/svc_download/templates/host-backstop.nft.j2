@@ -68,6 +68,11 @@ table inet host_backstop {
         udp dport { 67, 68 } accept              # DHCP, if ever non-static
         icmp type echo-request accept            # outbound ping for sanity
 
+        # UI socket proxies (init ns) dial the jailed apps across the veth;
+        # without this the output drop returns EPERM on connect and every
+        # proxy dies with "Failed to connect to remote host".
+        oifname "veth-host" accept
+
         # PATCH WINDOW: `nft -f patch-window.nft` flips egress on; see README.
 
         log prefix "host-backstop-out-drop " counter drop
