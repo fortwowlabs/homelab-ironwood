@@ -110,7 +110,9 @@
     balloon:          0
     scsihw:           virtio-scsi-single
     agent:            "enabled=1,fstrim_cloned_disks=1"
-    serial0:          socket
+    # community.proxmox >= 1.x takes serial ports as a dict, not serial0=
+    serial:
+      serial0:        socket
     vga:              serial0
     net:
       net0: "virtio,bridge={{ pve_bridge }}"

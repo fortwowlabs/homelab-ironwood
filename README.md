@@ -47,14 +47,29 @@ for who in "-user automation@pve" "-token automation@pve!ansible"; do
   pveum aclmod /storage/nvme0pool    $who -role PVEDatastoreUser
   pveum aclmod /storage/local        $who -role PVEDatastoreUser
 done
+# VM serial ports are permission-gated at / (Sys.Modify), not at the pool —
+# without this the create 403s with "Permission check failed (/, Sys.Modify)".
+# One-privilege custom role keeps the widening deliberate and auditable:
+pveum role add homelab-sysmodify -privs Sys.Modify
+for who in "-user automation@pve" "-token automation@pve!ansible"; do
+  pveum aclmod / $who -role homelab-sysmodify
+done
+# PVE 8 gates NIC attachment behind SDN.Use on the bridge (403 "SDN.Use"
+# on /sdn/zones/localnetwork/vmbr0 otherwise) — same custom-role pattern:
+pveum role add homelab-sdnuse -privs SDN.Use
+for who in "-user automation@pve" "-token automation@pve!ansible"; do
+  pveum aclmod /sdn/zones/localnetwork/vmbr0 $who -role homelab-sdnuse
+done
 
-# 2. secrets
-cp inventory/group_vars/all_vault.yml.example inventory/group_vars/all_vault.yml
-$EDITOR inventory/group_vars/all_vault.yml      # token secret + Mullvad fields
-ansible-vault encrypt inventory/group_vars/all_vault.yml
+# 2. secrets — MUST live inside group_vars/all/ (a file named all_vault.yml
+#    maps to a group called "all_vault", which doesn't exist, and is silently
+#    never loaded)
+cp inventory/group_vars/all_vault.yml.example inventory/group_vars/all/vault.yml
+$EDITOR inventory/group_vars/all/vault.yml      # token secret + Mullvad fields
+.venv/bin/ansible-vault encrypt inventory/group_vars/all/vault.yml
 
 # 3. your public SSH key
-$EDITOR inventory/group_vars/all.yml            # set admin_ssh_pubkey
+$EDITOR inventory/group_vars/all/main.yml       # set admin_ssh_pubkey
 
 # 4. confirm you can reach PVE root over SSH (image fetch/snippet render use it)
 ssh root@192.168.1.10 true
@@ -169,6 +184,13 @@ Planned maintenance on the stack? `systemctl stop leak-canary.timer` first,
 stopped services (that's it doing its job).
 
 ## Gotchas carried over from the bundle
+
+- **Adopting a bundle-era VM?** Add it to the pool first:
+  `pveum pool modify homelab-svc -vms 131`. The token's visibility is
+  pool-scoped, so an existing VM outside the pool is invisible to the
+  existence check — the play then tries to create it and dies on
+  "VM 131 already exists". (`pveum pool list` doesn't render members;
+  verify with `pvesh get /pools/homelab-svc`.)
 
 - **host-backstop.nft input chain is default-drop.** It is now TEMPLATED
   from `lan_cidr` (`roles/svc_download/templates/host-backstop.nft.j2`), and

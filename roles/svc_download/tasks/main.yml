@@ -148,6 +148,13 @@
     force: false
   tags: [files, jail]
 
+- name: netns resolver dir
+  ansible.builtin.file:
+    path: /etc/netns/vpn
+    state: directory
+    mode: "0755"
+  tags: [files]
+
 - name: netns resolver (Mullvad in-tunnel DNS)
   ansible.builtin.copy:
     dest: /etc/netns/vpn/resolv.conf
@@ -155,7 +162,7 @@
     mode: "0644"
   tags: [files]
 
-- name: Create appdata dirs (10001) + local incomplete + NFS mountpoints
+- name: Create appdata dirs (10001) + local incomplete
   ansible.builtin.file:
     path: "{{ item }}"
     state: directory
@@ -168,6 +175,17 @@
     - /srv/appdata/sonarr
     - /srv/appdata/radarr
     - /var/lib/sabnzbd-incomplete
+  tags: [files]
+
+# Mountpoints only — no owner/group: once the NFS mount is live (fstab from a
+# previous run), chown/chgrp here hits the server through root-squash and
+# fails; server-side ownership is authoritative (the write-probe below is the
+# real check).
+- name: Create NFS mountpoints
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+  loop:
     - /srv/media
     - /srv/backups
   tags: [files]
@@ -208,14 +226,15 @@
 
 - name: Prove NFS is writable as the service uid
   ansible.builtin.command:
-    cmd: "runuser -u '#{{ svc_uid }}' -- touch /srv/media/.probe-dl"
+# setpriv, not runuser: runuser -u wants a username and rejects '#uid'.
+    cmd: "setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups -- touch /srv/media/.probe-dl"
   changed_when: false
   tags: [nfs, verify]
 
+# As the service uid, like the probe — root gets squashed and can't unlink.
 - name: Clean up probe
-  ansible.builtin.file:
-    path: /srv/media/.probe-dl
-    state: absent
+  ansible.builtin.command:
+    cmd: "setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups -- rm -f /srv/media/.probe-dl"
   changed_when: false
   tags: [nfs, verify]
 
@@ -293,6 +312,44 @@
 - name: Reload so generated quadlet units exist
   ansible.builtin.systemd:
     daemon_reload: true
+  tags: [containers]
+
+# First deploy: podman pulls images in the HOST netns, which the backstop
+# fences — only the running containers live in the vpn netns. Open the patch
+# window just for missing images; the strict backstop always reloads after.
+- name: Check which container images are present
+  ansible.builtin.command:
+    cmd: "podman image exists {{ item }}"
+  loop:
+    - lscr.io/linuxserver/sabnzbd:latest
+    - lscr.io/linuxserver/prowlarr:latest
+    - lscr.io/linuxserver/sonarr:latest
+    - lscr.io/linuxserver/radarr:latest
+  register: dl_images
+  failed_when: false
+  changed_when: false
+  tags: [containers]
+
+- name: Pre-pull missing images through the patch window
+  when: dl_images.results | selectattr('rc', 'ne', 0) | list | length > 0
+  block:
+    - name: Open patch window
+      ansible.builtin.command:
+        cmd: nft -f /etc/nftables/patch-window.nft
+      changed_when: true
+
+    - name: Pull missing images
+      ansible.builtin.command:
+        cmd: "podman pull {{ item.item }}"
+      loop: "{{ dl_images.results | selectattr('rc', 'ne', 0) | list }}"
+      loop_control:
+        label: "{{ item.item }}"
+      changed_when: true
+  always:
+    - name: Close patch window (reload strict backstop)
+      ansible.builtin.command:
+        cmd: nft -f /etc/nftables/host-backstop.nft
+      changed_when: true
   tags: [containers]
 
 - name: Start download containers

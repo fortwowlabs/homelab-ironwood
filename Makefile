@@ -73,7 +73,7 @@ lint: ## ansible-lint (install: pip install ansible-lint)
 	$(LINT) $(PLAYBOOK) $(VERIFY) || echo "(ansible-lint not installed or found issues)"
 
 vault-edit: ## Edit the encrypted secrets file
-	$(BIN)ansible-vault edit inventory/group_vars/all_vault.yml
+	$(BIN)ansible-vault edit inventory/group_vars/all/vault.yml
 
 clean: ## Remove local ansible cruft
 	rm -rf *.retry .ansible collections

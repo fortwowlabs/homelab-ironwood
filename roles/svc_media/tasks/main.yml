@@ -72,21 +72,22 @@
 
 - name: Prove NFS writable as service uid
   ansible.builtin.command:
-    cmd: "runuser -u '#{{ svc_uid }}' -- touch /srv/media/.probe-media"
+# setpriv, not runuser: runuser -u wants a username and rejects '#uid'.
+    cmd: "setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups -- touch /srv/media/.probe-media"
   changed_when: false
   tags: [nfs, verify]
 
+# As the service uid, like the probe — root gets squashed and can't unlink.
 - name: Clean probe
-  ansible.builtin.file:
-    path: /srv/media/.probe-media
-    state: absent
+  ansible.builtin.command:
+    cmd: "setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups -- rm -f /srv/media/.probe-media"
   changed_when: false
   tags: [nfs, verify]
 
 - name: Backup subtree on NFS (created as 10001 so root-squash is moot)
   ansible.builtin.command:
     cmd: >-
-      runuser -u '#{{ svc_uid }}' -- mkdir -p
+      setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups -- mkdir -p
       /srv/backups/audiobookshelf
       /srv/backups/svc-media/romm-db
       /srv/backups/svc-media/appdata

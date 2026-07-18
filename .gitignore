@@ -1,6 +1,6 @@
 # Secrets — the encrypted vault is technically safe to commit, but keeping it
 # out entirely is the belt-and-suspenders default. Commit the .example only.
-inventory/group_vars/all_vault.yml
+inventory/group_vars/all/vault.yml
 .vault_pass
 
 # Python venv (created by `make deps`)

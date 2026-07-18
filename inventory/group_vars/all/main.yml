@@ -21,8 +21,10 @@ svc_media_ip:    192.168.1.30
 svc_download_ip: 192.168.1.31
 
 # --- TrueNAS NFS (created by hand in Phase 1 — NOT automated) ---
-nfs_media_export:   "/mnt/sata_wd_14tb/media"
-nfs_backups_export: "/mnt/sata_wd_14tb/backups"
+# These live INSIDE the exported `tank` dataset (exports are tank + rust;
+# verify with `showmount -e 192.168.1.20`).
+nfs_media_export:   "/mnt/sata_wd_14tb/tank/media"
+nfs_backups_export: "/mnt/sata_wd_14tb/tank/backups"
 nfs_opts: "hard,nofail,x-systemd.automount,x-systemd.mount-timeout=30"
 
 # --- Proxmox storage (from /etc/pve/storage.cfg) ---

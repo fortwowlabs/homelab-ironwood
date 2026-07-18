@@ -1,11 +1,12 @@
 ---
 # ============================================================================
-# SECRETS. Copy to all_vault.yml and encrypt:
-#     cp all_vault.yml.example all_vault.yml
-#     $EDITOR all_vault.yml          # fill in real values
-#     ansible-vault encrypt all_vault.yml
-# Edit later with:  ansible-vault edit all_vault.yml
-# all_vault.yml is .gitignored; only the .example (this file) is committed.
+# SECRETS. Copy to all/vault.yml (NOT group_vars/all_vault.yml — that name
+# maps to a nonexistent group and is silently ignored) and encrypt:
+#     cp all_vault.yml.example all/vault.yml
+#     $EDITOR all/vault.yml          # fill in real values
+#     ansible-vault encrypt all/vault.yml
+# Edit later with:  make vault-edit
+# all/vault.yml is .gitignored; only the .example (this file) is committed.
 # ============================================================================
 
 # --- Proxmox API token (Phase 0 on thurgadin) — SCOPED (v5) ---------------
@@ -25,6 +26,15 @@
 #   pveum aclmod /storage/nvme0pool -token 'automation@pve!ansible' -role PVEDatastoreUser
 #   pveum aclmod /storage/local     -user automation@pve -role PVEDatastoreUser
 #   pveum aclmod /storage/local     -token 'automation@pve!ansible' -role PVEDatastoreUser
+#   # serial-port config is gated at / with Sys.Modify (PVE quirk); grant it
+#   # via a single-privilege custom role, NOT PVEVMAdmin-at-/:
+#   pveum role add homelab-sysmodify -privs Sys.Modify
+#   pveum aclmod / -user automation@pve -role homelab-sysmodify
+#   pveum aclmod / -token 'automation@pve!ansible' -role homelab-sysmodify
+#   # PVE 8: NIC attachment needs SDN.Use on the bridge:
+#   pveum role add homelab-sdnuse -privs SDN.Use
+#   pveum aclmod /sdn/zones/localnetwork/vmbr0 -user automation@pve -role homelab-sdnuse
+#   pveum aclmod /sdn/zones/localnetwork/vmbr0 -token 'automation@pve!ansible' -role homelab-sdnuse
 #
 # Honest scope note: the qm import / EFI-disk steps run as root over SSH
 # anyway (module limitation), so this scoping protects against TOKEN leakage,
