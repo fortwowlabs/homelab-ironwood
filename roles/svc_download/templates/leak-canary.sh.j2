@@ -61,19 +61,20 @@ if [[ -f "$FLAG" ]]; then
 fi
 
 # 1. Every expected container must exist, its unit must be active, and it
-#    must live in the jail. SandboxKey is the netns path Podman joined;
-#    anything else means a unit drifted (e.g. someone removed PodmanArgs and
-#    it silently fell back to the default bridge).
+#    must live in the jail. Membership is proven by the main PID's netns
+#    inode: SandboxKey is EMPTY for containers joined to a pre-made netns
+#    via --network=ns: (podman only fills it for netns it created), so it
+#    cannot distinguish "in the jail" from "drifted".
 want_inode=$(stat -Lc %i /run/netns/vpn) || fail_leak "netns /run/netns/vpn missing"
 for c in "${expected[@]}"; do
     podman container exists "$c" \
         || down "expected container $c does not exist"
     systemctl is-active --quiet "dl-$c.service" \
         || down "dl-$c.service is not active"
-    key=$(podman inspect -f '{% raw %}{{.NetworkSettings.SandboxKey}}{% endraw %}' "$c")
-    [[ -n "$key" ]] || fail_leak "container $c has no sandbox netns"
-    [[ "$(stat -Lc %i "$key" 2>/dev/null)" == "$want_inode" ]] \
-        || fail_leak "container $c is NOT in the vpn netns (sandbox: $key)"
+    pid=$(podman inspect -f '{% raw %}{{.State.Pid}}{% endraw %}' "$c")
+    [[ "$pid" -gt 0 ]] || fail_leak "container $c has no running pid"
+    [[ "$(stat -Lc %i /proc/$pid/ns/net 2>/dev/null)" == "$want_inode" ]] \
+        || fail_leak "container $c is NOT in the vpn netns (pid: $pid)"
 done
 
 # 2. Topology drift.

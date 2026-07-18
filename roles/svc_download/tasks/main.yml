@@ -359,6 +359,17 @@
   loop: [sabnzbd, prowlarr, sonarr, radarr]
   tags: [containers]
 
+# The proxy sockets/services run as systemd_socket_proxyd_t, which SELinux
+# confines to specific ports. Without these booleans the socket binds fail
+# with EACCES and NO audit record (systemd's internal labeling path).
+- name: Allow systemd-socket-proxyd any bind/connect (SELinux booleans)
+  ansible.posix.seboolean:
+    name: "{{ item }}"
+    state: true
+    persistent: true
+  loop: [systemd_socket_proxyd_bind_any, systemd_socket_proxyd_connect_any]
+  tags: [containers]
+
 - name: Enable + start UI socket proxies
   ansible.builtin.systemd:
     name: "{{ item }}"
@@ -393,9 +404,13 @@
     cmd: |
       set -euo pipefail
       want=$(stat -Lc %i /run/netns/vpn)
+      # Compare the main PID's netns inode. SandboxKey is EMPTY for
+      # containers joined to a pre-made netns via --network=ns: (podman only
+      # fills it for netns it created), so it cannot prove membership here.
       for c in sabnzbd prowlarr sonarr radarr; do
-        key=$(podman inspect -f '{{ '{{' }}.NetworkSettings.SandboxKey{{ '}}' }}' "$c")
-        [ "$(stat -Lc %i "$key")" = "$want" ] || { echo "LEAK: $c not in jail ($key)"; exit 1; }
+        pid=$(podman inspect -f '{{ '{{' }}.State.Pid{{ '}}' }}' "$c")
+        [ "$pid" -gt 0 ] || { echo "LEAK: $c not running (pid=$pid)"; exit 1; }
+        [ "$(stat -Lc %i /proc/$pid/ns/net)" = "$want" ] || { echo "LEAK: $c not in jail (pid=$pid)"; exit 1; }
       done
       echo "all-in-jail"
     executable: /bin/bash

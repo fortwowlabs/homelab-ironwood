@@ -24,10 +24,11 @@ fail() {
 #    PodmanArgs and it silently fell back to the default bridge).
 want_inode=$(stat -Lc %i /run/netns/vpn) || fail "netns /run/netns/vpn missing"
 for c in $(podman ps --filter name='^(sabnzbd|nzbhydra2|prowlarr|sonarr|radarr)$' -q); do
-    key=$(podman inspect -f '{{.NetworkSettings.SandboxKey}}' "$c")
-    [[ -n "$key" ]] || fail "container $c has no sandbox netns"
-    [[ "$(stat -Lc %i "$key" 2>/dev/null)" == "$want_inode" ]] \
-        || fail "container $c is NOT in the vpn netns (sandbox: $key)"
+    # PID netns inode, not SandboxKey — SandboxKey is empty for --network=ns:
+    pid=$(podman inspect -f '{{.State.Pid}}' "$c")
+    [[ "$pid" -gt 0 ]] || fail "container $c has no running pid"
+    [[ "$(stat -Lc %i /proc/$pid/ns/net 2>/dev/null)" == "$want_inode" ]] \
+        || fail "container $c is NOT in the vpn netns (pid: $pid)"
 done
 
 # 2. Topology drift.

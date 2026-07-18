@@ -4,8 +4,9 @@
 #   nft -f /etc/nftables/patch-window.nft     # open
 #   <run: dnf update / podman auto-update>
 #   nft -f /etc/nftables/host-backstop.nft    # close (reload strict baseline)
-# Adds accept rules to the existing output chain; reloading host-backstop.nft
-# removes them by rebuilding the table.
-add rule inet host_backstop output ip daddr 192.168.1.1 udp dport 53 accept
-add rule inet host_backstop output ip daddr 192.168.1.1 tcp dport 53 accept
-add rule inet host_backstop output tcp dport 443 accept
+# INSERTS accept rules at the TOP of the output chain — `add` would append
+# them below the chain's final `log ... drop` rule where they never match.
+# Reloading host-backstop.nft removes them by rebuilding the table.
+insert rule inet host_backstop output ip daddr 192.168.1.1 udp dport 53 accept
+insert rule inet host_backstop output ip daddr 192.168.1.1 tcp dport 53 accept
+insert rule inet host_backstop output tcp dport 443 accept
