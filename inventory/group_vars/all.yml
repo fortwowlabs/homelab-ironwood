@@ -1,0 +1,80 @@
+---
+# ============================================================================
+# Environment facts (audited 2026-05-31; image pin refreshed 2026-07-15).
+# Non-secret — safe in git. Secrets live in group_vars/all_vault.yml
+# (ansible-vault encrypted).
+# ============================================================================
+
+# --- Network / identity ---
+lan_gateway:     192.168.1.1
+lan_dns:         192.168.1.1
+lan_cidr:        192.168.1.0/24     # admin scope (deliberate: whole flat LAN)
+search_domain:   fort.wow
+admin_user:      straderb
+svc_uid:         10001
+svc_gid:         10001
+timezone:        America/New_York
+
+# --- Hosts ---
+truenas_ip:      192.168.1.20
+svc_media_ip:    192.168.1.30
+svc_download_ip: 192.168.1.31
+
+# --- TrueNAS NFS (created by hand in Phase 1 — NOT automated) ---
+nfs_media_export:   "/mnt/sata_wd_14tb/media"
+nfs_backups_export: "/mnt/sata_wd_14tb/backups"
+nfs_opts: "hard,nofail,x-systemd.automount,x-systemd.mount-timeout=30"
+
+# --- Proxmox storage (from /etc/pve/storage.cfg) ---
+pve_storage:         nvme0pool           # VM disks
+pve_snippet_storage: local
+pve_snippet_dir:     /var/lib/vz/snippets
+pve_image_dir:       /var/lib/vz/template/cache
+pve_bridge:          vmbr0
+# EL10 userspace is x86-64-v3; PVE default (v2-AES) won't boot it. 'host' on
+# the 3700X (Zen 2) qualifies. Use x86-64-v3 instead only for live migration.
+pve_cpu_type:        host
+
+# --- Rocky 10 GenericCloud image — PINNED (v5) --------------------------
+# Pin a DATED build, never the mutable `.latest` symlink: latest can change
+# upstream while the local .sha256 stamp keeps an old copy, and the old v4
+# check matched the hash against ANY line of the aggregate CHECKSUM file.
+# v5 fetches the per-image BSD-style CHECKSUM and matches the exact filename.
+#
+# BUMP PROCEDURE (deliberate, not automatic):
+#   1. Browse https://dl.rockylinux.org/pub/rocky/10/images/x86_64/
+#   2. Update the three values below to the new dated build.
+#   3. rm the old image + .sha256 stamp in {{ pve_image_dir }} on thurgadin.
+#   4. Note: Rocky prunes dated images of the PREVIOUS minor when a new one
+#      lands, so a stale pin eventually 404s — that is your cue to bump.
+#   Optional authenticity (not just transfer integrity): also fetch
+#   {{ rocky_checksum_url }}.asc and `gpg --verify` against the Rocky key.
+rocky_image_name: "Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2"
+rocky_image_url:  "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2"
+rocky_checksum_url: "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2.CHECKSUM"
+
+# --- Admin SSH key injected into both VMs (public key CONTENT, not a path) ---
+# Paste your MBP ed25519 public key here (safe — it's a public key):
+admin_ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMjZAEI+FfdW74JRrWjUbSK9HmF7AVHaa8qlYsN9YSLB straderb@Mac.fort.wow"
+
+# --- Mullvad in-tunnel DNS (public constant, not a secret) ---
+mullvad_dns: "10.64.0.1"
+
+# --- ntfy: where deploy results are pushed. ------------------------------
+# Default is the LAN-internal ntfy you'll stand up on svc-media (Phase 9).
+# FIRST RUN: that ntfy does not exist yet. Either point this at
+# https://ntfy.sh with a long random topic for bootstrap, or accept that
+# the push fails — v5 prints a loud WARNING in the play output instead of
+# swallowing it (v4 was silent). The svc-download leak canary alerts to
+# this same target; the host backstop opens egress to it automatically
+# when the ntfy host == svc_media_ip.
+ntfy_url:   "http://192.168.1.30:8080"     # LAN-internal ntfy on svc-media
+ntfy_topic: "homelab-deploy"
+
+# --- svc-media access layer -----------------------------------------------
+# caddy  = install Tailscale + Caddy and wire the ts.net vhosts, fully
+#          unattended IF vault_tailscale_authkey is set (skipped with a
+#          visible note when tailscaled isn't authenticated yet).
+# manual = v4 behavior: role stops at "containers healthy on the LAN";
+#          you run `tailscale up` + Caddy by hand (DEPLOY Phase 6).
+media_access_layer: caddy

@@ -1,0 +1,21 @@
+# ~homelab/.config/containers/systemd/romm-db.container
+[Unit]
+Description=RomM MariaDB
+
+[Container]
+Image=docker.io/library/mariadb:11
+ContainerName=romm-db
+Network=romm.network
+EnvironmentFile=%h/appdata/romm/romm.env
+Volume=%h/appdata/romm/mysql:/var/lib/mysql:Z
+HealthCmd=healthcheck.sh --connect --innodb_initialized
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,19 @@
+# Secrets — the encrypted vault is technically safe to commit, but keeping it
+# out entirely is the belt-and-suspenders default. Commit the .example only.
+inventory/group_vars/all_vault.yml
+.vault_pass
+
+# Python venv (created by `make deps`)
+.venv/
+
+# Ansible cruft
+*.retry
+.ansible/
+collections/ansible_collections/
+
+# Claude Code local (machine-specific) settings
+.claude/settings.local.json
+
+# Editor / OS
+*.swp
+.DS_Store

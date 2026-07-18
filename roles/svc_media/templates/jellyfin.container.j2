@@ -1,0 +1,37 @@
+# ~homelab/.config/containers/systemd/jellyfin.container   (rootless)
+# RENDERED BY ANSIBLE from roles/svc_media/templates/jellyfin.container.j2
+#
+# Ports (v5): 8096 published on the LAN IP ONLY — not 0.0.0.0. Tailscale on
+# this VM means all-interfaces would silently expose Jellyfin to the whole
+# tailnet the moment tailscaled came up. LAN clients direct-play against
+# http://{{ svc_media_ip }}:8096 (firewalld rich rule scopes it to the LAN
+# source range); tailnet clients go through Caddy on the ts.net name.
+#
+# Transcoding: 3700X host, NO iGPU — CPU transcode. Fine for 1-2 concurrent
+# 1080p jobs on 4 vCPU; prefer direct-play clients. v5: tmpfs moved to
+# /cache/transcodes (the official image's actual default transcode path —
+# /transcodes was never written to, so v4's tmpfs shielded nothing) and
+# sized 6g. NOTE: tmpfs pages count against VM RAM when in use; the VM has
+# 10G. If you see memory pressure during heavy transcodes, drop to 4g here.
+[Unit]
+Description=Jellyfin
+
+[Container]
+Image=docker.io/jellyfin/jellyfin:latest
+ContainerName=jellyfin
+PublishPort={{ svc_media_ip }}:8096:8096
+Volume=%h/appdata/jellyfin/config:/config:Z
+Volume=%h/appdata/jellyfin/cache:/cache:Z
+Volume=/srv/media/tv:/media/tv:ro
+Volume=/srv/media/movies:/media/movies:ro
+Tmpfs=/cache/transcodes:size=6g
+Environment=JELLYFIN_PublishedServerUrl=http://{{ svc_media_ip }}:8096
+
+[Service]
+# Refuse to start on a bare mountpoint: stat triggers the automount,
+# findmnt proves real nfs4 is behind it.
+ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

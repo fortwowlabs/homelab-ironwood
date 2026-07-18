@@ -1,0 +1,28 @@
+---
+# The pve_vm role talks to the Proxmox API (token, no root password) for VM
+# lifecycle, but a few operations must touch thurgadin's filesystem (rendering
+# the cloud-init snippet, image fetch/verify, disk resize). Those delegate
+# over SSH to this target. Set to an SSH alias/user@host that reaches root on
+# thurgadin. If you keep PVE strictly hands-off, pre-place the snippet + image
+# yourself and set pve_image_present=true (see role header).
+pve_ssh_host: "root@192.168.1.10"
+
+# Set true to skip the image fetch/verify block entirely (image already in
+# {{ pve_image_dir }} with a .sha256 stamp).
+pve_image_present: false
+
+# TLS: PVE ships a self-signed cert by default. If you haven't put a trusted
+# cert on 8006, the proxmox modules need this. Flip to true only if you must.
+# (community.proxmox reads validate_certs; set per-task or here as a default.)
+pve_validate_certs: false
+
+# v5: resource pool the service VMs are created in. Create it once
+# (see all_vault.yml.example header) — the scoped API token's VM rights
+# live on this pool. Comment out to create VMs outside any pool (then the
+# token needs VM rights elsewhere, e.g. /vms).
+pve_vm_pool: homelab-svc
+
+# v5: `-e pve_reconcile=true` (or `make reconcile`) pushes cores/memory/
+# onboot/startup from host_vars onto EXISTING VMs. Off by default so a
+# routine converge can never surprise-reconfigure a running VM.
+pve_reconcile: false

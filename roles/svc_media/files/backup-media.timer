@@ -1,0 +1,11 @@
+# /etc/systemd/system/backup-media.timer
+[Unit]
+Description=Nightly svc-media backup
+
+[Timer]
+OnCalendar=*-*-* 03:05:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

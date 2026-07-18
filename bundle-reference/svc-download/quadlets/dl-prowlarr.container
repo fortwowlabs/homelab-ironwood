@@ -1,0 +1,31 @@
+# /etc/containers/systemd/dl-prowlarr.container   (rootful, inside vpn netns)
+#
+# Prowlarr re-enters the design WITH Sonarr/Radarr: app-sync is its whole
+# value, and now there are apps to sync to. It replaces NZBHydra2 as the
+# indexer layer (keep dl-nzbhydra2 only if you later add LazyLibrarian,
+# which speaks Hydra natively but not Prowlarr-sync).
+# In-jail service discovery is localhost: everything in the netns shares one
+# network stack, so Prowlarr -> SAB is http://127.0.0.1:8080, and the arrs
+# are 127.0.0.1:8989 / 7878.
+[Unit]
+Description=Prowlarr (inside vpn netns)
+Requires=vpn-netns.service
+After=vpn-netns.service
+
+[Container]
+Image=lscr.io/linuxserver/prowlarr:latest
+ContainerName=prowlarr
+Label=io.containers.autoupdate=registry
+Environment=PUID=10001
+Environment=PGID=10001
+Environment=TZ=America/New_York
+PodmanArgs=--network=ns:/run/netns/vpn
+DNS=10.64.0.1
+Volume=/srv/appdata/prowlarr:/config:Z
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

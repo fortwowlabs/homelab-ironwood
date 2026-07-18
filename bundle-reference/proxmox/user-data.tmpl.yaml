@@ -1,0 +1,67 @@
+#cloud-config
+# proxmox/user-data.tmpl.yaml — rendered per-VM by create-vm.sh (envsubst)
+# into ${SNIPPET_DIR}/${NAME}-user.yaml and attached via --cicustom.
+#
+# IMPORTANT: cicustom user= REPLACES Proxmox's generated user-data entirely.
+# ciuser/cipassword/sshkeys set via `qm set` are IGNORED once this is attached
+# — every user and key must be defined here. Network config (ipconfig0) is a
+# separate NoCloud file and still applies.
+#
+# Scope: bootstrap only — identity, agent, baseline packages, disk growth.
+# Everything else (NFS mounts, quadlets, netns) belongs to the bundle's
+# per-VM deploy steps, where it's reviewable and rollback-able.
+
+hostname: ${NAME}
+fqdn: ${NAME}.${SEARCHDOMAIN}
+prefer_fqdn_over_hostname: true
+timezone: ${TIMEZONE}
+
+users:
+  - name: ${ADMIN_USER}
+    groups: [wheel]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - ${ADMIN_SSH_PUBKEY}
+  # Service account matching TrueNAS dataset ownership. No login, no keys.
+  - name: homelab
+    uid: 10001
+    primary_group: homelab
+    no_user_group: false
+    shell: /sbin/nologin
+    lock_passwd: true
+    homedir: /opt/homelab
+
+groups:
+  - homelab: []
+
+# GenericCloud images grow the root fs automatically when growpart runs;
+# stated explicitly so it survives image-default changes.
+growpart:
+  mode: auto
+  devices: ["/"]
+
+package_update: true
+packages:
+  - qemu-guest-agent
+  - epel-release
+  - podman
+  - nfs-utils
+  - policycoreutils-python-utils
+  - curl
+${EXTRA_PACKAGES_YAML}
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  # groupadd via cloud-init 'groups' has no gid control; enforce 10001 here.
+  - [ sh, -c, "groupmod -g 10001 homelab && usermod -g 10001 homelab || true" ]
+  - loginctl enable-linger homelab || true
+
+# NOTE on ordering: packages from EPEL requested in the same run as
+# epel-release can race on some cloud-init versions. wireguard-tools is in
+# `packages` above via EXTRA_PACKAGES; if it fails on first boot, the deploy
+# README's `dnf install` step covers it — treat cloud-init as best-effort
+# bootstrap, not the system of record.
+
+final_message: "cloud-init bootstrap complete for ${NAME} after $UPTIME s"

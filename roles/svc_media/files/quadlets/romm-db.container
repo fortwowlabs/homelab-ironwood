@@ -1,0 +1,34 @@
+# ~homelab/.config/containers/systemd/romm-db.container
+#
+# v5: DB gets its OWN env file (romm-db.env) so the app container's secrets
+# (auth key, metadata-provider API creds) never enter the DB container.
+# romm-db.env must define exactly:
+#   MARIADB_ROOT_PASSWORD=...
+#   MARIADB_DATABASE=romm
+#   MARIADB_USER=romm-user
+#   MARIADB_PASSWORD=...        # must match DB_PASSWD in romm.env
+#
+# Notify=healthy: the unit only reports started once the HealthCmd passes,
+# so romm.service (Requires/After) waits for a READY database, not just a
+# started container.
+[Unit]
+Description=RomM MariaDB
+
+[Container]
+Image=docker.io/library/mariadb:11
+ContainerName=romm-db
+Network=romm.network
+EnvironmentFile=%h/appdata/romm/romm-db.env
+Volume=%h/appdata/romm/mysql:/var/lib/mysql:Z
+Notify=healthy
+HealthCmd=healthcheck.sh --connect --innodb_initialized
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# backup-dl-appdata.sh — nightly appdata tars for the download stack.
+# RENDERED BY ANSIBLE. Run by backup-dl-appdata.timer as root; all NFS I/O
+# happens as the homelab uid (runuser) so root-squash on the export is moot.
+#
+# Consistency note: the arr apps use live SQLite, so these tars are crash-
+# consistent snapshots. Each arr ALSO writes its own scheduled zip under
+# /config/Backups (application-consistent) — which these tars capture too.
+# Retention: {{ backup_retention_days | default(14) }} days.
+set -euo pipefail
+
+DEST=/srv/backups/svc-download
+STAMP=$(date +%F)
+NTFY="{{ ntfy_url }}/{{ ntfy_topic }}"
+
+on_err() {
+    logger -p daemon.err -t backup-dl "appdata backup FAILED"
+    curl -fsS --max-time 5 -X POST -H "Title: svc-download backup FAILED" \
+        -H "Priority: high" -H "Tags: floppy_disk" \
+{% if (vault_ntfy_token | default('')) | length > 0 %}
+        -H "Authorization: Bearer {{ vault_ntfy_token }}" \
+{% endif %}
+        -d "backup-dl-appdata.sh failed — check journalctl -u backup-dl-appdata" \
+        "$NTFY" >/dev/null 2>&1 || true
+}
+trap on_err ERR
+
+runuser -u homelab -- mkdir -p "$DEST"
+for app in sabnzbd prowlarr sonarr radarr; do
+    runuser -u homelab -- tar -C /srv/appdata -czf "$DEST/${app}-${STAMP}.tar.gz" "$app"
+done
+runuser -u homelab -- find "$DEST" -name '*.tar.gz' -mtime +{{ backup_retention_days | default(14) }} -delete
+logger -t backup-dl "appdata backup OK ($STAMP)"

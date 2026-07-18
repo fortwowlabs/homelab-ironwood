@@ -1,0 +1,9 @@
+---
+# Install with:  ansible-galaxy collection install -r requirements.yml
+# Python deps (on the control node, i.e. your MBP):
+#   pip install "proxmoxer>=2.0" requests
+collections:
+  - name: community.proxmox
+    version: ">=2.0.0"      # replaces the deprecated community.general.proxmox_kvm
+  - name: community.general  # nfs mount, misc utilities
+  - name: ansible.posix      # mount, sysctl, seboolean

@@ -1,0 +1,57 @@
+---
+# ============================================================================
+# SECRETS. Copy to all_vault.yml and encrypt:
+#     cp all_vault.yml.example all_vault.yml
+#     $EDITOR all_vault.yml          # fill in real values
+#     ansible-vault encrypt all_vault.yml
+# Edit later with:  ansible-vault edit all_vault.yml
+# all_vault.yml is .gitignored; only the .example (this file) is committed.
+# ============================================================================
+
+# --- Proxmox API token (Phase 0 on thurgadin) — SCOPED (v5) ---------------
+# v4 granted PVEVMAdmin at / with privilege separation disabled. v5 scopes
+# the token to a pool holding only these two VMs + the two storages it
+# actually touches, and keeps privsep ON (ACLs go on the token itself).
+# Run ON thurgadin, once:
+#
+#   pveum pool add homelab-svc --comment "svc-download + svc-media"
+#   pveum user add automation@pve
+#   pveum user token add automation@pve ansible          # privsep stays 1
+#   # VM lifecycle inside the pool only:
+#   pveum aclmod /pool/homelab-svc -user automation@pve -role PVEVMAdmin
+#   pveum aclmod /pool/homelab-svc -token 'automation@pve!ansible' -role PVEVMAdmin
+#   # Disk allocation on the VM storage + snippet/image storage:
+#   pveum aclmod /storage/nvme0pool -user automation@pve -role PVEDatastoreUser
+#   pveum aclmod /storage/nvme0pool -token 'automation@pve!ansible' -role PVEDatastoreUser
+#   pveum aclmod /storage/local     -user automation@pve -role PVEDatastoreUser
+#   pveum aclmod /storage/local     -token 'automation@pve!ansible' -role PVEDatastoreUser
+#
+# Honest scope note: the qm import / EFI-disk steps run as root over SSH
+# anyway (module limitation), so this scoping protects against TOKEN leakage,
+# not against compromise of the control node's SSH key. If the first create
+# 403s on some edge permission, widen deliberately (add Sys.Audit on /nodes/
+# thurgadin via a custom role) rather than reverting to PVEVMAdmin-at-/.
+vault_pve_token_id:     "automation@pve!ansible"
+vault_pve_token_secret: "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
+
+# --- Mullvad WireGuard (from your generated config; wg(8) fields only) ---
+vault_mullvad_privkey:    "REPLACE_base64_private_key"
+vault_mullvad_peer_pubkey: "REPLACE_mullvad_server_public_key"
+vault_mullvad_endpoint_ip: "185.x.x.x"      # NUMERIC endpoint IP
+# Any port your generated config uses is fine now — v5 derives BOTH the
+# nftables endpoint-IP set and the endpoint-PORT set from peer.conf, so the
+# backstop no longer assumes 51820.
+vault_mullvad_endpoint_port: 51820
+vault_mullvad_wg_addr:    "10.65.x.x/32"     # your assigned tunnel Address
+
+# --- Tailscale (svc-media) -------------------------------------------------
+# Pre-auth key from https://login.tailscale.com/admin/settings/keys
+#   Recommended: Reusable=NO, Ephemeral=NO, Pre-authorized=YES,
+#   Tags: tag:svc-media (if you use ACL tags), short expiry — the key is
+#   only needed once; the node keeps its own credentials afterwards.
+# Leave "" to keep `tailscale up` a manual step (role skips with a note,
+# and Caddy is skipped too since it binds to the tailscale address).
+vault_tailscale_authkey: ""
+
+# --- ntfy auth (only if your ntfy requires a token; else leave empty) ---
+vault_ntfy_token: ""

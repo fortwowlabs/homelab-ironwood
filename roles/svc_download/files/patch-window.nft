@@ -1,0 +1,11 @@
+#!/usr/sbin/nft -f
+# patch-window.nft — TEMPORARILY open host egress for dnf/registry.
+# Usage:
+#   nft -f /etc/nftables/patch-window.nft     # open
+#   <run: dnf update / podman auto-update>
+#   nft -f /etc/nftables/host-backstop.nft    # close (reload strict baseline)
+# Adds accept rules to the existing output chain; reloading host-backstop.nft
+# removes them by rebuilding the table.
+add rule inet host_backstop output ip daddr 192.168.1.1 udp dport 53 accept
+add rule inet host_backstop output ip daddr 192.168.1.1 tcp dport 53 accept
+add rule inet host_backstop output tcp dport 443 accept

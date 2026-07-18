@@ -1,0 +1,6 @@
+# ~homelab/.config/containers/systemd/romm.network
+# Private bridge for the RomM app<->DB pair (current upstream stack:
+# app w/ internal Valkey + MariaDB — verify against docs.romm.app before
+# deploy; this project churns).
+[Network]
+NetworkName=romm

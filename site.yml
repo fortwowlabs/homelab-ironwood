@@ -1,0 +1,181 @@
+---
+# ============================================================================
+# site.yml — full unattended deploy. Run from the MBP:
+#     ansible-playbook site.yml --ask-vault-pass
+# Resume a slice (v5: tag routing actually works now — includes are tagged
+# `always` and the tasks inside each role carry the real tags):
+#     ansible-playbook site.yml --limit svc-download --tags jail,verify --ask-vault-pass
+#     ansible-playbook site.yml --tags provision --ask-vault-pass
+# Dry-run / drift check after day one (in-guest config only; VM shape is
+# reconciled separately — see `make reconcile`):
+#     ansible-playbook site.yml --check --diff --ask-vault-pass
+#
+# Ordering matches DEPLOY.md: provision both VMs (API) -> cloud-init gates ->
+# configure download (jail first, the critical path) -> configure media.
+# A failure anywhere posts to ntfy and stops (rescue tasks are tagged
+# `always` so alerting fires even on tag-sliced runs). Success posts a green
+# ntfy at the end of FULL runs only.
+#
+# PREREQUISITES (one-time, NOT automated — see DEPLOY.md + README):
+#   - TrueNAS Phase 1 done (homelab uid 10001, media+backups datasets, NFS
+#     exports restricted to .30/.31, IP pinned, encryption auto-unlock tested)
+#   - PVE pool `homelab-svc` + scoped API token created; vault filled
+#   - Mullvad configs generated; vault filled
+#   - admin_ssh_pubkey set in group_vars/all.yml
+#   - Optional: vault_tailscale_authkey set -> Tailscale + Caddy come up
+#     unattended on svc-media; empty -> both are skipped with a visible note.
+# ============================================================================
+
+# ---------- Phase 3 & 5: provision both VMs via the PVE API ----------
+- name: Provision service VMs
+  hosts: pve
+  gather_facts: false
+  tasks:
+    - name: Provision block
+      block:
+        - name: Create + boot each service VM
+          ansible.builtin.include_role:
+            name: pve_vm
+            apply:
+              tags: [provision]
+          tags: [always]
+          vars:
+            vm_id:      "{{ hostvars[item].vm_id }}"
+            vm_name:    "{{ item }}"
+            vm_cores:   "{{ hostvars[item].vm_cores }}"
+            vm_memory:  "{{ hostvars[item].vm_memory }}"
+            vm_disk_gb: "{{ hostvars[item].vm_disk_gb }}"
+            vm_ip:      "{{ hostvars[item].vm_ip }}"
+            vm_startup: "{{ hostvars[item].vm_startup }}"
+            vm_extra_packages: "{{ hostvars[item].vm_extra_packages }}"
+          loop:
+            - svc-download
+            - svc-media
+      # If provisioning fails, tell me and stop before touching guests.
+      rescue:
+        - name: Notify provisioning failure
+          ansible.builtin.include_role:
+            name: notify
+            apply:
+              tags: [always]
+          tags: [always]
+          vars:
+            ntfy_title: "homelab deploy FAILED (provisioning)"
+            ntfy_result: "VM provisioning failed on the PVE API step. Nothing configured yet."
+            ntfy_priority: "high"
+            ntfy_tags: "rotating_light"
+        - name: Abort
+          ansible.builtin.fail:
+            msg: "Provisioning failed — see above."
+          tags: [always]
+
+# ---------- Cloud-init GATES: both guests, strict ----------
+# v5: strict — `degraded done` is now a FAILURE. It previously concealed dnf
+# package errors. If a benign degrade ever appears, inspect it with
+# `cloud-init status --long` on the guest before loosening this.
+- name: svc-download cloud-init gate
+  hosts: svc-download
+  gather_facts: false
+  tasks:
+    - name: Wait for cloud-init to finish (strict)
+      ansible.builtin.command: cloud-init status --wait --long
+      changed_when: false
+      register: ci
+      failed_when: "'status: done' not in ci.stdout"
+      tags: [always]
+    - name: homelab uid/gid + SELinux enforcing
+      ansible.builtin.shell: "id homelab && getenforce"
+      register: idcheck
+      changed_when: false
+      failed_when: >-
+        ('uid=' ~ svc_uid) not in idcheck.stdout or 'Enforcing' not in idcheck.stdout
+      tags: [always]
+
+- name: svc-media cloud-init gate
+  hosts: svc-media
+  gather_facts: false
+  tasks:
+    - name: Wait for cloud-init to finish (strict)
+      ansible.builtin.command: cloud-init status --wait --long
+      changed_when: false
+      register: ci
+      failed_when: "'status: done' not in ci.stdout"
+      tags: [always]
+    - name: homelab uid/gid + SELinux enforcing
+      ansible.builtin.shell: "id homelab && getenforce"
+      register: idcheck
+      changed_when: false
+      failed_when: >-
+        ('uid=' ~ svc_uid) not in idcheck.stdout or 'Enforcing' not in idcheck.stdout
+      tags: [always]
+
+# ---------- Phase 4: the jail (critical path) ----------
+- name: Configure svc-download (netns jail + stack)
+  hosts: svc-download
+  gather_facts: true
+  tasks:
+    - block:
+        - ansible.builtin.include_role:
+            name: svc_download
+          tags: [always]
+      rescue:
+        - name: Notify jail/stack failure
+          ansible.builtin.include_role:
+            name: notify
+            apply:
+              tags: [always]
+          tags: [always]
+          vars:
+            ntfy_title: "homelab deploy FAILED (svc-download)"
+            ntfy_result: >-
+              svc-download configuration failed. NO real download traffic has
+              flowed (gates block it). Check the failed task above.
+            ntfy_priority: "high"
+            ntfy_tags: "rotating_light"
+        - ansible.builtin.fail:
+            msg: "svc-download failed — see above."
+          tags: [always]
+
+# ---------- Phase 5-6: media ----------
+- name: Configure svc-media (rootless media stack)
+  hosts: svc-media
+  gather_facts: true
+  tasks:
+    - block:
+        - ansible.builtin.include_role:
+            name: svc_media
+          tags: [always]
+      rescue:
+        - name: Notify media failure
+          ansible.builtin.include_role:
+            name: notify
+            apply:
+              tags: [always]
+          tags: [always]
+          vars:
+            ntfy_title: "homelab deploy: svc-media FAILED"
+            ntfy_result: "svc-media configuration failed, but the jail is up and verified."
+            ntfy_priority: "high"
+            ntfy_tags: "warning"
+        - ansible.builtin.fail:
+            msg: "svc-media failed — see above."
+          tags: [always]
+
+# ---------- Success notification (full runs only — deliberately untagged,
+# ---------- so tag-sliced runs don't claim a full deploy succeeded) ----------
+- name: Announce success
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Green ntfy
+      ansible.builtin.include_role:
+        name: notify
+      vars:
+        ntfy_title: "homelab deploy OK"
+        ntfy_result: >-
+          Both VMs provisioned and verified. Jail leak-tested (containers in
+          netns, Mullvad confirmed, fail-closed kill test passed, canary green).
+          Container-level NFS probes passed. Jellyfin answering on the LAN.
+          Next: app wiring (DEPLOY Phase 7).
+        ntfy_priority: "default"
+        ntfy_tags: "white_check_mark"

@@ -1,0 +1,14 @@
+---
+# svc-download — netns VPN jail + SAB/arr stack (flat LAN, no VLAN)
+vm_id:      131
+vm_name:    svc-download
+vm_cores:   4
+vm_memory:  6144
+vm_disk_gb: 160
+vm_ip:      "{{ svc_download_ip }}"
+vm_startup: "order=3,up=30"
+vm_extra_packages:
+  - wireguard-tools
+  - podman
+  - nfs-utils
+  - policycoreutils-python-utils

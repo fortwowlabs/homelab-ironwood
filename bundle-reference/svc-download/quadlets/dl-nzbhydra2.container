@@ -1,0 +1,28 @@
+# /etc/containers/systemd/dl-nzbhydra2.container   (rootful)
+#
+# Hydra is the indexer layer here (not Prowlarr): with Readarr retired,
+# nothing in this stack consumes Prowlarr's app-sync, and LazyLibrarian —
+# if you ever add it — speaks to Hydra natively as a single Newznab endpoint.
+# UI via veth: 10.77.0.2:5076 -> proxied to the VLAN by hydra-proxy.socket.
+[Unit]
+Description=NZBHydra2 (inside vpn netns)
+Requires=vpn-netns.service
+After=vpn-netns.service
+
+[Container]
+Image=lscr.io/linuxserver/nzbhydra2:latest
+ContainerName=nzbhydra2
+Label=io.containers.autoupdate=registry
+Environment=PUID=10001
+Environment=PGID=10001
+Environment=TZ=America/New_York
+PodmanArgs=--network=ns:/run/netns/vpn
+DNS=10.64.0.1
+Volume=/srv/appdata/nzbhydra2:/config:Z
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

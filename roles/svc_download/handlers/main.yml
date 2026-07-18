@@ -1,0 +1,12 @@
+---
+- name: reload systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: restart vpn-netns
+  ansible.builtin.systemd:
+    name: vpn-netns.service
+    state: restarted
+  # Only fires if the unit is already loaded; safe during initial run because
+  # the jail bring-up task starts it after secrets are in place.
+  failed_when: false

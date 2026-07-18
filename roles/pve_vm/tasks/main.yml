@@ -1,0 +1,184 @@
+---
+# ============================================================================
+# pve_vm — provision one Rocky 10 service VM via the Proxmox API.
+# Create-once by design: an existing VMID is left alone on normal runs so a
+# converge can never surprise-reconfigure a running VM. Day-two shape changes
+# (cores/memory/onboot/startup) are pushed EXPLICITLY with
+# `-e pve_reconcile=true` (make reconcile). Disk size / CPU type / bridge /
+# cicustom changes remain manual by intent — those want a maintenance window.
+#
+# Runs against localhost (control node) but the image tasks need to land ON
+# thurgadin's filesystem, so those delegate over SSH to the PVE host. That
+# means this ONE role needs SSH-to-root@thurgadin in addition to the API
+# token. If you'd rather keep zero SSH to PVE, pre-seed the image by hand
+# once and set pve_image_present=true to skip the fetch block.
+# ============================================================================
+
+- name: Fetch + verify Rocky image on the PVE host
+  when: not (pve_image_present | default(false))
+  delegate_to: "{{ pve_ssh_host | default('root@192.168.1.10') }}"
+  block:
+
+    - name: Check whether a verified image already exists
+      ansible.builtin.stat:
+        path: "{{ pve_image_dir }}/{{ rocky_image_name }}.sha256"
+      register: img_stamp
+
+    - name: Refuse mutable image pins
+      ansible.builtin.assert:
+        that:
+          - "'.latest.' not in rocky_image_name"
+        fail_msg: >-
+          rocky_image_name must be a DATED build (see the bump procedure in
+          group_vars/all.yml). '.latest.' pins are mutable upstream and defeat
+          checksum verification.
+
+    - name: Download image + its per-file CHECKSUM (only if no verified copy)
+      when: not img_stamp.stat.exists
+      ansible.builtin.get_url:
+        url: "{{ item.url }}"
+        dest: "{{ item.dest }}"
+        mode: "0644"
+      loop:
+        - { url: "{{ rocky_image_url }}",    dest: "{{ pve_image_dir }}/{{ rocky_image_name }}" }
+        - { url: "{{ rocky_checksum_url }}", dest: "{{ pve_image_dir }}/{{ rocky_image_name }}.CHECKSUM" }
+
+    # v5: exact-line match. Rocky's per-file CHECKSUM is BSD-style:
+    #   SHA256 (Rocky-10-GenericCloud-Base-10.2-....qcow2) = <hash>
+    # The v4 `grep -q "$got" CHECKSUM` matched the hash ANYWHERE in the
+    # aggregate file — any artifact's hash would have passed. This parses the
+    # hash for exactly our filename and compares. (Authenticity, not just
+    # integrity: optionally gpg --verify {{ rocky_checksum_url }}.asc.)
+    - name: Verify sha256 against the exact CHECKSUM line and stamp it
+      when: not img_stamp.stat.exists
+      ansible.builtin.shell:
+        cmd: |
+          set -euo pipefail
+          cd "{{ pve_image_dir }}"
+          img="{{ rocky_image_name }}"
+          want=$(awk -v f="($img)" '$1=="SHA256" && $2==f {print $4}' "$img.CHECKSUM")
+          [ -n "$want" ] || { echo "FATAL: no SHA256 line for $img in its CHECKSUM"; exit 1; }
+          got=$(sha256sum "$img" | awk '{print $1}')
+          [ "$got" = "$want" ] || { echo "CHECKSUM MISMATCH: got=$got want=$want"; exit 1; }
+          echo "$got  {{ pve_image_dir }}/$img" > "$img.sha256"
+        executable: /bin/bash
+      changed_when: true
+
+- name: "Render cloud-init snippet for {{ vm_name }} onto the PVE host"
+  delegate_to: "{{ pve_ssh_host | default('root@192.168.1.10') }}"
+  ansible.builtin.template:
+    src: user-data.yaml.j2
+    dest: "{{ pve_snippet_dir }}/{{ vm_name }}-user.yaml"
+    mode: "0644"
+
+# Does the VM already exist? If so, creation is skipped (create-once).
+- name: "Check whether VM {{ vm_id }} already exists"
+  community.proxmox.proxmox_kvm:
+    api_host:         "{{ pve_api_host }}"
+    api_user:         "{{ vault_pve_token_id.split('!')[0] }}"
+    api_token_id:     "{{ vault_pve_token_id.split('!')[1] }}"
+    api_token_secret: "{{ vault_pve_token_secret }}"
+    validate_certs:   "{{ pve_validate_certs | default(false) }}"
+    node:             "{{ pve_node }}"
+    vmid:             "{{ vm_id }}"
+    state:            current
+  register: vm_current
+  failed_when: false
+  changed_when: false
+
+# Create the shell of the VM (everything declarative EXCEPT the imported boot
+# disk + EFI disk, which the module handles poorly across 5.x builds). Those
+# two run via `qm` over SSH — the reliable path.
+- name: "Create VM {{ vm_id }} ({{ vm_name }}) — declarative config"
+  when: vm_current.status is not defined
+  community.proxmox.proxmox_kvm:
+    api_host:         "{{ pve_api_host }}"
+    api_user:         "{{ vault_pve_token_id.split('!')[0] }}"
+    api_token_id:     "{{ vault_pve_token_id.split('!')[1] }}"
+    api_token_secret: "{{ vault_pve_token_secret }}"
+    validate_certs:   "{{ pve_validate_certs | default(false) }}"
+    node:             "{{ pve_node }}"
+    vmid:             "{{ vm_id }}"
+    name:             "{{ vm_name }}"
+    pool:             "{{ pve_vm_pool | default(omit) }}"
+    ostype:           l26
+    machine:          q35
+    bios:             ovmf
+    cpu:              "{{ pve_cpu_type }}"
+    cores:            "{{ vm_cores }}"
+    memory:           "{{ vm_memory }}"
+    balloon:          0
+    scsihw:           virtio-scsi-single
+    agent:            "enabled=1,fstrim_cloned_disks=1"
+    serial0:          socket
+    vga:              serial0
+    net:
+      net0: "virtio,bridge={{ pve_bridge }}"
+    ide:
+      ide2: "{{ pve_storage }}:cloudinit"
+    ciuser:           "{{ admin_user }}"
+    nameservers:      "{{ lan_dns }}"
+    searchdomains:    "{{ search_domain }}"
+    ipconfig:
+      ipconfig0: "ip={{ vm_ip }}/24,gw={{ lan_gateway }}"
+    cicustom:         "user={{ pve_snippet_storage }}:snippets/{{ vm_name }}-user.yaml"
+    onboot:           true
+    startup:          "{{ vm_startup }}"
+    state:            present
+  register: vm_created
+
+# v5: explicit day-two reconcile of the cheap-to-change knobs. Opt-in only.
+# NOTE: on a RUNNING VM, cores/memory land as *pending* config and apply at
+# the next guest power-cycle (balloon=0, no hotplug configured) — the task
+# reports changed; `qm pending {{ vm_id }}` on thurgadin shows what's queued.
+- name: "Reconcile VM {{ vm_id }} shape from host_vars (opt-in)"
+  when:
+    - vm_current.status is defined
+    - pve_reconcile | default(false) | bool
+  community.proxmox.proxmox_kvm:
+    api_host:         "{{ pve_api_host }}"
+    api_user:         "{{ vault_pve_token_id.split('!')[0] }}"
+    api_token_id:     "{{ vault_pve_token_id.split('!')[1] }}"
+    api_token_secret: "{{ vault_pve_token_secret }}"
+    validate_certs:   "{{ pve_validate_certs | default(false) }}"
+    node:             "{{ pve_node }}"
+    vmid:             "{{ vm_id }}"
+    name:             "{{ vm_name }}"
+    cores:            "{{ vm_cores }}"
+    memory:           "{{ vm_memory }}"
+    onboot:           true
+    startup:          "{{ vm_startup }}"
+    update:           true
+
+- name: "Attach EFI disk, import boot disk, size + boot order (qm, first create only)"
+  when: vm_current.status is not defined
+  delegate_to: "{{ pve_ssh_host | default('root@192.168.1.10') }}"
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      # EFI vars disk; pre-enrolled-keys=0 => Secure Boot off
+      qm set {{ vm_id }} --efidisk0 {{ pve_storage }}:1,efitype=4m,pre-enrolled-keys=0
+      # Import the verified cloud image as scsi0, discard + iothread
+      qm set {{ vm_id }} --scsi0 {{ pve_storage }}:0,import-from={{ pve_image_dir }}/{{ rocky_image_name }},discard=on,iothread=1
+      qm set {{ vm_id }} --boot order=scsi0
+      qm disk resize {{ vm_id }} scsi0 {{ vm_disk_gb }}G
+    executable: /bin/bash
+  changed_when: true
+
+- name: "Start VM {{ vm_id }}"
+  community.proxmox.proxmox_kvm:
+    api_host:         "{{ pve_api_host }}"
+    api_user:         "{{ vault_pve_token_id.split('!')[0] }}"
+    api_token_id:     "{{ vault_pve_token_id.split('!')[1] }}"
+    api_token_secret: "{{ vault_pve_token_secret }}"
+    validate_certs:   "{{ pve_validate_certs | default(false) }}"
+    node:             "{{ pve_node }}"
+    vmid:             "{{ vm_id }}"
+    state:            started
+
+- name: "Wait for {{ vm_name }} SSH to answer (cloud-init still running)"
+  ansible.builtin.wait_for:
+    host: "{{ vm_ip }}"
+    port: 22
+    delay: 15
+    timeout: 300

@@ -1,0 +1,10 @@
+# /etc/systemd/system/hydra-proxy.socket
+[Unit]
+Description=NZBHydra2 UI proxy socket (VLAN -> vpn netns veth)
+
+[Socket]
+ListenStream=192.168.1.31:5076
+BindIPv6Only=ipv6-only
+
+[Install]
+WantedBy=sockets.target

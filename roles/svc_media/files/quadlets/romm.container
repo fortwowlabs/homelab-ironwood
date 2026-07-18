@@ -1,0 +1,39 @@
+# ~homelab/.config/containers/systemd/romm.container
+#
+# romm.env (APP secrets only — the DB container has its own romm-db.env):
+#   DB_HOST=romm-db
+#   DB_NAME=romm
+#   DB_USER=romm-user
+#   DB_PASSWD=...               # must match MARIADB_PASSWORD in romm-db.env
+#   ROMM_AUTH_SECRET_KEY=...    # openssl rand -hex 32
+#   + metadata provider creds (ScreenScraper/RetroAchievements/SteamGridDB,
+#     HASHEOUS_API_ENABLED) per current upstream docs.
+# Library layout on the NFS dataset must be .../romm/roms/<platform>/.
+#
+# v5: image PINNED to the release verified against these mounts (matches the
+# upstream 4.9.x quickstart exactly, embedded-Valkey layout incl. the
+# /redis-data volume). Bump DELIBERATELY: check the release notes, update the
+# tag, restart, confirm the migration in `podman logs romm`.
+[Unit]
+Description=RomM
+Requires=romm-db.service
+After=romm-db.service
+
+[Container]
+Image=docker.io/rommapp/romm:4.9.2
+ContainerName=romm
+Network=romm.network
+EnvironmentFile=%h/appdata/romm/romm.env
+PublishPort=127.0.0.1:8081:8080
+Volume=/srv/media/romm:/romm/library
+Volume=%h/appdata/romm/resources:/romm/resources:Z
+Volume=%h/appdata/romm/redis-data:/redis-data:Z
+Volume=%h/appdata/romm/assets:/romm/assets:Z
+Volume=%h/appdata/romm/config:/romm/config:Z
+
+[Service]
+ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

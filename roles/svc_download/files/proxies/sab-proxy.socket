@@ -1,0 +1,14 @@
+# /etc/systemd/system/sab-proxy.socket
+[Unit]
+Description=sab UI proxy socket (LAN -> vpn netns veth)
+# v5: static-IP bind can race NetworkManager at boot; FreeBind lets the
+# socket bind before 192.168.1.31 is configured (systemd.socket(5)).
+Wants=network-online.target
+After=network-online.target
+
+[Socket]
+ListenStream=192.168.1.31:8080
+FreeBind=yes
+
+[Install]
+WantedBy=sockets.target

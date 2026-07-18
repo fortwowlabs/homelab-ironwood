@@ -1,0 +1,400 @@
+---
+# ============================================================================
+# svc_media — rootless media stack (homelab uid 10001, user-scope systemd).
+# Mirrors DEPLOY.md Phases 5-6. Tags:
+#   files | nfs | media | access | backup | verify
+#
+# v5 changes:
+#   - Installs its own packages. v4 put tailscale in cloud-init's package
+#     list; the unresolvable name failed the WHOLE dnf transaction and
+#     silently took podman/nfs-utils with it. Tailscale now installs from
+#     its official EL10 repo here, under [access].
+#   - `tailscale up` is UNATTENDED when vault_tailscale_authkey is set;
+#     Caddy (ts.net vhosts) deploys once tailscale is Running. Both skip
+#     with a visible note otherwise — the deploy still succeeds.
+#   - Jellyfin publishes on the LAN IP only + firewalld rich rule scoped to
+#     lan_cidr (tailnet no longer implicitly exposed).
+#   - romm-db.env required alongside romm.env (secret split).
+#   - Container-level NFS probes: prove each container SEES its media, not
+#     just that the host mounted something.
+#   - Nightly backup timer (RomM DB dump + appdata tars).
+# ============================================================================
+
+# ---------------------------------------------------------------- packages ---
+- name: EPEL first (caddy lives there)
+  ansible.builtin.dnf:
+    name: epel-release
+    state: present
+  tags: [files]
+
+- name: Install stack packages (cloud-init also tries; this is authoritative)
+  ansible.builtin.dnf:
+    name:
+      - podman
+      - nfs-utils
+      - policycoreutils-python-utils
+      - curl
+    state: present
+  tags: [files]
+
+- name: "GATE: rootless subuid/subgid ranges exist for homelab"
+  ansible.builtin.shell: "grep '^homelab:' /etc/subuid && grep '^homelab:' /etc/subgid"
+  changed_when: false
+  tags: [files, verify]
+
+# --------------------------------------------------------------------- nfs ---
+- name: Ensure NFS mountpoints exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+  loop: [/srv/media, /srv/backups]
+  tags: [nfs]
+
+- name: Allow containers on NFS
+  ansible.posix.seboolean:
+    name: virt_use_nfs
+    state: true
+    persistent: true
+  tags: [nfs, files]
+
+- name: Mount media + backups over NFSv4
+  ansible.posix.mount:
+    path: "{{ item.path }}"
+    src: "{{ truenas_ip }}:{{ item.export }}"
+    fstype: nfs4
+    opts: "{{ nfs_opts }}"
+    state: mounted
+  loop:
+    - { path: /srv/media,   export: "{{ nfs_media_export }}" }
+    - { path: /srv/backups, export: "{{ nfs_backups_export }}" }
+  tags: [nfs]
+
+- name: Prove NFS writable as service uid
+  ansible.builtin.command:
+    cmd: "runuser -u '#{{ svc_uid }}' -- touch /srv/media/.probe-media"
+  changed_when: false
+  tags: [nfs, verify]
+
+- name: Clean probe
+  ansible.builtin.file:
+    path: /srv/media/.probe-media
+    state: absent
+  changed_when: false
+  tags: [nfs, verify]
+
+- name: Backup subtree on NFS (created as 10001 so root-squash is moot)
+  ansible.builtin.command:
+    cmd: >-
+      runuser -u '#{{ svc_uid }}' -- mkdir -p
+      /srv/backups/audiobookshelf
+      /srv/backups/svc-media/romm-db
+      /srv/backups/svc-media/appdata
+  changed_when: false
+  tags: [nfs, files, backup]
+
+# ------------------------------------------------------------------- files ---
+- name: Ensure linger for homelab (cloud-init tries this; confirm)
+  ansible.builtin.command:
+    cmd: loginctl enable-linger homelab
+  changed_when: false
+  tags: [files]
+
+- name: Create rootless quadlet + appdata tree (owned 10001)
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop:
+    - /opt/homelab/.config/containers/systemd
+    - /opt/homelab/appdata/jellyfin/config
+    - /opt/homelab/appdata/jellyfin/cache
+    - /opt/homelab/appdata/audiobookshelf/config
+    - /opt/homelab/appdata/audiobookshelf/metadata
+    - /opt/homelab/appdata/jellyseerr
+    - /opt/homelab/appdata/romm/resources
+    - /opt/homelab/appdata/romm/assets
+    - /opt/homelab/appdata/romm/config
+    - /opt/homelab/appdata/romm/redis-data    # embedded Valkey state (upstream layout)
+    - /opt/homelab/appdata/romm/mysql
+  tags: [files]
+
+- name: Install rootless quadlets (static)
+  ansible.builtin.copy:
+    src: "quadlets/{{ item }}"
+    dest: "/opt/homelab/.config/containers/systemd/{{ item }}"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  loop:
+    - audiobookshelf.container
+    - jellyseerr.container
+    - romm.container
+    - romm-db.container
+    - romm.network
+  tags: [files, media]
+
+- name: Render jellyfin quadlet (LAN-IP publish)
+  ansible.builtin.template:
+    src: jellyfin.container.j2
+    dest: /opt/homelab/.config/containers/systemd/jellyfin.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  tags: [files, media]
+
+- name: Render backup script
+  ansible.builtin.template:
+    src: backup-media.sh.j2
+    dest: /usr/local/sbin/backup-media.sh
+    mode: "0755"    # runs as homelab, not root
+  tags: [files, backup]
+
+- name: Install backup units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop: [backup-media.service, backup-media.timer]
+  tags: [files, backup]
+
+# ------------------------------------------------------- secrets pre-flight --
+- name: Check for romm.env + romm-db.env
+  ansible.builtin.stat:
+    path: "/opt/homelab/appdata/romm/{{ item }}"
+  register: romm_envs
+  loop: [romm.env, romm-db.env]
+  tags: [media]
+
+- name: Fail clearly if either env file is absent
+  ansible.builtin.fail:
+    msg: >-
+      /opt/homelab/appdata/romm/{{ item.item }} is missing (owner 10001, mode
+      0600). v5 splits secrets: romm.env carries APP config (DB_HOST=romm-db,
+      DB_NAME, DB_USER, DB_PASSWD, ROMM_AUTH_SECRET_KEY=$(openssl rand -hex
+      32), metadata provider creds); romm-db.env carries ONLY the MariaDB
+      bootstrap (MARIADB_ROOT_PASSWORD, MARIADB_DATABASE=romm, MARIADB_USER,
+      MARIADB_PASSWORD matching DB_PASSWD). See the quadlet headers.
+  when: not item.stat.exists
+  loop: "{{ romm_envs.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  tags: [media]
+
+# -------------------------------------------------------------------- media --
+- name: Reload the homelab user systemd scope
+  ansible.builtin.command:
+    cmd: systemctl --user -M homelab@ daemon-reload
+  changed_when: true
+  tags: [media]
+
+- name: Start media containers (rootless; romm waits on healthy DB)
+  ansible.builtin.command:
+    cmd: "systemctl --user -M homelab@ start {{ item }}"
+  loop: [jellyfin, audiobookshelf, romm-db, romm, jellyseerr]
+  changed_when: true
+  tags: [media]
+
+- name: "Open Jellyfin 8096 to the LAN source range only (v5 rich rule)"
+  ansible.posix.firewalld:
+    rich_rule: "rule family=ipv4 source address={{ lan_cidr }} port port=8096 protocol=tcp accept"
+    permanent: true
+    immediate: true
+    state: enabled
+  tags: [media]
+
+- name: Remove the v4 unscoped 8096 opening if upgrading
+  ansible.posix.firewalld:
+    port: 8096/tcp
+    permanent: true
+    immediate: true
+    state: disabled
+  tags: [media]
+
+# ------------------------------------------------------------------ access ---
+# Tailscale from the OFFICIAL EL10 repo (verified 2026-07-15).
+- name: Tailscale repo
+  ansible.builtin.yum_repository:
+    name: tailscale-stable
+    description: Tailscale stable (EL10)
+    baseurl: "https://pkgs.tailscale.com/stable/rhel/10/$basearch"
+    gpgkey: "https://pkgs.tailscale.com/stable/rhel/10/repo.gpg"
+    gpgcheck: true
+    repo_gpgcheck: true
+    enabled: true
+  tags: [access]
+
+- name: Install tailscale
+  ansible.builtin.dnf:
+    name: tailscale
+    state: present
+  tags: [access]
+
+- name: Enable tailscaled
+  ansible.builtin.systemd:
+    name: tailscaled
+    enabled: true
+    state: started
+  tags: [access]
+
+- name: Read tailscale backend state
+  ansible.builtin.command: tailscale status --json
+  register: ts_raw
+  changed_when: false
+  failed_when: false
+  tags: [access]
+
+- name: Parse backend state
+  ansible.builtin.set_fact:
+    ts_state: "{{ ((ts_raw.stdout or '{}') | from_json).BackendState | default('Unknown') }}"
+  tags: [access]
+
+- name: Authenticate unattended (authkey in vault)
+  when:
+    - (vault_tailscale_authkey | default('')) | length > 0
+    - ts_state != 'Running'
+  block:
+    - name: tailscale up --authkey
+      ansible.builtin.command:
+        cmd: "tailscale up --authkey={{ vault_tailscale_authkey }}"
+      no_log: true
+      changed_when: true
+    - name: Re-read state
+      ansible.builtin.command: tailscale status --json
+      register: ts_raw2
+      changed_when: false
+    - name: Confirm Running
+      ansible.builtin.set_fact:
+        ts_state: "{{ (ts_raw2.stdout | from_json).BackendState }}"
+    - name: Gate on Running
+      ansible.builtin.assert:
+        that: [ts_state == 'Running']
+        fail_msg: "tailscale up ran but BackendState={{ ts_state }} — check the authkey (expired? not pre-authorized?)."
+  tags: [access]
+
+- name: NOTE — tailscale needs manual auth (no authkey in vault)
+  ansible.builtin.debug:
+    msg: >-
+      *** Tailscale installed but NOT authenticated (vault_tailscale_authkey
+      empty). Run `tailscale up` on svc-media interactively, then re-run with
+      --tags access to deploy Caddy. Skipping Caddy for now. ***
+  when: ts_state != 'Running'
+  tags: [access]
+
+- name: Deploy Caddy access layer (ts.net vhosts)
+  when:
+    - media_access_layer | default('manual') == 'caddy'
+    - ts_state == 'Running'
+  block:
+    - name: Install caddy (EPEL; if dnf can't find it, see files/tailscale-serve.sh fallback)
+      ansible.builtin.dnf:
+        name: caddy
+        state: present
+
+    - name: tailscaled drop-in — let the caddy user fetch ts.net certs
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/tailscaled.service.d/permit-cert.conf
+        content: |
+          [Service]
+          Environment=TS_PERMIT_CERT_UID=caddy
+        mode: "0644"
+      register: ts_dropin
+
+    - name: Restart tailscaled to pick up the drop-in
+      ansible.builtin.systemd:
+        name: tailscaled
+        state: restarted
+        daemon_reload: true
+      when: ts_dropin is changed
+
+    - name: Learn this node's ts.net name + address
+      ansible.builtin.command: tailscale status --json
+      register: ts_self
+      changed_when: false
+
+    - name: caddy drop-in — TS_HOST/TS_IP for the Caddyfile
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/caddy.service.d/ts-env.conf
+        content: |
+          [Service]
+          Environment=TS_HOST={{ ((ts_self.stdout | from_json).Self.DNSName).rstrip('.') }}
+          Environment=TS_IP={{ (ts_self.stdout | from_json).TailscaleIPs[0] | default((ts_self.stdout | from_json).Self.TailscaleIPs[0]) }}
+        mode: "0644"
+      register: caddy_env
+
+    - name: Install Caddyfile
+      ansible.builtin.copy:
+        src: caddy/Caddyfile
+        dest: /etc/caddy/Caddyfile
+        mode: "0644"
+      register: caddyfile
+
+    - name: Enable + (re)start caddy
+      ansible.builtin.systemd:
+        name: caddy
+        enabled: true
+        state: "{{ 'restarted' if (caddy_env is changed or caddyfile is changed) else 'started' }}"
+        daemon_reload: true
+
+    - name: "GATE: Caddy answering on the tailnet vhost port"
+      ansible.builtin.command:
+        cmd: "curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://{{ ((ts_self.stdout | from_json).Self.DNSName).rstrip('.') }}:8447"
+      register: caddy_gate
+      changed_when: false
+      failed_when: caddy_gate.stdout not in ['200', '307', '302']
+      retries: 3
+      delay: 5
+      until: caddy_gate is not failed
+  tags: [access]
+
+- name: NOTE — Caddy skipped
+  ansible.builtin.debug:
+    msg: "*** Caddy skipped (media_access_layer={{ media_access_layer | default('manual') }}, tailscale={{ ts_state }}). ***"
+  when: media_access_layer | default('manual') != 'caddy' or ts_state != 'Running'
+  tags: [access]
+
+# ------------------------------------------------------------------ backup ---
+- name: Arm the nightly backup timer
+  ansible.builtin.systemd:
+    name: backup-media.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [backup]
+
+# ------------------------------------------------------------------ verify ---
+- name: "GATE: Jellyfin answers on the LAN IP (v5: no longer on loopback)"
+  ansible.builtin.uri:
+    url: "http://{{ svc_media_ip }}:8096/System/Info/Public"
+    status_code: 200
+    timeout: 20
+  register: jf
+  retries: 6
+  delay: 10
+  until: jf.status == 200
+  tags: [verify]
+
+- name: "GATE: containers actually see their NFS data (exec probes)"
+  ansible.builtin.command:
+    cmd: >-
+      runuser -u homelab -- env XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}
+      podman exec {{ item.container }} sh -c '{{ item.probe }}'
+  loop:
+    - { container: jellyfin,       probe: "test -r /media/movies" }
+    - { container: audiobookshelf, probe: "touch /audiobooks/.probe-nfs && rm /audiobooks/.probe-nfs" }
+    - { container: romm,           probe: "touch /romm/library/.probe-nfs && rm /romm/library/.probe-nfs" }
+  loop_control:
+    label: "{{ item.container }}"
+  register: nfs_probe
+  changed_when: false
+  retries: 6
+  delay: 10
+  until: nfs_probe is not failed
+  tags: [verify]
+
+- name: svc-media verification summary
+  ansible.builtin.set_fact:
+    svc_media_verified: true
+  tags: [verify]

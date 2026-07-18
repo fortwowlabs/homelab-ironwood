@@ -1,0 +1,38 @@
+---
+# Push a deploy result to ntfy so you can walk away and get pinged. Called
+# from site.yml/verify.yml on success and from rescue blocks on failure.
+# ntfy_result / ntfy_title / ntfy_priority are set by the caller.
+#
+# v5: a failed push no longer disappears. It still won't fail the play
+# (alerting must never mask the real result), but it prints a WARNING you
+# can't miss in the output. First run before ntfy exists on svc-media?
+# Point ntfy_url at https://ntfy.sh/<long-random-topic> in group_vars.
+- name: Push result to ntfy
+  ansible.builtin.uri:
+    url: "{{ ntfy_url }}/{{ ntfy_topic }}"
+    method: POST
+    body: "{{ ntfy_result }}"
+    headers: >-
+      {{
+        {'Title': ntfy_title | default('homelab deploy'),
+         'Priority': ntfy_priority | default('default'),
+         'Tags': ntfy_tags | default('house')}
+        | combine({'Authorization': 'Bearer ' + vault_ntfy_token}
+                  if (vault_ntfy_token | default('')) | length > 0 else {})
+      }}
+    status_code: [200, 201]
+  delegate_to: localhost
+  become: false
+  register: ntfy_push
+  failed_when: false     # never let a missing ntfy fail the whole run...
+
+- name: WARN if the ntfy push failed
+  ansible.builtin.debug:
+    msg: >-
+      *** WARNING: ntfy push to {{ ntfy_url }}/{{ ntfy_topic }} FAILED
+      (status={{ ntfy_push.status | default('unreachable') }}). The play
+      result above is authoritative — you just won't get the phone ping.
+      Fix ntfy on svc-media, or set ntfy_url to https://ntfy.sh/<topic>
+      for bootstrap. ***
+  when: (ntfy_push.status | default(-1)) not in [200, 201]
+

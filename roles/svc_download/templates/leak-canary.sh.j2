@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# leak-canary.sh — continuous verification of the jail invariants.
+# RENDERED BY ANSIBLE from roles/svc_download/templates/leak-canary.sh.j2.
+# Run by leak-canary.timer every 15 min. Converts "we leak-tested it once in
+# July" into an enforced property.
+#
+# v5 fixes over v4:
+#   - Checks an EXPLICIT expected list, not `podman ps` output. v4 iterated
+#     only RUNNING containers, so "everything stopped" reported OK — and
+#     since fail() stops the stack, one leak produced one alert and then
+#     green forever.
+#   - A leak writes a persistent tripped flag ($FLAG); every
+#     subsequent run keeps alerting until you clear it:
+#         rm /var/lib/leak-canary/tripped && systemctl start dl-{sabnzbd,prowlarr,sonarr,radarr}
+#   - Alerts actually fire (ntfy on the LAN — host-backstop opens that path).
+#   - Planned maintenance: `systemctl stop leak-canary.timer` first, or the
+#     "service not active" alert will ping you.
+#
+# Severity model:
+#   LEAK  (wrong netns / foreign route / wrong egress IP)  -> stop stack,
+#         write flag, urgent alert, exit 1.
+#   DOWN  (expected container missing / unit inactive)     -> high alert,
+#         exit 1, NO stop (nothing to protect) and NO flag.
+#   A stalled egress curl (tunnel down) is NOT a failure — fail-closed working.
+set -uo pipefail
+
+STATE_DIR=/var/lib/leak-canary
+FLAG="$STATE_DIR/tripped"
+NTFY="{{ ntfy_url }}/{{ ntfy_topic }}"
+expected=(sabnzbd prowlarr sonarr radarr)
+
+mkdir -p "$STATE_DIR"
+
+alert() {  # $1=priority $2=title $3=body — best effort, never gates logic
+    logger -p auth.crit -t leak-canary "$2 — $3"
+    curl -fsS --max-time 5 -X POST \
+        -H "Title: $2" -H "Priority: $1" -H "Tags: rotating_light" \
+{% if (vault_ntfy_token | default('')) | length > 0 %}
+        -H "Authorization: Bearer {{ vault_ntfy_token }}" \
+{% endif %}
+        -d "$3" "$NTFY" >/dev/null 2>&1 \
+        || logger -p auth.crit -t leak-canary "ALERT DELIVERY FAILED (ntfy unreachable): $2"
+}
+
+fail_leak() {
+    date -Is > "$FLAG"
+    systemctl stop 'dl-*.service' 2>/dev/null
+    alert urgent "LEAK: download jail" "$1 — download stack STOPPED. Investigate, then: rm $FLAG && systemctl start dl-{sabnzbd,prowlarr,sonarr,radarr}"
+    exit 1
+}
+
+down() {
+    alert high "download stack degraded" "$1 (planned maintenance? stop leak-canary.timer to silence)"
+    exit 1
+}
+
+# 0. A previously-tripped canary stays loud until a human clears it.
+if [[ -f "$FLAG" ]]; then
+    alert high "download stack HALTED (leak flag)" "tripped $(cat "$FLAG"); still halted. Investigate, then rm $FLAG and restart dl-* units."
+    exit 1
+fi
+
+# 1. Every expected container must exist, its unit must be active, and it
+#    must live in the jail. SandboxKey is the netns path Podman joined;
+#    anything else means a unit drifted (e.g. someone removed PodmanArgs and
+#    it silently fell back to the default bridge).
+want_inode=$(stat -Lc %i /run/netns/vpn) || fail_leak "netns /run/netns/vpn missing"
+for c in "${expected[@]}"; do
+    podman container exists "$c" \
+        || down "expected container $c does not exist"
+    systemctl is-active --quiet "dl-$c.service" \
+        || down "dl-$c.service is not active"
+    key=$(podman inspect -f '{% raw %}{{.NetworkSettings.SandboxKey}}{% endraw %}' "$c")
+    [[ -n "$key" ]] || fail_leak "container $c has no sandbox netns"
+    [[ "$(stat -Lc %i "$key" 2>/dev/null)" == "$want_inode" ]] \
+        || fail_leak "container $c is NOT in the vpn netns (sandbox: $key)"
+done
+
+# 2. Topology drift.
+ip -n vpn route show default | grep -q 'dev wg0' \
+    || fail_leak "default route in netns is no longer wg0"
+ip -n vpn route show | grep -Ev 'dev (lo|wg0|veth-vpn)' | grep -q . \
+    && fail_leak "unexpected route present in netns"
+
+# 3. Egress identity. Timeout/stall = tunnel down = fail-closed = OK.
+egress=$(ip netns exec vpn curl -4 -s --max-time 10 https://am.i.mullvad.net/connected || true)
+if [[ -n "$egress" && "$egress" != *"You are connected to Mullvad"* ]]; then
+    fail_leak "egress check says NOT Mullvad: $egress"
+fi
+
+logger -t leak-canary "OK (egress=${egress:-tunnel-down/fail-closed})"
+exit 0

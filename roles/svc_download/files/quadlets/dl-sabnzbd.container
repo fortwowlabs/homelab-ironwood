@@ -1,0 +1,54 @@
+# /etc/containers/systemd/dl-sabnzbd.container   (rootful)
+#
+# Joins the pre-built jail via --network=ns:. PodmanArgs is used instead of
+# Network= because Quadlet's Network= key does not reliably pass ns: paths
+# through on all Podman 5.x builds — verify yours with:
+#   /usr/libexec/podman/quadlet -dryrun
+#
+# No PublishPort: port publishing is unsupported/meaningless when joining a
+# foreign netns. The UI is reached via the veth (10.77.0.2:8080) through the
+# systemd-socket-proxyd units.
+#
+# No --userns=auto here deliberately: auto-mapped subuids (100000+) written to
+# NFS volumes create unmappable ownership on TrueNAS. LSIO's PUID/PGID drop is
+# the privilege boundary instead.
+[Unit]
+Description=SABnzbd (inside vpn netns)
+Requires=vpn-netns.service
+After=vpn-netns.service
+# v5: refuse to start on a bare mountpoint. RequiresMountsFor covers the
+# (auto)mount unit; the ExecStartPre proves REAL nfs4 is behind the autofs
+# stub (stat triggers the automount, findmnt verifies the fstype).
+RequiresMountsFor=/srv/media
+
+[Container]
+Image=lscr.io/linuxserver/sabnzbd:latest
+ContainerName=sabnzbd
+Environment=PUID=10001
+Environment=PGID=10001
+Environment=TZ=America/New_York
+PodmanArgs=--network=ns:/run/netns/vpn
+DNS=10.64.0.1
+# Local (SELinux-relabelable) volumes get :Z; NFS-backed volumes must NOT
+# use :Z/:z — rely on `setsebool -P virt_use_nfs 1` instead.
+#
+# PATH ALIGNMENT (v4 fix): SAB mounts the SAME /srv/media -> /data as
+# Sonarr/Radarr. SAB's Completed folder is /data/downloads/complete, which
+# the arrs see at the identical container path AND identical filesystem —
+# imports hardlink instead of copy, and no remote-path-mapping config is
+# needed. Incomplete/unpack churn stays on the VM's local NVMe-backed disk
+# (/var/lib/sabnzbd-incomplete); only the finished job crosses to NFS once.
+Volume=/srv/appdata/sabnzbd:/config:Z
+Volume=/var/lib/sabnzbd-incomplete:/incomplete-downloads:Z
+Volume=/srv/media:/data
+
+[Service]
+ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+# Generated units cannot be `systemctl enable`d — the [Install] section above
+# is what wires boot-start. After editing: systemctl daemon-reload &&
+# systemctl start dl-sabnzbd.service

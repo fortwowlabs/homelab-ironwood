@@ -1,0 +1,12 @@
+# /etc/systemd/system/sab-proxy.service  (activated by sab-proxy.socket)
+[Unit]
+Description=SABnzbd UI proxy (VLAN -> 10.77.0.2:8080)
+Requires=vpn-netns.service dl-sabnzbd.service
+After=vpn-netns.service dl-sabnzbd.service
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=5min 10.77.0.2:8080
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes

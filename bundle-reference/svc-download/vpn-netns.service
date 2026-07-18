@@ -1,0 +1,20 @@
+# /etc/systemd/system/vpn-netns.service
+#
+# Oneshot that owns the jail's lifecycle. Download containers declare
+# Requires=/After= this unit, so they cannot start before the jail exists,
+# and `systemctl stop vpn-netns` takes them down with it (Requires= propagates
+# stop). Construction needs NO connectivity — WireGuard handshakes lazily —
+# so there is no boot-time leak window.
+[Unit]
+Description=VPN network namespace jail (wg0 + admin veth)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/sbin/vpn-netns-up.sh
+ExecStop=/usr/local/sbin/vpn-netns-down.sh
+
+[Install]
+WantedBy=multi-user.target

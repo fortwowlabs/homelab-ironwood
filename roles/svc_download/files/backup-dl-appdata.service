@@ -1,0 +1,9 @@
+# /etc/systemd/system/backup-dl-appdata.service
+[Unit]
+Description=Nightly download-stack appdata backup to NFS
+# Backups need the NFS backup dataset behind the automount:
+RequiresMountsFor=/srv/backups
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/backup-dl-appdata.sh

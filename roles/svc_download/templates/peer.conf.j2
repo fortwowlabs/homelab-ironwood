@@ -1,0 +1,12 @@
+# /etc/wireguard/peer.conf — rendered by Ansible from vault. wg(8) syntax
+# ONLY (no Address/DNS/MTU — those are wg-quick extensions that break
+# `wg setconf`). Tunnel Address is in vpn-netns.env (WG_ADDR); DNS is in
+# /etc/netns/vpn/resolv.conf. Endpoint is numeric by design.
+[Interface]
+PrivateKey = {{ vault_mullvad_privkey }}
+
+[Peer]
+PublicKey  = {{ vault_mullvad_peer_pubkey }}
+AllowedIPs = 0.0.0.0/0
+Endpoint   = {{ vault_mullvad_endpoint_ip }}:{{ vault_mullvad_endpoint_port }}
+PersistentKeepalive = 25

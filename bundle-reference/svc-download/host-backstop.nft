@@ -1,0 +1,83 @@
+#!/usr/sbin/nft -f
+# /etc/nftables/host-backstop.nft   (PRIMARY second layer — pfSense-free variant)
+#
+# With no pfSense egress rules, THIS is the backstop behind the netns jail.
+# It constrains the VM's INIT namespace (the host itself) — the jail needs
+# no help, since inside it non-Mullvad destinations are simply unroutable.
+# This guards the host surface: a unit accidentally started outside the jail,
+# a misconfiguration, casual malware on the VM.
+#
+# Scope discipline: OWN table, explicit `delete table` guard, NO
+# `flush ruleset`. Reloading this file cannot clobber wg-quick, podman NAT,
+# or anything else, and nothing clobbers it.
+#
+# Endpoints are injected from /etc/nftables/mullvad-endpoints.nft (generated
+# by refresh-mullvad-endpoints.sh) so a Mullvad server swap does not strand
+# the handshake. The set is declared here, populated there.
+#
+# Honest limit: root on the VM can delete this table. It raises the bar
+# against misconfiguration and casual malware; it is NOT a security boundary.
+# The boundary is the jail.
+#
+# firewalld must be OFF on this VM (this file owns BOTH directions now).
+
+define TRUENAS = 192.168.1.20
+define LAN_ADMIN = 192.168.1.0/24   # tighten to your MBP/admin IPs if you prefer
+
+table inet host_backstop
+delete table inet host_backstop
+
+table inet host_backstop {
+    # Populated by mullvad-endpoints.nft (included below). Declared here so
+    # the ruleset loads even before the first refresh.
+    set mullvad_wg {
+        type ipv4_addr
+        flags interval
+    }
+
+    # ---- OUTBOUND: default-drop; Mullvad handshake + NFS + essentials -----
+    chain output {
+        type filter hook output priority 0; policy drop;
+
+        oifname "lo" accept
+        ct state established,related accept
+
+        # WireGuard handshake to Mullvad. The wg0 UDP socket was created in
+        # this (init) ns, so the encrypted handshake egresses here; the
+        # cleartext side lives only inside the jail.
+        ip daddr @mullvad_wg udp dport 51820 accept
+
+        # NFSv4 to TrueNAS (single port; no rpcbind/mountd sprawl on v4)
+        ip daddr $TRUENAS tcp dport 2049 accept
+
+        udp dport { 67, 68 } accept              # DHCP, if ever non-static
+        icmp type echo-request accept            # outbound ping for sanity
+
+        # PATCH WINDOW: `nft -f patch-window.nft` flips egress on; see README.
+
+        log prefix "host-backstop-out-drop " counter drop
+    }
+
+    # ---- INBOUND: replaces firewalld on this VM ---------------------------
+    chain input {
+        type filter hook input priority 0; policy drop;
+
+        iifname "lo" accept
+        ct state established,related accept
+        ct state invalid drop
+
+        ip saddr $LAN_ADMIN tcp dport 22 accept   # SSH from admin
+
+        # Jailed-service admin UIs via the veth socket proxies (proxies bind
+        # these ports on the LAN IP). Adjust if you change proxy ports.
+        ip saddr $LAN_ADMIN tcp dport { 8080, 5076, 9696, 8989, 7878 } accept
+
+        icmp type echo-request accept
+
+        log prefix "host-backstop-in-drop " counter drop
+    }
+
+    # No forward chain: nothing routes THROUGH this VM's init ns.
+}
+
+include "/etc/nftables/mullvad-endpoints.nft"

@@ -1,0 +1,18 @@
+---
+# svc-media — rootless media stack (Jellyfin/ABS/RomM/Jellyseerr) + Tailscale
+vm_id:      130
+vm_name:    svc-media
+vm_cores:   4
+vm_memory:  10240
+vm_disk_gb: 100
+vm_ip:      "{{ svc_media_ip }}"
+vm_startup: "order=2,up=90"    # TrueNAS is order=1 (set once, out of band)
+# v5: NO tailscale here. Tailscale is not in Rocky/EPEL repos, and one
+# unresolvable name makes cloud-init's dnf transaction fail WHOLE — in v4
+# that silently took podman/nfs-utils down with it ("degraded done").
+# The svc_media role now adds Tailscale's official EL10 repo and installs
+# the package itself (tags: access).
+vm_extra_packages:
+  - podman
+  - nfs-utils
+  - policycoreutils-python-utils

@@ -1,0 +1,30 @@
+# /etc/containers/systemd/dl-radarr.container   (rootful, inside vpn netns)
+#
+# Radarr lives IN the jail deliberately: indexer API queries and metadata
+# traffic describe your library and should ride wg0 like the downloads do.
+# Imports are filesystem ops on the NFS mount (no network from the container),
+# so jailing costs nothing.
+#
+[Unit]
+Description=Radarr (inside vpn netns)
+Requires=vpn-netns.service
+After=vpn-netns.service
+
+[Container]
+Image=lscr.io/linuxserver/radarr:latest
+ContainerName=radarr
+Label=io.containers.autoupdate=registry
+Environment=PUID=10001
+Environment=PGID=10001
+Environment=TZ=America/New_York
+PodmanArgs=--network=ns:/run/netns/vpn
+DNS=10.64.0.1
+Volume=/srv/appdata/radarr:/config:Z
+Volume=/srv/media:/data
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

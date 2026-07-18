@@ -1,0 +1,50 @@
+#cloud-config
+# Rendered by Ansible into {{ pve_snippet_dir }}/{{ vm_name }}-user.yaml and
+# attached via cicustom. cicustom user= REPLACES PVE's generated user-data,
+# so every user/key lives here. Scope: bootstrap only (identity, agent,
+# baseline packages, disk growth). Everything else is done by the svc_* roles.
+hostname: {{ vm_name }}
+fqdn: {{ vm_name }}.{{ search_domain }}
+prefer_fqdn_over_hostname: true
+timezone: {{ timezone }}
+
+users:
+  - name: {{ admin_user }}
+    groups: [wheel]
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: true
+    ssh_authorized_keys:
+      - {{ admin_ssh_pubkey }}
+  # Service account matching TrueNAS dataset ownership. No login, no keys.
+  - name: homelab
+    uid: {{ svc_uid }}
+    primary_group: homelab
+    no_user_group: false
+    shell: /sbin/nologin
+    lock_passwd: true
+    homedir: /opt/homelab
+
+groups:
+  - homelab: []
+
+growpart:
+  mode: auto
+  devices: ["/"]
+
+package_update: true
+packages:
+  - qemu-guest-agent
+  - epel-release
+  - curl
+{% for p in vm_extra_packages | default([]) %}
+  - {{ p }}
+{% endfor %}
+
+runcmd:
+  - systemctl enable --now qemu-guest-agent
+  # cloud-init 'groups' can't set a gid; enforce 10001 explicitly.
+  - [ sh, -c, "groupmod -g {{ svc_gid }} homelab && usermod -g {{ svc_gid }} homelab || true" ]
+  - loginctl enable-linger homelab || true
+
+final_message: "cloud-init bootstrap complete for {{ vm_name }} after $UPTIME s"

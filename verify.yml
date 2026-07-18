@@ -1,0 +1,91 @@
+---
+# verify.yml — run ONLY the gate assertions against already-deployed hosts.
+# Useful as a scheduled health check (the contrib/ timer) or after a manual
+# change. Posts the result to ntfy.
+#
+#   ansible-playbook verify.yml --tags verify --ask-vault-pass
+#
+# NOTE: you MUST pass --tags verify. v5 mechanics: the include_role tasks are
+# tagged `always` (so the include itself survives tag filtering) and carry NO
+# `apply:` — only the tasks tagged [verify] inside each role run. (v4 used
+# apply:{tags:[verify]}, which ADDS the tag to every task in the role and
+# silently turned "verify" into a full converge. Fixed.)
+#
+# Rescue/alert tasks are tagged `always`: a failing gate fires the urgent
+# ntfy and exits non-zero even under --tags verify. (In v4 they were
+# untagged, got tag-skipped, and a failed nightly verify exited 0 in
+# total silence. Fixed.)
+#
+# The verify tasks are read-only EXCEPT svc_download's fail-closed kill test
+# (tags [verify, killtest]), which stops/starts the jail to prove propagation
+# and restores state. The nightly timer skips it with --skip-tags killtest.
+
+- name: Verify svc-download invariants
+  hosts: svc-download
+  gather_facts: false
+  tasks:
+    - name: svc-download verify block
+      block:
+        - name: Run svc_download verify tasks
+          ansible.builtin.include_role:
+            name: svc_download
+          tags: [always]
+      rescue:
+        - name: Notify verify failure
+          ansible.builtin.include_role:
+            name: notify
+            apply:
+              tags: [always]
+          tags: [always]
+          vars:
+            ntfy_title: "homelab VERIFY FAILED (svc-download)"
+            ntfy_result: "A jail invariant failed verification. Investigate now."
+            ntfy_priority: "urgent"
+            ntfy_tags: "rotating_light"
+        - name: Abort
+          ansible.builtin.fail:
+            msg: "verify failed"
+          tags: [always]
+
+- name: Verify svc-media
+  hosts: svc-media
+  gather_facts: false
+  tasks:
+    - name: svc-media verify block
+      block:
+        - name: Run svc_media verify tasks
+          ansible.builtin.include_role:
+            name: svc_media
+          tags: [always]
+      rescue:
+        - name: Notify verify failure
+          ansible.builtin.include_role:
+            name: notify
+            apply:
+              tags: [always]
+          tags: [always]
+          vars:
+            ntfy_title: "homelab VERIFY FAILED (svc-media)"
+            ntfy_result: "A media-stack gate failed verification (NFS probe or Jellyfin)."
+            ntfy_priority: "urgent"
+            ntfy_tags: "rotating_light"
+        - name: Abort
+          ansible.builtin.fail:
+            msg: "verify failed"
+          tags: [always]
+
+- name: Verify OK notification
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Green ntfy (skipped for the nightly timer; -e notify_on_success=false)
+      ansible.builtin.include_role:
+        name: notify
+        apply:
+          tags: [always]
+      tags: [always]
+      vars:
+        ntfy_title: "homelab verify OK"
+        ntfy_result: "All gates green."
+        ntfy_tags: "white_check_mark"
+      when: notify_on_success | default(true) | bool

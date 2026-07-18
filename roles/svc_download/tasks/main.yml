@@ -1,0 +1,384 @@
+---
+# ============================================================================
+# svc_download — the netns VPN jail + SAB/arr stack.
+# Mirrors DEPLOY.md Phase 4. Tags let you run slices (v5: tag routing through
+# site.yml works now):
+#   --tags files      (place scripts/units/quadlets/nft)
+#   --tags secrets    (render peer.conf + vpn-netns.env from vault)
+#   --tags nfs        (mount /srv/media + /srv/backups)
+#   --tags jail       (backstop + bring the netns up)
+#   --tags containers (start dl-* + proxies)
+#   --tags backup     (nightly appdata backup timer)
+#   --tags verify     (the Phase 4 GATE assertions)
+# v5 stack: SABnzbd + Prowlarr + Sonarr + Radarr. NZBHydra2 removed —
+# Prowlarr is the indexer layer for an arr-only stack.
+# ============================================================================
+
+# ---------------------------------------------------------------- packages ---
+- name: Cloud-init should have installed these; ensure present
+  ansible.builtin.dnf:
+    name:
+      - epel-release
+    state: present
+  tags: [files]
+
+- name: Install jail + container packages
+  ansible.builtin.dnf:
+    name:
+      - wireguard-tools
+      - podman
+      - curl
+      - nfs-utils
+      - policycoreutils-python-utils
+    state: present
+  tags: [files]
+
+- name: systemd-socket-proxyd must be present (ships in systemd rpm)
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/systemd-socket-proxyd
+  register: proxyd
+  failed_when: not proxyd.stat.exists
+  tags: [files]
+
+- name: Allow containers to use NFS-backed volumes
+  ansible.posix.seboolean:
+    name: virt_use_nfs
+    state: true
+    persistent: true
+  tags: [files]
+
+# ------------------------------------------------------------------- files ---
+- name: Install jail scripts to /usr/local/sbin
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/sbin/{{ item }}"
+    mode: "0750"
+  loop:
+    - vpn-netns-up.sh
+    - vpn-netns-down.sh
+    - refresh-mullvad-endpoints.sh
+  tags: [files]
+
+- name: Render the leak canary (ntfy target baked in)
+  ansible.builtin.template:
+    src: leak-canary.sh.j2
+    dest: /usr/local/sbin/leak-canary.sh
+    mode: "0750"
+  tags: [files]
+
+- name: Render the appdata backup script (ntfy target baked in)
+  ansible.builtin.template:
+    src: backup-dl-appdata.sh.j2
+    dest: /usr/local/sbin/backup-dl-appdata.sh
+    mode: "0750"
+  tags: [files, backup]
+
+- name: Canary state dir (holds the persistent tripped flag)
+  ansible.builtin.file:
+    path: /var/lib/leak-canary
+    state: directory
+    mode: "0750"
+  tags: [files]
+
+- name: Install systemd units + socket proxies
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item | basename }}"
+    mode: "0644"
+  loop:
+    - vpn-netns.service
+    - leak-canary.service
+    - leak-canary.timer
+    - backup-dl-appdata.service
+    - backup-dl-appdata.timer
+    - proxies/sab-proxy.socket
+    - proxies/sab-proxy.service
+    - proxies/prowlarr-proxy.socket
+    - proxies/prowlarr-proxy.service
+    - proxies/sonarr-proxy.socket
+    - proxies/sonarr-proxy.service
+    - proxies/radarr-proxy.socket
+    - proxies/radarr-proxy.service
+  notify: reload systemd
+  tags: [files, backup]
+
+- name: Install rootful quadlets
+  ansible.builtin.copy:
+    src: "quadlets/{{ item }}"
+    dest: "/etc/containers/systemd/{{ item }}"
+    mode: "0644"
+  loop:
+    - dl-sabnzbd.container
+    - dl-prowlarr.container
+    - dl-sonarr.container
+    - dl-radarr.container
+  notify: reload systemd
+  tags: [files]
+
+- name: Retire NZBHydra2 leftovers if upgrading from v4
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop:
+    - /etc/containers/systemd/dl-nzbhydra2.container
+    - /etc/systemd/system/hydra-proxy.socket
+    - /etc/systemd/system/hydra-proxy.service
+  notify: reload systemd
+  tags: [files]
+
+- name: Render nftables backstop from template (NOT enabled yet)
+  ansible.builtin.template:
+    src: host-backstop.nft.j2
+    dest: /etc/nftables/host-backstop.nft
+    mode: "0644"
+  tags: [files, jail]
+
+- name: Install patch-window helper
+  ansible.builtin.copy:
+    src: patch-window.nft
+    dest: /etc/nftables/patch-window.nft
+    mode: "0644"
+  tags: [files, jail]
+
+- name: Seed mullvad-endpoints.nft only if absent
+  ansible.builtin.copy:
+    src: mullvad-endpoints.nft.seed
+    dest: /etc/nftables/mullvad-endpoints.nft
+    mode: "0644"
+    force: false
+  tags: [files, jail]
+
+- name: netns resolver (Mullvad in-tunnel DNS)
+  ansible.builtin.copy:
+    dest: /etc/netns/vpn/resolv.conf
+    content: "nameserver {{ mullvad_dns }}\n"
+    mode: "0644"
+  tags: [files]
+
+- name: Create appdata dirs (10001) + local incomplete + NFS mountpoints
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop:
+    - /srv/appdata/sabnzbd
+    - /srv/appdata/prowlarr
+    - /srv/appdata/sonarr
+    - /srv/appdata/radarr
+    - /var/lib/sabnzbd-incomplete
+    - /srv/media
+    - /srv/backups
+  tags: [files]
+
+# ----------------------------------------------------------------- secrets ---
+- name: Render peer.conf from vault (600)
+  ansible.builtin.template:
+    src: peer.conf.j2
+    dest: /etc/wireguard/peer.conf
+    owner: root
+    group: root
+    mode: "0600"
+  notify: restart vpn-netns
+  tags: [secrets]
+
+- name: Render vpn-netns.env from vault (600)
+  ansible.builtin.template:
+    src: vpn-netns.env.j2
+    dest: /etc/vpn-netns.env
+    owner: root
+    group: root
+    mode: "0600"
+  notify: restart vpn-netns
+  tags: [secrets]
+
+# --------------------------------------------------------------------- nfs ---
+- name: Mount /srv/media + /srv/backups over NFSv4 (persist in fstab)
+  ansible.posix.mount:
+    path: "{{ item.path }}"
+    src: "{{ truenas_ip }}:{{ item.export }}"
+    fstype: nfs4
+    opts: "{{ nfs_opts }}"
+    state: mounted
+  loop:
+    - { path: /srv/media,   export: "{{ nfs_media_export }}" }
+    - { path: /srv/backups, export: "{{ nfs_backups_export }}" }
+  tags: [nfs]
+
+- name: Prove NFS is writable as the service uid
+  ansible.builtin.command:
+    cmd: "runuser -u '#{{ svc_uid }}' -- touch /srv/media/.probe-dl"
+  changed_when: false
+  tags: [nfs, verify]
+
+- name: Clean up probe
+  ansible.builtin.file:
+    path: /srv/media/.probe-dl
+    state: absent
+  changed_when: false
+  tags: [nfs, verify]
+
+# -------------------------------------------------------------------- jail ---
+# The backstop's input chain is default-drop. We assert LAN_ADMIN matches the
+# intended admin scope BEFORE enabling, so Ansible's own SSH survives.
+# firewalld off first.
+- name: Confirm LAN_ADMIN in host-backstop covers our control path
+  ansible.builtin.command:
+    cmd: "grep -q 'define LAN_ADMIN = {{ lan_cidr }}' /etc/nftables/host-backstop.nft"
+  changed_when: false
+  tags: [jail]
+
+- name: Disable firewalld (host-backstop owns both directions)
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: false
+    state: stopped
+  failed_when: false
+  tags: [jail]
+
+- name: Populate Mullvad endpoint sets (IPs + ports) + load backstop table
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/refresh-mullvad-endpoints.sh
+  changed_when: true
+  tags: [jail]
+
+- name: Persist nftables include across reboot
+  ansible.builtin.lineinfile:
+    path: /etc/sysconfig/nftables.conf
+    line: 'include "/etc/nftables/host-backstop.nft"'
+    create: true
+    mode: "0644"
+  tags: [jail]
+
+- name: Enable nftables
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: started
+  tags: [jail]
+
+- name: Verify SSH admission survived the backstop (sanity, before we trust it)
+  ansible.builtin.command:
+    cmd: nft list chain inet host_backstop input
+  register: nft_input
+  changed_when: false
+  failed_when: "'dport 22 accept' not in (nft_input.stdout | regex_replace('\\s+', ' '))"
+  tags: [jail]
+
+- name: Bring up the netns jail
+  ansible.builtin.systemd:
+    name: vpn-netns.service
+    enabled: true
+    state: started
+  tags: [jail]
+
+- name: "GATE: jail egresses via Mullvad"
+  ansible.builtin.command:
+    cmd: ip netns exec vpn curl -4 --max-time 15 https://am.i.mullvad.net/connected
+  register: mullvad_jail
+  changed_when: false
+  failed_when: "'You are connected to Mullvad' not in mullvad_jail.stdout"
+  tags: [jail, verify]
+
+- name: "GATE: host itself is fenced (must time out)"
+  ansible.builtin.command:
+    cmd: curl -4 --max-time 5 https://ifconfig.me
+  register: host_egress
+  changed_when: false
+  failed_when: host_egress.rc == 0    # success = leak; we WANT failure/timeout
+  tags: [jail, verify]
+
+# -------------------------------------------------------------- containers ---
+- name: Reload so generated quadlet units exist
+  ansible.builtin.systemd:
+    daemon_reload: true
+  tags: [containers]
+
+- name: Start download containers
+  ansible.builtin.systemd:
+    name: "dl-{{ item }}.service"
+    state: started
+  loop: [sabnzbd, prowlarr, sonarr, radarr]
+  tags: [containers]
+
+- name: Enable + start UI socket proxies
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - sab-proxy.socket
+    - prowlarr-proxy.socket
+    - sonarr-proxy.socket
+    - radarr-proxy.socket
+  tags: [containers]
+
+- name: Arm the leak canary timer
+  ansible.builtin.systemd:
+    name: leak-canary.timer
+    enabled: true
+    state: started
+  tags: [containers]
+
+# ------------------------------------------------------------------ backup ---
+- name: Arm the nightly appdata backup timer
+  ansible.builtin.systemd:
+    name: backup-dl-appdata.timer
+    enabled: true
+    state: started
+  tags: [backup]
+
+# ------------------------------------------------------------------ verify ---
+# The gate that matters: every container is INSIDE the jail netns.
+- name: "GATE: each dl-* container is in /run/netns/vpn"
+  ansible.builtin.shell:
+    cmd: |
+      set -euo pipefail
+      want=$(stat -Lc %i /run/netns/vpn)
+      for c in sabnzbd prowlarr sonarr radarr; do
+        key=$(podman inspect -f '{{ '{{' }}.NetworkSettings.SandboxKey{{ '}}' }}' "$c")
+        [ "$(stat -Lc %i "$key")" = "$want" ] || { echo "LEAK: $c not in jail ($key)"; exit 1; }
+      done
+      echo "all-in-jail"
+    executable: /bin/bash
+  register: jail_membership
+  changed_when: false
+  failed_when: "'all-in-jail' not in jail_membership.stdout"
+  tags: [verify]
+
+- name: "GATE: Mullvad confirmed from inside a container"
+  ansible.builtin.command:
+    cmd: podman exec sabnzbd curl -4 -s --max-time 15 https://am.i.mullvad.net/connected
+  register: mullvad_container
+  changed_when: false
+  failed_when: "'You are connected to Mullvad' not in mullvad_container.stdout"
+  tags: [verify]
+
+- name: "GATE: fail-closed — stopping the jail stops the containers"
+  ansible.builtin.shell:
+    cmd: |
+      set -uo pipefail
+      systemctl stop vpn-netns
+      st=$(systemctl is-active dl-sabnzbd || true)
+      systemctl start vpn-netns dl-sabnzbd dl-prowlarr dl-sonarr dl-radarr
+      [ "$st" = "inactive" ] || { echo "FAIL: dl-sabnzbd stayed $st when jail stopped"; exit 1; }
+      echo "fail-closed-ok"
+    executable: /bin/bash
+  register: killtest
+  changed_when: true
+  failed_when: "'fail-closed-ok' not in killtest.stdout"
+  tags: [verify, killtest]
+
+- name: "GATE: leak-canary passes (also fails if a prior trip is uncleared)"
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/leak-canary.sh
+  register: canary
+  changed_when: false
+  failed_when: canary.rc != 0
+  tags: [verify]
+
+- name: svc-download verification summary
+  ansible.builtin.set_fact:
+    svc_download_verified: true
+  tags: [verify]

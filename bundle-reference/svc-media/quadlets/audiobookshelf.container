@@ -1,0 +1,27 @@
+# svc-media — ROOTLESS Quadlet, place in:
+#   ~homelab/.config/containers/systemd/audiobookshelf.container
+# as the 'homelab' user (uid/gid 10001), with lingering enabled:
+#   loginctl enable-linger homelab
+# Rootless is fine here (no netns tricks needed on this VM); the container
+# runs as 10001 which matches TrueNAS dataset ownership, so no PUID env and
+# no userns-vs-NFS mapping problem.
+[Unit]
+Description=Audiobookshelf
+
+[Container]
+Image=ghcr.io/advplyr/audiobookshelf:latest
+ContainerName=audiobookshelf
+Label=io.containers.autoupdate=registry
+PublishPort=127.0.0.1:13378:80
+Volume=%h/appdata/audiobookshelf/config:/config:Z
+Volume=%h/appdata/audiobookshelf/metadata:/metadata:Z
+Volume=/srv/media/audiobooks:/audiobooks
+Volume=/srv/media/ebooks:/ebooks:ro
+# ABS's built-in scheduled backups (Settings > Backups) should target a path
+# on the NFS backup dataset — that replaces any rsync-of-live-sqlite scheme.
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

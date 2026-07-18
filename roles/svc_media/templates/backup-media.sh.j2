@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# backup-media.sh — nightly svc-media backups to the NFS backup dataset.
+# RENDERED BY ANSIBLE. Runs as the homelab user (rootless podman needs
+# XDG_RUNTIME_DIR — set in backup-media.service).
+#
+# What it covers:
+#   - RomM MariaDB: application-consistent mariadb-dump (--single-transaction)
+#   - Appdata tars: jellyfin/config, jellyseerr, romm/{config,assets,resources}
+#     (crash-consistent — live SQLite in jellyfin/jellyseerr; acceptable for
+#     nightly homelab RPO. resources/ is rebuildable metadata but saves a
+#     re-scrape; it can grow — retention below bounds it.)
+#   - Audiobookshelf: NOT tarred here. ABS's built-in backup (Settings >
+#     Backups, schedule it once in the UI) writes application-consistent
+#     archives to /config/backups == /srv/backups/audiobookshelf.
+# Restore is a MANUAL, quarterly-tested procedure — see README.
+set -euo pipefail
+
+STAMP=$(date +%F)
+DB_DEST=/srv/backups/svc-media/romm-db
+APP_DEST=/srv/backups/svc-media/appdata
+NTFY="{{ ntfy_url }}/{{ ntfy_topic }}"
+
+on_err() {
+    logger -p daemon.err -t backup-media "backup FAILED"
+    curl -fsS --max-time 5 -X POST -H "Title: svc-media backup FAILED" \
+        -H "Priority: high" -H "Tags: floppy_disk" \
+{% if (vault_ntfy_token | default('')) | length > 0 %}
+        -H "Authorization: Bearer {{ vault_ntfy_token }}" \
+{% endif %}
+        -d "backup-media.sh failed — journalctl -u backup-media" \
+        "$NTFY" >/dev/null 2>&1 || true
+}
+trap on_err ERR
+
+mkdir -p "$DB_DEST" "$APP_DEST"
+
+# 1. RomM DB dump (root creds live only inside the db container's env)
+podman exec romm-db sh -c \
+    'exec mariadb-dump --all-databases --single-transaction -uroot -p"$MARIADB_ROOT_PASSWORD"' \
+    | gzip > "$DB_DEST/romm-$STAMP.sql.gz"
+
+# 2. Appdata tars
+tar -C "$HOME/appdata" -czf "$APP_DEST/jellyfin-config-$STAMP.tar.gz" jellyfin/config
+tar -C "$HOME/appdata" -czf "$APP_DEST/jellyseerr-$STAMP.tar.gz" jellyseerr
+tar -C "$HOME/appdata" -czf "$APP_DEST/romm-appdata-$STAMP.tar.gz" romm/config romm/assets romm/resources
+
+# 3. Retention
+find "$DB_DEST" "$APP_DEST" -type f -mtime +{{ backup_retention_days | default(14) }} -delete
+logger -t backup-media "backup OK ($STAMP)"

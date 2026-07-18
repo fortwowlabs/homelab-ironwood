@@ -1,0 +1,28 @@
+# /etc/wireguard/peer.conf   (chmod 600, root:root)
+#
+# wg(8) `wg setconf` syntax ONLY. This is NOT a wg-quick file:
+# Address=, DNS=, MTU=, PostUp= are wg-quick extensions and will make
+# `wg setconf` fail. Tunnel address goes in /etc/vpn-netns.env (WG_ADDR),
+# DNS goes in /etc/netns/vpn/resolv.conf.
+#
+# Use a NUMERIC Endpoint IP. A hostname would need DNS in the init ns at
+# setconf time and reintroduces a resolution dependency you don't want.
+
+[Interface]
+PrivateKey = <base64-private-key>
+
+[Peer]
+PublicKey  = <mullvad-server-pubkey>
+AllowedIPs = 0.0.0.0/0
+Endpoint   = <MULLVAD_SERVER_IP>:51820   # from the downloaded conf; numeric already
+PersistentKeepalive = 25
+
+# Mullvad notes:
+# * mullvad.net -> WireGuard configuration generates static confs; strip the
+#   wg-quick-only lines (Address/DNS) as above. Address goes to WG_ADDR in
+#   /etc/vpn-netns.env; DNS is 10.64.0.1 -> /etc/netns/vpn/resolv.conf and
+#   the DNS= key in each dl-*.container Quadlet.
+# * Generate 2-3 server configs (same account/key) and list all their IPs in
+#   the pfSense MULLVAD_ENDPOINTS alias — swapping servers is then a one-line
+#   Endpoint edit + `systemctl restart vpn-netns`, no firewall change.
+# * In-jail verification endpoint: https://am.i.mullvad.net/connected
