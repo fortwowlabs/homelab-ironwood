@@ -33,6 +33,8 @@
       - podman
       - nfs-utils
       - policycoreutils-python-utils
+      - firewalld          # svc-media's firewall; GenericCloud ships without it
+      - python3-firewall   # firewalld ansible module bindings (not in cloud image)
       - curl
     state: present
   tags: [files]
@@ -198,6 +200,15 @@
   changed_when: true
   tags: [media]
 
+# Running before the rich rules: the firewalld module needs the daemon up
+# (zone ops fail with INVALID_ZONE otherwise). Default zone permits ssh.
+- name: Enable + start firewalld
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: true
+    state: started
+  tags: [media]
+
 - name: "Open Jellyfin 8096 to the LAN source range only (v5 rich rule)"
   ansible.posix.firewalld:
     rich_rule: "rule family=ipv4 source address={{ lan_cidr }} port port=8096 protocol=tcp accept"
@@ -294,6 +305,12 @@
         name: caddy
         state: present
 
+    - name: tailscaled drop-in dir
+      ansible.builtin.file:
+        path: /etc/systemd/system/tailscaled.service.d
+        state: directory
+        mode: "0755"
+
     - name: tailscaled drop-in — let the caddy user fetch ts.net certs
       ansible.builtin.copy:
         dest: /etc/systemd/system/tailscaled.service.d/permit-cert.conf
@@ -315,6 +332,12 @@
       register: ts_self
       changed_when: false
 
+    - name: caddy drop-in dir
+      ansible.builtin.file:
+        path: /etc/systemd/system/caddy.service.d
+        state: directory
+        mode: "0755"
+
     - name: caddy drop-in — TS_HOST/TS_IP for the Caddyfile
       ansible.builtin.copy:
         dest: /etc/systemd/system/caddy.service.d/ts-env.conf
@@ -331,6 +354,16 @@
         dest: /etc/caddy/Caddyfile
         mode: "0644"
       register: caddyfile
+
+    # 8443 is already http_port_t; the other vhost ports are not, and
+    # confined caddy gets EACCES binding them. 8448/8449 pre-labeled for the
+    # commented-out vhosts in the Caddyfile.
+    - name: Label Caddy vhost ports http_port_t (SELinux)
+      community.general.seport:
+        ports: 8444,8445,8447,8448,8449
+        proto: tcp
+        setype: http_port_t
+        state: present
 
     - name: Enable + (re)start caddy
       ansible.builtin.systemd:

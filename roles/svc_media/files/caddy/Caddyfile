@@ -14,6 +14,11 @@
 {
 	# Caddy asks tailscaled for certs when the site host is *.ts.net
 	auto_https disable_redirects
+	# No HTTP/3: SELinux labels 8443-8449 tcp (http_port_t) but not udp,
+	# so the QUIC listeners die with EACCES. h1+h2 is plenty on a tailnet.
+	servers {
+		protocols h1 h2
+	}
 }
 
 # --- Audiobookshelf ---
