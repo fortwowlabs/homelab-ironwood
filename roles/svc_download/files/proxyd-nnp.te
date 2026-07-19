@@ -1,0 +1,15 @@
+# The *-proxy.service units set NoNewPrivileges=yes. Under NNP, SELinux
+# requires an explicit nnp_transition for init_t -> systemd_socket_proxyd_t;
+# without it the transition is silently SKIPPED (audit: security_bounded_
+# transition denied), proxyd runs as init_t, and its connect() to the jail
+# veth fails EACCES — while the proxyd booleans do nothing, because the
+# process never entered the domain they govern.
+module proxyd-nnp 1.0;
+
+require {
+    type init_t;
+    type systemd_socket_proxyd_t;
+    class process2 nnp_transition;
+}
+
+allow init_t systemd_socket_proxyd_t:process2 nnp_transition;

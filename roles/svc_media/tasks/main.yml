@@ -379,10 +379,11 @@
     - name: Compile + load caddy-tailscale module
       ansible.builtin.shell: |
         set -euo pipefail
-        cd /tmp
-        checkmodule -M -m -o caddy-tailscale.mod /etc/caddy/caddy-tailscale.te
-        semodule_package -o caddy-tailscale.pp -m caddy-tailscale.mod
-        semodule -i caddy-tailscale.pp
+        d=$(mktemp -d)
+        trap 'rm -rf "$d"' EXIT
+        checkmodule -M -m -o "$d/caddy-tailscale.mod" /etc/caddy/caddy-tailscale.te
+        semodule_package -o "$d/caddy-tailscale.pp" -m "$d/caddy-tailscale.mod"
+        semodule -i "$d/caddy-tailscale.pp"
       when: caddy_ts_te is changed or caddy_ts_mod.rc != 0
       changed_when: true
 

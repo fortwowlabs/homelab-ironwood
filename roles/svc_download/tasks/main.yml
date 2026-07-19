@@ -15,22 +15,40 @@
 # ============================================================================
 
 # ---------------------------------------------------------------- packages ---
-- name: Cloud-init should have installed these; ensure present
-  ansible.builtin.dnf:
-    name:
-      - epel-release
-    state: present
+# On a re-run the backstop is already loaded and blocks DNS, so a dnf
+# metadata refresh fails ("Could not resolve mirrors.rockylinux.org"). Check
+# presence with rpm first and only reach the network — through the patch
+# window — when something is genuinely missing. Steady state: no egress.
+- name: Which required packages are missing?
+  ansible.builtin.shell:
+    cmd: "rpm -q {{ _dl_packages | join(' ') }} >/dev/null 2>&1 || rpm -q {{ _dl_packages | join(' ') }} 2>&1 | awk '/is not installed/{print $2}'"
+  vars:
+    _dl_packages: [epel-release, wireguard-tools, podman, curl, nfs-utils, policycoreutils-python-utils, checkpolicy]
+  register: dl_pkgs_missing
+  changed_when: false
   tags: [files]
 
-- name: Install jail + container packages
-  ansible.builtin.dnf:
-    name:
-      - wireguard-tools
-      - podman
-      - curl
-      - nfs-utils
-      - policycoreutils-python-utils
-    state: present
+- name: Install missing packages through the patch window
+  when: dl_pkgs_missing.stdout | trim | length > 0
+  block:
+    - name: Open patch window (pkgs)
+      ansible.builtin.command:
+        cmd: nft -f /etc/nftables/patch-window.nft
+      changed_when: true
+
+    - name: dnf install the missing packages
+      ansible.builtin.dnf:
+        name: "{{ dl_pkgs_missing.stdout_lines }}"
+        state: present
+  always:
+    - name: Close patch window (reload strict backstop)
+      ansible.builtin.command:
+        cmd: nft -f /etc/nftables/host-backstop.nft
+      changed_when: true
+      # Backstop file may not exist yet on a truly-first run; the later jail
+      # bring-up renders + loads it. Harmless if the open window persists
+      # until then (egress is intended during first-run package install).
+      failed_when: false
   tags: [files]
 
 - name: systemd-socket-proxyd must be present (ships in systemd rpm)
@@ -371,6 +389,41 @@
     state: true
     persistent: true
   loop: [systemd_socket_proxyd_bind_any, systemd_socket_proxyd_connect_any]
+  tags: [containers]
+
+# The proxy units set NoNewPrivileges=yes. Under NNP, SELinux needs an
+# explicit nnp_transition allow for init_t -> systemd_socket_proxyd_t or the
+# transition is silently skipped: proxyd runs as init_t, its connect() to the
+# jail veth EACCESes, and the booleans above are inert (wrong domain). The
+# denial only shows as security_bounded_transition in the raw audit log.
+# (checkpolicy is installed up top with the other packages, before the
+# backstop blocks the DNS a dnf refresh would need.)
+- name: proxyd-nnp SELinux module source
+  ansible.builtin.copy:
+    src: proxyd-nnp.te
+    dest: /etc/nftables/proxyd-nnp.te
+    mode: "0644"
+  register: proxyd_nnp_te
+  tags: [containers]
+
+- name: Is the proxyd-nnp module loaded?
+  ansible.builtin.shell: "semodule -l | grep -qw proxyd-nnp"
+  register: proxyd_nnp_mod
+  failed_when: false
+  changed_when: false
+  tags: [containers]
+
+- name: Compile + load proxyd-nnp module
+  ansible.builtin.shell: |
+    set -euo pipefail
+    d=$(mktemp -d)
+    trap 'rm -rf "$d"' EXIT
+    checkmodule -M -m -o "$d/proxyd-nnp.mod" /etc/nftables/proxyd-nnp.te
+    semodule_package -o "$d/proxyd-nnp.pp" -m "$d/proxyd-nnp.mod"
+    semodule -i "$d/proxyd-nnp.pp"
+  when: proxyd_nnp_te is changed or proxyd_nnp_mod.rc != 0
+  changed_when: true
+  notify: restart ui proxies
   tags: [containers]
 
 - name: Enable + start UI socket proxies

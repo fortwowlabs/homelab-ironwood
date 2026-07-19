@@ -9,6 +9,17 @@
   # The file ends with an include of mullvad-endpoints.nft, so the endpoint
   # sets repopulate atomically with the reload.
 
+- name: restart ui proxies
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    state: restarted
+  loop:
+    - sab-proxy.service
+    - prowlarr-proxy.service
+    - sonarr-proxy.service
+    - radarr-proxy.service
+  failed_when: false
+
 - name: restart vpn-netns
   ansible.builtin.systemd:
     name: vpn-netns.service
