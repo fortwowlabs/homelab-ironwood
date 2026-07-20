@@ -1,10 +1,19 @@
 # Media acquisition & presentation
 
+Requests go through **Seerr** (`seerr.fort.wow`) — the unified successor to
+Overseerr/Jellyseerr — which drives Sonarr/Radarr. It replaced Jellyseerr in v6
+(same port 5055, so nothing else changed). Its config is Overseerr/Jellyseerr-
+compatible: to carry an existing setup over, follow the migration guide at
+<https://docs.seerr.dev/migration-guide/> (copy the old
+`/opt/homelab/appdata/jellyseerr` config into `.../seerr` before first start);
+otherwise just re-run the short setup wizard.
+
 | Type | Search/download | Presentation | Status |
 |------|-----------------|--------------|--------|
 | Movies / TV | Radarr / Sonarr + Prowlarr + SABnzbd | Jellyfin | working |
 | Books / ebooks / audiobooks | **LazyLibrarian** (v6) + Prowlarr + SABnzbd | Audiobookshelf | **new — wire in UI** |
 | Game ROMs | *manual ingest* (no arr pipeline exists) | RomM + metadata | **new — add keys + drop ROMs** |
+| Requests | **Seerr** (v6, replaces Jellyseerr) | drives Sonarr/Radarr | **new** |
 
 ## LazyLibrarian (books / ebooks / audiobooks)
 

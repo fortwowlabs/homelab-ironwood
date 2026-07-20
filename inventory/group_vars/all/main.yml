@@ -100,7 +100,7 @@ caddy_services:
   jellyfin:   { backend: "127.0.0.1:8096",             group: Media,     icon: jellyfin }
   abs:        { backend: "127.0.0.1:13378",            group: Media,     icon: audiobookshelf }
   romm:       { backend: "127.0.0.1:8081",             group: Media,     icon: romm }
-  jellyseerr: { backend: "127.0.0.1:5055",             group: Media,     icon: jellyseerr }
+  seerr:      { backend: "127.0.0.1:5055",             group: Media,     icon: overseerr }
   sonarr:     { backend: "{{ svc_download_ip }}:8989", group: Downloads, icon: sonarr }
   radarr:     { backend: "{{ svc_download_ip }}:7878", group: Downloads, icon: radarr }
   prowlarr:   { backend: "{{ svc_download_ip }}:9696", group: Downloads, icon: prowlarr }

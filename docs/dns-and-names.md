@@ -16,7 +16,7 @@ client ──▶ DNS: <name>.fort.wow ──▶ 192.168.1.30 (svc-media)
                                          │
         ┌────────────────────────────────┼─────────────────────────────┐
    127.0.0.1 backends on svc-media           192.168.1.31 (svc-download)
-   jellyfin/abs/romm/jellyseerr              sonarr/radarr/prowlarr/sabnzbd
+   jellyfin/abs/romm/seerr              sonarr/radarr/prowlarr/sabnzbd
                                              (via the existing LAN socket proxies)
 ```
 

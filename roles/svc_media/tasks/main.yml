@@ -114,7 +114,7 @@
     - /opt/homelab/appdata/jellyfin/cache
     - /opt/homelab/appdata/audiobookshelf/config
     - /opt/homelab/appdata/audiobookshelf/metadata
-    - /opt/homelab/appdata/jellyseerr
+    - /opt/homelab/appdata/seerr
     - /opt/homelab/appdata/romm/resources
     - /opt/homelab/appdata/romm/assets
     - /opt/homelab/appdata/romm/config
@@ -134,7 +134,7 @@
     mode: "0644"
   loop:
     - audiobookshelf.container
-    - jellyseerr.container
+    - seerr.container
     - romm.container
     - romm-db.container
     - romm.network
@@ -217,6 +217,30 @@
   tags: [media]
 
 # -------------------------------------------------------------------- media --
+# Retire Jellyseerr (replaced by Seerr). Stop the old unit + remove its quadlet
+# so the reload below drops the generated service; then delete the container.
+# Harmless no-op on a fresh install (nothing named jellyseerr).
+- name: Stop the old jellyseerr user service
+  ansible.builtin.command:
+    cmd: "systemctl --user -M homelab@ stop jellyseerr.service"
+  failed_when: false
+  changed_when: true
+  tags: [media]
+
+- name: Remove the old jellyseerr quadlet
+  ansible.builtin.file:
+    path: /opt/homelab/.config/containers/systemd/jellyseerr.container
+    state: absent
+  tags: [media]
+
+- name: Remove the old jellyseerr container if it lingers
+  ansible.builtin.command:
+    cmd: "runuser -u homelab -- env XDG_RUNTIME_DIR=/run/user/{{ svc_uid }} podman rm -f jellyseerr"
+    chdir: /tmp
+  failed_when: false
+  changed_when: true
+  tags: [media]
+
 - name: Reload the homelab user systemd scope
   ansible.builtin.command:
     cmd: systemctl --user -M homelab@ daemon-reload
@@ -226,7 +250,7 @@
 - name: Start media containers (rootless; romm waits on healthy DB)
   ansible.builtin.command:
     cmd: "systemctl --user -M homelab@ start {{ item }}"
-  loop: [jellyfin, audiobookshelf, romm-db, romm, jellyseerr, ntfy, homepage]
+  loop: [jellyfin, audiobookshelf, romm-db, romm, seerr, ntfy, homepage]
   changed_when: true
   tags: [media]
 
@@ -378,8 +402,8 @@
         # --resolve so the gate doesn't depend on DNS being wired yet
         cmd: >-
           curl -sk --max-time 10 -o /dev/null -w '%{http_code}'
-          --resolve jellyseerr.{{ service_domain }}:443:{{ svc_media_ip }}
-          https://jellyseerr.{{ service_domain }}
+          --resolve seerr.{{ service_domain }}:443:{{ svc_media_ip }}
+          https://seerr.{{ service_domain }}
       register: caddy_gate
       changed_when: false
       failed_when: caddy_gate.stdout not in ['200', '307', '302', '401']

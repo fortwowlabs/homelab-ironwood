@@ -19,7 +19,7 @@ drift checks use the same code.
 | 3/5 VM creation              | Yes    | `pve_vm` role via the API |
 | 4 Jail + stack               | Yes    | `svc_download` role, gates as assertions |
 | 6 Media stack                | Yes    | `svc_media` role. Media apps + LazyLibrarian (books/audiobooks) + RomM (ROM presentation + metadata). |
-| 7 App wiring                 | No     | Clicking through SAB/Prowlarr/arr/LazyLibrarian/Jellyseerr UIs — see [docs/DEPLOY-CHECKLIST.md](docs/DEPLOY-CHECKLIST.md) |
+| 7 App wiring                 | No     | Clicking through SAB/Prowlarr/arr/LazyLibrarian/Seerr UIs — see [docs/DEPLOY-CHECKLIST.md](docs/DEPLOY-CHECKLIST.md) |
 | 9 Backups                    | Yes    | Nightly timers on both VMs: RomM DB dump + appdata tars (media, 03:05), arr/SAB/LazyLibrarian appdata tars (download, 03:10), 14-day retention. ABS uses its built-in backup to the NFS-mounted `/config/backups` — schedule it once in the UI. **Restore is manual; test it quarterly.** |
 | 9 ntfy server                | Yes (v6) | Rootless container on svc-media (`ntfy.fort.wow`), bound to the LAN IP so the canary/deploy/disk alarms deliver. |
 | **Service DNS names (v6)**   | Yes    | dnsmasq + Caddy hostname routing → `*.fort.wow`. 3 one-time glue steps ([docs/dns-and-names.md](docs/dns-and-names.md)) |

@@ -60,7 +60,7 @@ exists before the things that are reached by name.
 ## Still-manual (carried over, not v6-specific)
 
 - [ ] Original app wiring if not done: SAB Usenet provider; Prowlarr indexers →
-      Sonarr/Radarr; Jellyfin libraries + admin account; Jellyseerr ↔ Jellyfin.
+      Sonarr/Radarr; Jellyfin libraries + admin account; Seerr ↔ Jellyfin.
 - [ ] Nightly verify timer from `contrib/` on an always-on box (README).
 - [ ] Pin container images by digest after burn-in (README image policy).
 
