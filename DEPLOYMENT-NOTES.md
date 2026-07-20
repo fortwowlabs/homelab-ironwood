@@ -192,3 +192,52 @@ Kept here so nobody re-debugs them. Full detail in the commit messages
 **Both**
 - SELinux module compiles use a fresh `mktemp -d`, not `cd /tmp` with fixed
   filenames (which collide with pre-existing sticky-bit `/tmp` artifacts).
+
+---
+
+## 6. Incident 2026-07-20 — rpool full froze svc-download
+
+**Symptom:** download web UIs dead; Proxmox GUI warning "out of space".
+
+**Root cause:** VM 131 (svc-download) had its disk on `local-zfs` = the 220 GB
+**system pool `rpool`**, not the 1.8 TB `nvme0pool` where it belonged — a
+consequence of it being an *adopted* bundle-era VM (Ansible create-once never
+relocates disks; svc-media/130, created fresh, landed on nvme0pool correctly).
+rpool was oversubscribed (67 GB stale ISOs + the 160 GB thin zvol + ZFS
+`copies=2`). **SABnzbd's `/var/lib/sabnzbd-incomplete` grew to 69 GB** on the
+VM's local disk, the thin zvol ran out of backing blocks, rpool hit 0, and
+Proxmox froze VM 131 in `io-error` (all dl services dead). The disk-full event
+also **wedged pmxcfs** — `/etc/pve` returned EIO on writes (reads fine; a 4 MB
+uncheckpointed SQLite WAL) — with no corruption and `rpool` reporting healthy.
+svc-media (nvme0pool) stayed up throughout.
+
+**Fix (each step approved):**
+1. Deleted 2 stale Rocky install DVDs from `/var/lib/vz/template/iso`
+   (~46 GB freed, doubled by copies=2) → VM 131 resumed from `io-error`.
+2. `systemctl restart pve-cluster` → recovered pmxcfs (WAL checkpointed,
+   `/etc/pve` writable). Safe because reads worked, WAL+db intact, pool healthy.
+3. Migrated VM 131 fully to nvme0pool — **offline** `qm disk move 131 scsi0`
+   and `efidisk0 … --delete` + `qm set 131 --ide2 nvme0pool:cloudinit`.
+   (The *online* move timed out on the thrashing VM; offline, with the VM
+   stopped, worked. Graceful `qm shutdown` failed on the hung guest → `qm stop`.)
+4. Started VM 131 on the healthy pool.
+
+**Result:** rpool 100% → 28% (158 GB free); VM 131 running on nvme0pool with
+85 GB free; all four dl UIs 200; jail/NFS/canary healthy.
+
+**Gotchas for next time:**
+- Recreating the cloud-init drive makes cloud-init **regenerate the VM's SSH
+  host key** on boot → `ssh-keygen -R 192.168.1.31` and re-scan (verify the new
+  fingerprint from the PVE host's vantage point first).
+- Online `qm disk move` (drive-mirror) can time out on a busy/thrashing guest;
+  the offline move (VM stopped) is the reliable path.
+
+**Still open (operational, not code):**
+- The **69 GB of incomplete downloads** — triage/clear stalled items in the
+  SABnzbd UI (`192.168.1.31:8080`) to reclaim the space. Not download data
+  anyone deleted for you.
+- **Hardening not yet committed:** an assertion/doc that both service VMs must
+  sit on `pve_storage` (nvme0pool) so an adopted VM can't silently land on the
+  system pool again — the real preventable cause. (A journald `SystemMaxUse`
+  cap / backstop drop-log rate-limit was considered but is unnecessary —
+  journald was only 139 MB; the drop-log was not the culprit.)
