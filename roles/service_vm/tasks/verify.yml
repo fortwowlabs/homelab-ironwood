@@ -7,18 +7,37 @@
   loop: "{{ service_nfs_mounts }}"
   changed_when: false
 
-- name: Verify NFS write access with guaranteed cleanup
+- name: Verify every NFS mount is writable with guaranteed cleanup
   block:
     - name: Create temporary NFS probe as the service UID
-      ansible.builtin.command: >-
-        setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups --
-        touch /srv/media/.homelab-verify-{{ inventory_hostname }}
+      ansible.builtin.command:
+        argv:
+          - setpriv
+          - "--reuid={{ svc_uid }}"
+          - "--regid={{ svc_gid }}"
+          - --clear-groups
+          - --
+          - touch
+          - "{{ item.path }}/.homelab-verify-{{ inventory_hostname }}"
+      loop: "{{ service_nfs_mounts }}"
+      loop_control:
+        label: "{{ item.path }}"
       changed_when: false
   always:
     - name: Remove temporary NFS probe as the service UID
-      ansible.builtin.command: >-
-        setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups --
-        rm -f /srv/media/.homelab-verify-{{ inventory_hostname }}
+      ansible.builtin.command:
+        argv:
+          - setpriv
+          - "--reuid={{ svc_uid }}"
+          - "--regid={{ svc_gid }}"
+          - --clear-groups
+          - --
+          - rm
+          - -f
+          - "{{ item.path }}/.homelab-verify-{{ inventory_hostname }}"
+      loop: "{{ service_nfs_mounts }}"
+      loop_control:
+        label: "{{ item.path }}"
       changed_when: false
 
 - name: Mark shared VM verification complete

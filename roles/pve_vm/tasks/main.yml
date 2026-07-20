@@ -1,186 +1,650 @@
 ---
-# ============================================================================
-# pve_vm — provision one Rocky 10 service VM via the Proxmox API.
-# Create-once by design: an existing VMID is left alone on normal runs so a
-# converge can never surprise-reconfigure a running VM. Day-two shape changes
-# (cores/memory/onboot/startup) are pushed EXPLICITLY with
-# `-e pve_reconcile=true` (make reconcile). Disk size / CPU type / bridge /
-# cicustom changes remain manual by intent — those want a maintenance window.
-#
-# Runs against localhost (control node) but the image tasks need to land ON
-# thurgadin's filesystem, so those delegate over SSH to the PVE host. That
-# means this ONE role needs SSH-to-root@thurgadin in addition to the API
-# token. If you'd rather keep zero SSH to PVE, pre-seed the image by hand
-# once and set pve_image_present=true to skip the fetch block.
-# ============================================================================
+# Provision one Rocky service VM. Existing disks are create-once: this role
+# may attach missing disks and grow scsi0, but it never replaces, moves, or
+# shrinks storage. Configuration mismatches fail with a maintenance message.
 
-- name: Fetch + verify Rocky image on the PVE host
-  when: not (pve_image_present | default(false))
-  delegate_to: "{{ pve_ssh_host | default('root@192.168.1.10') }}"
-  block:
+- name: Validate required Proxmox provisioning inputs
+  ansible.builtin.assert:
+    that:
+      - pve_api_host is defined
+      - pve_api_host | string | length > 0
+      - pve_node is defined
+      - pve_node | string | length > 0
+      - pve_ssh_host is defined
+      - pve_ssh_host | string | length > 0
+      - pve_storage is defined
+      - pve_storage | string | length > 0
+      - pve_vm_pool is defined
+      - pve_vm_pool | string | length > 0
+      - pve_bridge is defined
+      - pve_bridge | string | length > 0
+      - rocky_image_name is defined
+      - "'.latest.' not in rocky_image_name"
+      - rocky_image_url is defined
+      - rocky_image_sha256 is defined
+      - rocky_image_sha256 is match('^[a-fA-F0-9]{64}$')
+      - vault_pve_token_id is defined
+      - "'!' in vault_pve_token_id"
+      - vault_pve_token_id.split('!') | length == 2
+      - vault_pve_token_secret is defined
+      - vm_id is defined
+      - (vm_id | string) is match('^[1-9][0-9]+$')
+      - vm_name is defined
+      - hostvars[vm_name] is defined
+      - hostvars[vm_name].ansible_host is defined
+    fail_msg: >-
+      Proxmox provisioning requires explicit API/SSH, storage/pool/bridge,
+      VM, canonical inventory ansible_host, and pinned Rocky SHA-256 inputs.
+      No PVE SSH host or checksum is inferred.
+  no_log: true
+  diff: false
 
-    - name: Check whether a verified image already exists
-      ansible.builtin.stat:
-        path: "{{ pve_image_dir }}/{{ rocky_image_name }}.sha256"
-      register: img_stamp
+- name: "Query VM {{ vm_id }} through the scoped Proxmox API"
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ vault_pve_token_id.split('!')[0] }}"
+    api_token_id: "{{ vault_pve_token_id.split('!')[1] }}"
+    api_token_secret: "{{ vault_pve_token_secret }}"
+    validate_certs: "{{ pve_validate_certs | default(true) }}"
+    type: all
+    vmid: "{{ vm_id }}"
+    config: pending
+  register: vm_info
+  no_log: true
+  diff: false
 
-    - name: Refuse mutable image pins
-      ansible.builtin.assert:
-        that:
-          - "'.latest.' not in rocky_image_name"
-        fail_msg: >-
-          rocky_image_name must be a DATED build (see the bump procedure in
-          group_vars/all.yml). '.latest.' pins are mutable upstream and defeat
-          checksum verification.
+- name: Assert the API returned an unambiguous VM result
+  ansible.builtin.assert:
+    that:
+      - vm_info.proxmox_vms is defined
+      - vm_info.proxmox_vms | type_debug == 'list'
+      - vm_info.proxmox_vms | length <= 1
+    fail_msg: >-
+      The Proxmox API returned an invalid result for VMID {{ vm_id }}.
+      Provisioning stopped before making VM changes.
 
-    - name: Download image + its per-file CHECKSUM (only if no verified copy)
-      when: not img_stamp.stat.exists
-      ansible.builtin.get_url:
-        url: "{{ item.url }}"
-        dest: "{{ item.dest }}"
-        mode: "0644"
-      loop:
-        - { url: "{{ rocky_image_url }}",    dest: "{{ pve_image_dir }}/{{ rocky_image_name }}" }
-        - { url: "{{ rocky_checksum_url }}", dest: "{{ pve_image_dir }}/{{ rocky_image_name }}.CHECKSUM" }
+# A scoped token can report an empty list for a VM outside its pool. Check the
+# node directly before treating an empty successful API response as absence.
+- name: "Check PVE directly for API-hidden VMID {{ vm_id }}"
+  when: vm_info.proxmox_vms | length == 0
+  delegate_to: "{{ pve_ssh_host }}"
+  ansible.builtin.command:
+    argv:
+      - qm
+      - status
+      - "{{ vm_id | string }}"
+  register: hidden_vm_probe
+  check_mode: false
+  changed_when: false
+  failed_when: false
 
-    # v5: exact-line match. Rocky's per-file CHECKSUM is BSD-style:
-    #   SHA256 (Rocky-10-GenericCloud-Base-10.2-....qcow2) = <hash>
-    # The v4 `grep -q "$got" CHECKSUM` matched the hash ANYWHERE in the
-    # aggregate file — any artifact's hash would have passed. This parses the
-    # hash for exactly our filename and compares. (Authenticity, not just
-    # integrity: optionally gpg --verify {{ rocky_checksum_url }}.asc.)
-    - name: Verify sha256 against the exact CHECKSUM line and stamp it
-      when: not img_stamp.stat.exists
-      ansible.builtin.shell:
-        cmd: |
-          set -euo pipefail
-          cd "{{ pve_image_dir }}"
-          img="{{ rocky_image_name }}"
-          want=$(awk -v f="($img)" '$1=="SHA256" && $2==f {print $4}' "$img.CHECKSUM")
-          [ -n "$want" ] || { echo "FATAL: no SHA256 line for $img in its CHECKSUM"; exit 1; }
-          got=$(sha256sum "$img" | awk '{print $1}')
-          [ "$got" = "$want" ] || { echo "CHECKSUM MISMATCH: got=$got want=$want"; exit 1; }
-          echo "$got  {{ pve_image_dir }}/$img" > "$img.sha256"
-        executable: /bin/bash
-      changed_when: true
+- name: Refuse an existing VM hidden from the API token
+  when:
+    - vm_info.proxmox_vms | length == 0
+    - hidden_vm_probe.rc == 0
+  ansible.builtin.fail:
+    msg: >-
+      VMID {{ vm_id }} already exists on {{ pve_ssh_host }} but is hidden from
+      the scoped API token. Move it into pool {{ pve_vm_pool }} or correct the
+      token ACL; this role will not create over it.
 
-- name: "Render cloud-init snippet for {{ vm_name }} onto the PVE host"
-  delegate_to: "{{ pve_ssh_host | default('root@192.168.1.10') }}"
+- name: Validate the direct absent-VM result
+  when: vm_info.proxmox_vms | length == 0
+  ansible.builtin.assert:
+    that:
+      - hidden_vm_probe.rc != 0
+      - >-
+        ((hidden_vm_probe.stdout | default('')) ~ ' ' ~
+        (hidden_vm_probe.stderr | default(''))) is
+        search("(?i)(configuration file .*qemu-server/" ~
+        (vm_id | string) ~ "\\.conf.*does not exist|unable to find " ~
+        "configuration file .*qemu-server/" ~ (vm_id | string) ~
+        "\\.conf)")
+    fail_msg: >-
+      qm status could not prove VMID {{ vm_id }} absent. Its failure may be an
+      SSH, permission, or PVE error, so provisioning stopped safely.
+
+- name: Record API-visible VM state
+  ansible.builtin.set_fact:
+    pve_vm_exists: "{{ vm_info.proxmox_vms | length == 1 }}"
+
+- name: Record existing VM data
+  when: pve_vm_exists
+  ansible.builtin.set_fact:
+    pve_existing_vm: "{{ vm_info.proxmox_vms[0] }}"
+
+- name: Assert existing VM is a QEMU VM with API configuration
+  when: pve_vm_exists
+  ansible.builtin.assert:
+    that:
+      - pve_existing_vm.type == 'qemu'
+      - pve_existing_vm.config is defined
+      - pve_existing_vm.config is mapping
+    fail_msg: >-
+      VMID {{ vm_id }} exists but is not an inspectable QEMU VM. Provisioning
+      stopped before making changes.
+
+- name: Record existing VM configuration
+  when: pve_vm_exists
+  ansible.builtin.set_fact:
+    pve_existing_config: "{{ pve_existing_vm.config }}"
+
+- name: Assert immutable identity and base configuration of existing VM
+  when: pve_vm_exists
+  ansible.builtin.assert:
+    that:
+      - pve_existing_vm.vmid | int == vm_id | int
+      - pve_existing_vm.name == vm_name
+      - pve_existing_vm.node == pve_node
+      - pve_existing_vm.pool | default('') == pve_vm_pool
+      - pve_existing_config.name | default(pve_existing_vm.name) == vm_name
+      - pve_existing_config.net0 is defined
+      - >-
+        pve_existing_config.net0 is
+        search('(^|,)bridge=' ~ (pve_bridge | regex_escape) ~ '(,|$)')
+      - pve_existing_config.ide2 is defined
+      - pve_existing_config.ide2 is match('^' ~ (pve_storage | regex_escape) ~ ':')
+      - "'cloudinit' in pve_existing_config.ide2"
+      - pve_existing_config.ide2 is search('(^|,)media=cdrom(,|$)')
+    fail_msg: >-
+      Existing VM {{ vm_id }} does not match its inventory identity, pool,
+      bridge, or cloud-init storage. Correct it in a maintenance window; the
+      role will not rewrite these immutable settings automatically.
+
+- name: Assert existing EFI disk storage is correct
+  when:
+    - pve_vm_exists
+    - pve_existing_config.efidisk0 is defined
+  ansible.builtin.assert:
+    that:
+      - pve_existing_config.efidisk0 is match('^' ~ (pve_storage | regex_escape) ~ ':')
+    fail_msg: >-
+      VM {{ vm_id }} efidisk0 is not on {{ pve_storage }}. Automatic disk
+      movement is prohibited; move it manually during maintenance.
+
+- name: Assert existing boot disk storage is correct
+  when:
+    - pve_vm_exists
+    - pve_existing_config.scsi0 is defined
+  ansible.builtin.assert:
+    that:
+      - pve_existing_config.scsi0 is match('^' ~ (pve_storage | regex_escape) ~ ':')
+    fail_msg: >-
+      VM {{ vm_id }} scsi0 is not on {{ pve_storage }}. Automatic disk
+      replacement or movement is prohibited; correct it during maintenance.
+
+- name: Record detached volumes on an existing partial VM
+  when: pve_vm_exists
+  ansible.builtin.set_fact:
+    pve_initial_unused_volumes: >-
+      {{ pve_existing_config.keys() |
+         select('match', '^unused[0-9]+$') | list }}
+
+- name: Refuse cache or VM writes for an ambiguous partial import
+  when:
+    - pve_vm_exists
+    - >-
+      pve_existing_config.efidisk0 is not defined or
+      pve_existing_config.scsi0 is not defined
+  ansible.builtin.assert:
+    that:
+      - pve_initial_unused_volumes | length == 0
+    fail_msg: >-
+      VM {{ vm_id }} is missing efidisk0 or scsi0 but has detached volumes:
+      {{ pve_initial_unused_volumes | join(', ') }}. Resolve the interrupted
+      import manually before this role writes the image cache or VM state.
+
+- name: Download or revalidate the pinned Rocky image before disk import
+  when: >-
+    not pve_vm_exists or
+    (pve_existing_config | default({})).scsi0 is not defined
+  delegate_to: "{{ pve_ssh_host }}"
+  ansible.builtin.get_url:
+    url: "{{ rocky_image_url }}"
+    dest: "{{ pve_image_dir }}/{{ rocky_image_name }}"
+    checksum: "sha256:{{ rocky_image_sha256 | lower }}"
+    mode: "0644"
+
+- name: Read the actual Rocky image checksum before disk import
+  when: >-
+    not pve_vm_exists or
+    (pve_existing_config | default({})).scsi0 is not defined
+  delegate_to: "{{ pve_ssh_host }}"
+  ansible.builtin.stat:
+    path: "{{ pve_image_dir }}/{{ rocky_image_name }}"
+    checksum_algorithm: sha256
+  register: rocky_image_stat
+
+- name: Assert the disk-import image matches the Git-pinned checksum
+  when:
+    - >-
+      not pve_vm_exists or
+      (pve_existing_config | default({})).scsi0 is not defined
+    - not ansible_check_mode or rocky_image_stat.stat.exists
+  ansible.builtin.assert:
+    that:
+      - rocky_image_stat.stat.exists
+      - rocky_image_stat.stat.isreg
+      - rocky_image_stat.stat.checksum == (rocky_image_sha256 | lower)
+    fail_msg: >-
+      The cached Rocky image does not match rocky_image_sha256. Remove only
+      that image after investigating, then rerun so get_url can fetch it.
+
+- name: "Render cloud-init snippet for validated VM {{ vm_name }}"
+  delegate_to: "{{ pve_ssh_host }}"
   ansible.builtin.template:
     src: user-data.yaml.j2
     dest: "{{ pve_snippet_dir }}/{{ vm_name }}-user.yaml"
     mode: "0644"
 
-# Does the VM already exist? If so, creation is skipped (create-once).
-- name: "Check whether VM {{ vm_id }} already exists"
+- name: "Create VM {{ vm_id }} ({{ vm_name }}) base configuration"
+  when:
+    - not pve_vm_exists
+    - not ansible_check_mode
   community.proxmox.proxmox_kvm:
-    api_host:         "{{ pve_api_host }}"
-    api_user:         "{{ vault_pve_token_id.split('!')[0] }}"
-    api_token_id:     "{{ vault_pve_token_id.split('!')[1] }}"
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ vault_pve_token_id.split('!')[0] }}"
+    api_token_id: "{{ vault_pve_token_id.split('!')[1] }}"
     api_token_secret: "{{ vault_pve_token_secret }}"
-    validate_certs:   "{{ pve_validate_certs | default(false) }}"
-    node:             "{{ pve_node }}"
-    vmid:             "{{ vm_id }}"
-    state:            current
-  register: vm_current
-  failed_when: false
-  changed_when: false
-
-# Create the shell of the VM (everything declarative EXCEPT the imported boot
-# disk + EFI disk, which the module handles poorly across 5.x builds). Those
-# two run via `qm` over SSH — the reliable path.
-- name: "Create VM {{ vm_id }} ({{ vm_name }}) — declarative config"
-  when: vm_current.status is not defined
-  community.proxmox.proxmox_kvm:
-    api_host:         "{{ pve_api_host }}"
-    api_user:         "{{ vault_pve_token_id.split('!')[0] }}"
-    api_token_id:     "{{ vault_pve_token_id.split('!')[1] }}"
-    api_token_secret: "{{ vault_pve_token_secret }}"
-    validate_certs:   "{{ pve_validate_certs | default(false) }}"
-    node:             "{{ pve_node }}"
-    vmid:             "{{ vm_id }}"
-    name:             "{{ vm_name }}"
-    pool:             "{{ pve_vm_pool | default(omit) }}"
-    ostype:           l26
-    machine:          q35
-    bios:             ovmf
-    cpu:              "{{ pve_cpu_type }}"
-    cores:            "{{ vm_cores }}"
-    memory:           "{{ vm_memory }}"
-    balloon:          0
-    scsihw:           virtio-scsi-single
-    agent:            "enabled=1,fstrim_cloned_disks=1"
-    # community.proxmox >= 1.x takes serial ports as a dict, not serial0=
+    validate_certs: "{{ pve_validate_certs | default(true) }}"
+    node: "{{ pve_node }}"
+    vmid: "{{ vm_id }}"
+    name: "{{ vm_name }}"
+    pool: "{{ pve_vm_pool }}"
+    ostype: l26
+    machine: q35
+    bios: ovmf
+    cpu: "{{ pve_cpu_type }}"
+    cores: "{{ vm_cores }}"
+    memory: "{{ vm_memory }}"
+    balloon: 0
+    scsihw: virtio-scsi-single
+    agent: "enabled=1,fstrim_cloned_disks=1"
     serial:
-      serial0:        socket
-    vga:              serial0
+      serial0: socket
+    vga: serial0
     net:
       net0: "virtio,bridge={{ pve_bridge }}"
     ide:
       ide2: "{{ pve_storage }}:cloudinit"
-    ciuser:           "{{ admin_user }}"
-    nameservers:      "{{ lan_dns }}"
-    searchdomains:    "{{ search_domain }}"
+    ciuser: "{{ admin_user }}"
+    nameservers: "{{ lan_dns }}"
+    searchdomains: "{{ search_domain }}"
     ipconfig:
-      ipconfig0: "ip={{ vm_ip }}/24,gw={{ lan_gateway }}"
-    cicustom:         "user={{ pve_snippet_storage }}:snippets/{{ vm_name }}-user.yaml"
-    onboot:           true
-    startup:          "{{ vm_startup }}"
-    state:            present
-  register: vm_created
+      ipconfig0: >-
+        ip={{ hostvars[vm_name].ansible_host }}/24,gw={{ lan_gateway }}
+    cicustom: >-
+      user={{ pve_snippet_storage }}:snippets/{{ vm_name }}-user.yaml
+    onboot: true
+    startup: "{{ vm_startup }}"
+    state: present
+  no_log: true
+  diff: false
 
-# v5: explicit day-two reconcile of the cheap-to-change knobs. Opt-in only.
-# NOTE: on a RUNNING VM, cores/memory land as *pending* config and apply at
-# the next guest power-cycle (balloon=0, no hotplug configured) — the task
-# reports changed; `qm pending {{ vm_id }}` on thurgadin shows what's queued.
-- name: "Reconcile VM {{ vm_id }} shape from host_vars (opt-in)"
+- name: Report absent VM creation during check mode
   when:
-    - vm_current.status is defined
-    - pve_reconcile | default(false) | bool
-  community.proxmox.proxmox_kvm:
-    api_host:         "{{ pve_api_host }}"
-    api_user:         "{{ vault_pve_token_id.split('!')[0] }}"
-    api_token_id:     "{{ vault_pve_token_id.split('!')[1] }}"
-    api_token_secret: "{{ vault_pve_token_secret }}"
-    validate_certs:   "{{ pve_validate_certs | default(false) }}"
-    node:             "{{ pve_node }}"
-    vmid:             "{{ vm_id }}"
-    name:             "{{ vm_name }}"
-    cores:            "{{ vm_cores }}"
-    memory:           "{{ vm_memory }}"
-    onboot:           true
-    startup:          "{{ vm_startup }}"
-    update:           true
-
-- name: "Attach EFI disk, import boot disk, size + boot order (qm, first create only)"
-  when: vm_current.status is not defined
-  delegate_to: "{{ pve_ssh_host | default('root@192.168.1.10') }}"
-  ansible.builtin.shell:
-    cmd: |
-      set -euo pipefail
-      # EFI vars disk; pre-enrolled-keys=0 => Secure Boot off
-      qm set {{ vm_id }} --efidisk0 {{ pve_storage }}:1,efitype=4m,pre-enrolled-keys=0
-      # Import the verified cloud image as scsi0, discard + iothread
-      qm set {{ vm_id }} --scsi0 {{ pve_storage }}:0,import-from={{ pve_image_dir }}/{{ rocky_image_name }},discard=on,iothread=1
-      qm set {{ vm_id }} --boot order=scsi0
-      qm disk resize {{ vm_id }} scsi0 {{ vm_disk_gb }}G
-    executable: /bin/bash
+    - not pve_vm_exists
+    - ansible_check_mode
+  ansible.builtin.debug:
+    msg: >-
+      VM {{ vm_id }} is safely absent and would be created. Disk postcondition
+      checks are deferred because check mode does not mutate Proxmox.
   changed_when: true
 
-- name: "Start VM {{ vm_id }}"
-  community.proxmox.proxmox_kvm:
-    api_host:         "{{ pve_api_host }}"
-    api_user:         "{{ vault_pve_token_id.split('!')[0] }}"
-    api_token_id:     "{{ vault_pve_token_id.split('!')[1] }}"
-    api_token_secret: "{{ vault_pve_token_secret }}"
-    validate_certs:   "{{ pve_validate_certs | default(false) }}"
-    node:             "{{ pve_node }}"
-    vmid:             "{{ vm_id }}"
-    state:            started
+- name: End absent-VM check-mode evaluation before post-mutation checks
+  when:
+    - not pve_vm_exists
+    - ansible_check_mode
+  ansible.builtin.meta: end_role
 
-- name: "Wait for {{ vm_name }} SSH to answer (cloud-init still running)"
+- name: "Reconcile VM {{ vm_id }} shape from inventory (opt-in)"
+  when:
+    - pve_vm_exists
+    - pve_reconcile | default(false) | bool
+    - not ansible_check_mode
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ vault_pve_token_id.split('!')[0] }}"
+    api_token_id: "{{ vault_pve_token_id.split('!')[1] }}"
+    api_token_secret: "{{ vault_pve_token_secret }}"
+    validate_certs: "{{ pve_validate_certs | default(true) }}"
+    node: "{{ pve_node }}"
+    vmid: "{{ vm_id }}"
+    name: "{{ vm_name }}"
+    cores: "{{ vm_cores }}"
+    memory: "{{ vm_memory }}"
+    onboot: true
+    startup: "{{ vm_startup }}"
+    update: true
+  no_log: true
+  diff: false
+
+# Refresh after base creation so each disk operation can resume independently.
+- name: "Refresh VM {{ vm_id }} configuration before disk operations"
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ vault_pve_token_id.split('!')[0] }}"
+    api_token_id: "{{ vault_pve_token_id.split('!')[1] }}"
+    api_token_secret: "{{ vault_pve_token_secret }}"
+    validate_certs: "{{ pve_validate_certs | default(true) }}"
+    type: qemu
+    vmid: "{{ vm_id }}"
+    config: pending
+  register: vm_disk_info
+  no_log: true
+  diff: false
+
+- name: Assert VM is API-visible before disk operations
+  ansible.builtin.assert:
+    that:
+      - vm_disk_info.proxmox_vms is defined
+      - vm_disk_info.proxmox_vms | type_debug == 'list'
+      - vm_disk_info.proxmox_vms | length == 1
+      - vm_disk_info.proxmox_vms[0].node == pve_node
+      - vm_disk_info.proxmox_vms[0].config is defined
+      - vm_disk_info.proxmox_vms[0].config is mapping
+    fail_msg: >-
+      VM {{ vm_id }} was not visible after base creation. Disk operations were
+      not attempted.
+
+- name: Record current disk configuration
+  ansible.builtin.set_fact:
+    pve_disk_config: "{{ vm_disk_info.proxmox_vms[0].config }}"
+
+- name: Record detached volumes and pending disk operations
+  ansible.builtin.set_fact:
+    pve_unused_volumes: >-
+      {{ pve_disk_config.keys() |
+         select('match', '^unused[0-9]+$') | list }}
+    pve_boot_order_valid: >-
+      {{ pve_disk_config.boot is defined and
+         (pve_disk_config.boot is match('^(order=)?scsi0([;,]|$)')) }}
+
+- name: Refuse to allocate over a detached partial-import volume
+  when: >-
+    pve_disk_config.efidisk0 is not defined or
+    pve_disk_config.scsi0 is not defined
+  ansible.builtin.assert:
+    that:
+      - pve_unused_volumes | length == 0
+    fail_msg: >-
+      VM {{ vm_id }} is missing efidisk0 or scsi0 but has detached volumes:
+      {{ pve_unused_volumes | join(', ') }}. An interrupted import may own
+      those volumes. Reattach or remove them manually during maintenance;
+      the role will not allocate another disk.
+
+- name: Record whether disk mutations are required
+  ansible.builtin.set_fact:
+    pve_disk_mutation_required: >-
+      {{ pve_disk_config.efidisk0 is not defined or
+         pve_disk_config.scsi0 is not defined or
+         not pve_boot_order_valid }}
+
+- name: Report partial disk completion during check mode
+  when:
+    - ansible_check_mode
+    - pve_disk_mutation_required
+  ansible.builtin.debug:
+    msg: >-
+      VM {{ vm_id }} requires a missing EFI disk, missing scsi0 import, or
+      scsi0-first boot order. Check mode made no changes; post-mutation checks
+      are deferred.
+  changed_when: true
+
+- name: End partial-VM check-mode evaluation before post-mutation checks
+  when:
+    - ansible_check_mode
+    - pve_disk_mutation_required
+  ansible.builtin.meta: end_role
+
+- name: "Attach missing EFI disk to VM {{ vm_id }}"
+  when:
+    - not ansible_check_mode
+    - pve_disk_config.efidisk0 is not defined
+  delegate_to: "{{ pve_ssh_host }}"
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ vm_id | string }}"
+      - --efidisk0
+      - "{{ pve_storage }}:1,efitype=4m,pre-enrolled-keys=0"
+  register: pve_efi_attached
+  changed_when: true
+
+- name: "Import missing scsi0 boot disk for VM {{ vm_id }}"
+  when:
+    - not ansible_check_mode
+    - pve_disk_config.scsi0 is not defined
+  delegate_to: "{{ pve_ssh_host }}"
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ vm_id | string }}"
+      - --scsi0
+      - >-
+        {{ pve_storage }}:0,import-from={{ pve_image_dir }}/{{ rocky_image_name }},discard=on,iothread=1
+  register: pve_scsi_imported
+  changed_when: true
+
+- name: "Set resumable scsi0 boot order for VM {{ vm_id }}"
+  when:
+    - not ansible_check_mode
+    - not pve_boot_order_valid
+  delegate_to: "{{ pve_ssh_host }}"
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ vm_id | string }}"
+      - --boot
+      - order=scsi0
+  register: pve_boot_order_set
+  changed_when: true
+
+- name: "Refresh VM {{ vm_id }} configuration before safe resize"
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ vault_pve_token_id.split('!')[0] }}"
+    api_token_id: "{{ vault_pve_token_id.split('!')[1] }}"
+    api_token_secret: "{{ vault_pve_token_secret }}"
+    validate_certs: "{{ pve_validate_certs | default(true) }}"
+    type: qemu
+    vmid: "{{ vm_id }}"
+    config: pending
+  register: vm_resize_info
+  no_log: true
+  diff: false
+
+- name: Assert boot disk and boot order are ready
+  ansible.builtin.assert:
+    that:
+      - vm_resize_info.proxmox_vms is defined
+      - vm_resize_info.proxmox_vms | type_debug == 'list'
+      - vm_resize_info.proxmox_vms | length == 1
+      - vm_resize_info.proxmox_vms[0].config is defined
+      - vm_resize_info.proxmox_vms[0].config is mapping
+      - vm_resize_info.proxmox_vms[0].name == vm_name
+      - vm_resize_info.proxmox_vms[0].node == pve_node
+      - vm_resize_info.proxmox_vms[0].pool | default('') == pve_vm_pool
+      - vm_resize_info.proxmox_vms[0].config.net0 is defined
+      - >-
+        vm_resize_info.proxmox_vms[0].config.net0 is
+        search('(^|,)bridge=' ~ (pve_bridge | regex_escape) ~ '(,|$)')
+      - vm_resize_info.proxmox_vms[0].config.ide2 is defined
+      - >-
+        vm_resize_info.proxmox_vms[0].config.ide2 is
+        match('^' ~ (pve_storage | regex_escape) ~ ':')
+      - "'cloudinit' in vm_resize_info.proxmox_vms[0].config.ide2"
+      - >-
+        vm_resize_info.proxmox_vms[0].config.ide2 is
+        search('(^|,)media=cdrom(,|$)')
+      - vm_resize_info.proxmox_vms[0].config.efidisk0 is defined
+      - >-
+        vm_resize_info.proxmox_vms[0].config.efidisk0 is
+        match('^' ~ (pve_storage | regex_escape) ~ ':')
+      - vm_resize_info.proxmox_vms[0].config.scsi0 is defined
+      - >-
+        vm_resize_info.proxmox_vms[0].config.scsi0 is
+        match('^' ~ (pve_storage | regex_escape) ~ ':')
+      - vm_resize_info.proxmox_vms[0].config.boot is defined
+      - >-
+        vm_resize_info.proxmox_vms[0].config.boot is
+        match('^(order=)?scsi0([;,]|$)')
+      - >-
+        vm_resize_info.proxmox_vms[0].config.scsi0 is
+        search('(^|,)size=[0-9]+([.][0-9]+)?[KkMmGgTt](,|$)')
+    fail_msg: >-
+      VM {{ vm_id }} identity, pool, bridge, cloud-init disk, EFI disk, boot
+      disk, boot order, or size does not match inventory. No resize was
+      attempted; correct mismatched storage only during maintenance.
+
+- name: Extract current scsi0 size
+  ansible.builtin.set_fact:
+    pve_scsi0_size_matches: >-
+      {{ vm_resize_info.proxmox_vms[0].config.scsi0 |
+         regex_findall('(?:^|(?<=,))size=([0-9]+(?:[.][0-9]+)?[KkMmGgTt])(?=,|$)') }}
+    pve_size_unit_bytes:
+      K: 1024
+      M: 1048576
+      G: 1073741824
+      T: 1099511627776
+
+- name: Assert scsi0 has exactly one supported size
+  ansible.builtin.assert:
+    that:
+      - pve_scsi0_size_matches | length == 1
+    fail_msg: >-
+      VM {{ vm_id }} scsi0 does not expose exactly one K/M/G/T size. No resize
+      was attempted; inspect the Proxmox configuration manually.
+
+- name: Convert current and requested scsi0 sizes to bytes
+  ansible.builtin.set_fact:
+    pve_scsi0_size_text: "{{ pve_scsi0_size_matches[0] }}"
+    pve_scsi0_size_bytes: >-
+      {{ ((pve_scsi0_size_matches[0][:-1] | float) *
+          pve_size_unit_bytes[(pve_scsi0_size_matches[0][-1] | upper)]) | int }}
+    pve_requested_size_bytes: "{{ (vm_disk_gb | int) * 1073741824 }}"
+
+- name: Refuse to shrink an existing boot disk
+  ansible.builtin.assert:
+    that:
+      - pve_scsi0_size_bytes | int <= pve_requested_size_bytes | int
+    fail_msg: >-
+      VM {{ vm_id }} scsi0 is {{ pve_scsi0_size_text }}, larger than the
+      requested {{ vm_disk_gb }}G. Automatic disk shrinking is prohibited;
+      reconcile inventory or handle this manually during maintenance.
+
+- name: Report boot disk growth during check mode
+  when:
+    - ansible_check_mode
+    - pve_scsi0_size_bytes | int < pve_requested_size_bytes | int
+  ansible.builtin.debug:
+    msg: >-
+      VM {{ vm_id }} scsi0 would grow from {{ pve_scsi0_size_text }} to
+      {{ vm_disk_gb }}G. Post-resize checks are deferred because check mode
+      does not mutate Proxmox.
+  changed_when: true
+
+- name: "Grow VM {{ vm_id }} scsi0 to {{ vm_disk_gb }}G"
+  when:
+    - not ansible_check_mode
+    - pve_scsi0_size_bytes | int < pve_requested_size_bytes | int
+  delegate_to: "{{ pve_ssh_host }}"
+  ansible.builtin.command:
+    argv:
+      - qm
+      - disk
+      - resize
+      - "{{ vm_id | string }}"
+      - scsi0
+      - "{{ vm_disk_gb }}G"
+  register: pve_scsi_resized
+  changed_when: true
+
+- name: "Read final VM {{ vm_id }} configuration"
+  when: not ansible_check_mode
+  community.proxmox.proxmox_vm_info:
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ vault_pve_token_id.split('!')[0] }}"
+    api_token_id: "{{ vault_pve_token_id.split('!')[1] }}"
+    api_token_secret: "{{ vault_pve_token_secret }}"
+    validate_certs: "{{ pve_validate_certs | default(true) }}"
+    type: qemu
+    vmid: "{{ vm_id }}"
+    config: pending
+  register: vm_final_info
+  no_log: true
+  diff: false
+
+- name: Assert final VM configuration is inspectable
+  when: not ansible_check_mode
+  ansible.builtin.assert:
+    that:
+      - vm_final_info.proxmox_vms is defined
+      - vm_final_info.proxmox_vms | type_debug == 'list'
+      - vm_final_info.proxmox_vms | length == 1
+      - vm_final_info.proxmox_vms[0].node == pve_node
+      - vm_final_info.proxmox_vms[0].config is defined
+      - vm_final_info.proxmox_vms[0].config is mapping
+      - vm_final_info.proxmox_vms[0].config.scsi0 is defined
+      - >-
+        vm_final_info.proxmox_vms[0].config.scsi0 is
+        match('^' ~ (pve_storage | regex_escape) ~ ':')
+    fail_msg: >-
+      VM {{ vm_id }} could not be inspected after disk operations.
+
+- name: Extract final scsi0 size
+  when: not ansible_check_mode
+  ansible.builtin.set_fact:
+    pve_final_size_matches: >-
+      {{ vm_final_info.proxmox_vms[0].config.scsi0 |
+         regex_findall('(?:^|(?<=,))size=([0-9]+(?:[.][0-9]+)?[KkMmGgTt])(?=,|$)') }}
+
+- name: Assert final scsi0 size is inspectable
+  when: not ansible_check_mode
+  ansible.builtin.assert:
+    that:
+      - pve_final_size_matches | length == 1
+    fail_msg: >-
+      VM {{ vm_id }} scsi0 size is missing or unsupported after disk
+      operations.
+
+- name: Convert final scsi0 size to bytes
+  when: not ansible_check_mode
+  ansible.builtin.set_fact:
+    pve_final_size_bytes: >-
+      {{ ((pve_final_size_matches[0][:-1] | float) *
+          pve_size_unit_bytes[(pve_final_size_matches[0][-1] | upper)]) | int }}
+
+- name: Assert final scsi0 size matches inventory
+  when: not ansible_check_mode
+  ansible.builtin.assert:
+    that:
+      - pve_final_size_bytes | int == pve_requested_size_bytes | int
+    fail_msg: >-
+      VM {{ vm_id }} scsi0 did not converge to {{ vm_disk_gb }}G. Inspect it
+      manually; the role will never replace or shrink the disk.
+
+- name: "Start VM {{ vm_id }}"
+  when: not ansible_check_mode
+  community.proxmox.proxmox_kvm:
+    api_host: "{{ pve_api_host }}"
+    api_user: "{{ vault_pve_token_id.split('!')[0] }}"
+    api_token_id: "{{ vault_pve_token_id.split('!')[1] }}"
+    api_token_secret: "{{ vault_pve_token_secret }}"
+    validate_certs: "{{ pve_validate_certs | default(true) }}"
+    node: "{{ pve_node }}"
+    vmid: "{{ vm_id }}"
+    state: started
+  no_log: true
+  diff: false
+
+- name: "Wait for {{ vm_name }} SSH to answer"
+  when: not ansible_check_mode
   ansible.builtin.wait_for:
-    host: "{{ vm_ip }}"
+    host: "{{ hostvars[vm_name].ansible_host }}"
     port: 22
     delay: 15
     timeout: 300

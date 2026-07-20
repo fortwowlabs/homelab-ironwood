@@ -27,10 +27,14 @@
         name: leak-canary.timer
         state: stopped
 
-    - name: Stop any in-flight canary check before the intentional outage
-      ansible.builtin.systemd:
-        name: leak-canary.service
-        state: stopped
+    - name: Wait for any in-flight canary check before the intentional outage
+      ansible.builtin.command: systemctl is-active leak-canary.service
+      register: download_pre_drill_canary_service_state
+      changed_when: false
+      failed_when: download_pre_drill_canary_service_state.rc not in [0, 3]
+      retries: 6
+      delay: 5
+      until: download_pre_drill_canary_service_state.rc == 3
 
     - name: Check that no leak flag exists before the drill
       ansible.builtin.stat:

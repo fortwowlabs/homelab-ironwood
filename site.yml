@@ -41,7 +41,6 @@
             vm_cores:   "{{ hostvars[item].vm_cores }}"
             vm_memory:  "{{ hostvars[item].vm_memory }}"
             vm_disk_gb: "{{ hostvars[item].vm_disk_gb }}"
-            vm_ip:      "{{ hostvars[item].ansible_host }}"
             vm_startup: "{{ hostvars[item].vm_startup }}"
             vm_extra_packages: "{{ hostvars[item].vm_extra_packages }}"
           loop:

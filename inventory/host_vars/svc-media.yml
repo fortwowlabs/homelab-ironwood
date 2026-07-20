@@ -1,7 +1,6 @@
 ---
 # svc-media — rootless media stack (Jellyfin/ABS/RomM/Seerr) and LAN access
 vm_id:      130
-vm_name:    svc-media
 vm_cores:   4
 vm_memory:  10240
 vm_disk_gb: 100

@@ -3,15 +3,14 @@
 # crosses a capacity threshold. This is the guard that would have caught the
 # 2026-07-20 rpool-full outage BEFORE svc-download froze. Install on the PVE
 # host (thurgadin) via the systemd timer in contrib/systemd/. Never exits
-# nonzero — a failed push must not mark the unit failed.
+# nonzero for a push failure, but invalid/missing systemd configuration fails.
 set -uo pipefail
 
-# Config file: NTFY_URL, NTFY_TOPIC, THRESH, NTFY_TOKEN (optional).
-# shellcheck source=/dev/null
-[ -f /etc/homelab-diskguard.env ] && . /etc/homelab-diskguard.env
+# Loaded by homelab-diskguard.service from its root-owned environment file:
+# NTFY_URL, NTFY_TOPIC, THRESH, and optional NTFY_TOKEN.
 THRESH="${THRESH:-85}"
-NTFY_URL="${NTFY_URL:-http://192.168.1.30:8080}"
-NTFY_TOPIC="${NTFY_TOPIC:-homelab-deploy}"
+: "${NTFY_URL:?set NTFY_URL in /etc/homelab-diskguard.env from the svc-media inventory address}"
+: "${NTFY_TOPIC:?set NTFY_TOPIC in /etc/homelab-diskguard.env}"
 host=$(hostname -s)
 
 over=""

@@ -47,7 +47,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 
 .PHONY: help deps deps-dev validate validate-tools validate-syntax \
 	validate-ansible validate-yaml validate-shell validate-links \
-	validate-catalog validate-secrets validate-ci preflight deploy dl media \
+	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media \
 	check check-diff verify verify-disruptive drift reconcile access ping lint \
 	vault-edit clean
 
@@ -63,7 +63,7 @@ deps: ## Create .venv and install the pinned runtime and Ansible collections
 deps-dev: deps ## Install pinned validation dependencies as well
 	$(VENV)/bin/python -m pip install --requirement requirements-dev.txt
 
-validate: validate-tools validate-syntax validate-ansible validate-yaml validate-shell validate-links validate-catalog validate-secrets validate-ci ## Run every offline validation gate
+validate: validate-tools validate-syntax validate-ansible validate-yaml validate-shell validate-links validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci ## Run every offline validation gate
 
 validate-tools:
 	@mkdir -p .ansible/tmp .ansible/cache
@@ -94,6 +94,12 @@ validate-links:
 validate-catalog:
 	$(PYTHON) tests/validate_catalog.py
 	$(PYTHON) tests/validate_generated_catalog.py
+
+validate-provisioning:
+	$(PYTHON) tests/validate_pve_states.py
+
+validate-systemd:
+	$(PYTHON) tests/validate_systemd_units.py
 
 validate-secrets:
 	$(PYTHON) tests/validate_secrets.py

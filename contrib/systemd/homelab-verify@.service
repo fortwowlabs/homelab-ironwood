@@ -5,7 +5,6 @@
 Description=homelab-iac non-disruptive verification for %i
 Wants=network-online.target
 After=network-online.target
-ConditionOS=linux
 ConditionPathIsDirectory=/opt/homelab-iac/.venv
 
 [Service]

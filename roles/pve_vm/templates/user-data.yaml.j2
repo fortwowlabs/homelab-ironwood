@@ -43,7 +43,7 @@ packages:
 
 runcmd:
   - systemctl enable --now qemu-guest-agent
-  # cloud-init 'groups' can't set a gid; enforce 10001 explicitly.
+  # cloud-init 'groups' cannot set a gid; enforce the catalogued gid.
   - [ sh, -c, "groupmod -g {{ svc_gid }} homelab && usermod -g {{ svc_gid }} homelab || true" ]
   - loginctl enable-linger homelab || true
 

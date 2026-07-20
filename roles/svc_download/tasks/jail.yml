@@ -7,12 +7,24 @@
     cmd: "grep -q 'define LAN_ADMIN = {{ lan_cidr }}' /etc/nftables/host-backstop.nft"
   changed_when: false
 
-- name: Disable firewalld because nftables owns both directions
+- name: Inspect optional firewalld unit state
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - show
+      - firewalld.service
+      - --property=LoadState
+      - --value
+  register: download_firewalld_load_state
+  changed_when: false
+  check_mode: false
+
+- name: Disable firewalld when installed because nftables owns both directions
+  when: download_firewalld_load_state.stdout != 'not-found'
   ansible.builtin.systemd:
     name: firewalld
     enabled: false
     state: stopped
-  failed_when: false
 
 - name: Populate Mullvad endpoint sets and load the backstop
   ansible.builtin.command: /usr/local/sbin/refresh-mullvad-endpoints.sh
@@ -37,6 +49,12 @@
   register: download_nft_input
   changed_when: false
   failed_when: "'dport 22 accept' not in (download_nft_input.stdout | regex_replace('\\s+', ' '))"
+
+- name: Verify firewalld cannot compete with the nftables backstop
+  ansible.builtin.command: systemctl is-active firewalld.service
+  register: download_firewalld_active_state
+  changed_when: false
+  failed_when: download_firewalld_active_state.rc not in [3, 4]
 
 - name: Bring up the VPN namespace
   ansible.builtin.systemd:

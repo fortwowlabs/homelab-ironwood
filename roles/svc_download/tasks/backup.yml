@@ -1,7 +1,48 @@
 ---
+- name: Ensure the download backup directory exists as the service UID
+  ansible.builtin.command:
+    argv:
+      - setpriv
+      - "--reuid={{ svc_uid }}"
+      - "--regid={{ svc_gid }}"
+      - --clear-groups
+      - --
+      - mkdir
+      - -p
+      - /srv/backups/svc-download
+    creates: /srv/backups/svc-download
+
 - name: Arm nightly download appdata backup
   ansible.builtin.systemd:
     name: backup-dl-appdata.timer
     enabled: true
     state: started
     daemon_reload: true
+
+- name: Check for fresh nonempty catalog backup artifacts
+  ansible.builtin.shell: |
+    set -euo pipefail
+    [[ -d /srv/backups/svc-download ]] || exit 0
+    find /srv/backups/svc-download -maxdepth 1 -type f -size +0c -mtime -2 \
+      -name {{ (item ~ '-*.tar.gz') | quote }} -print -quit
+  args:
+    executable: /bin/bash
+  loop: >-
+    {{ download_apps | dict2items | map(attribute='value.backup_paths')
+       | list | flatten | unique | list }}
+  loop_control:
+    label: "{{ item }}"
+  register: download_backup_artifacts_before
+  changed_when: false
+  check_mode: false
+
+- name: Produce an initial download backup when any catalog artifact is absent
+  ansible.builtin.systemd:
+    name: backup-dl-appdata.service
+    state: started
+  when:
+    - not ansible_check_mode
+    - >-
+      download_backup_artifacts_before.results
+      | selectattr('stdout', 'equalto', '') | list | length > 0
+  changed_when: true

@@ -5,8 +5,33 @@
   changed_when: false
   failed_when: "'You are connected to Mullvad' not in download_mullvad_jail.stdout"
 
-- name: Verify the host remains fenced
-  ansible.builtin.command: curl -4 --max-time 5 https://ifconfig.me
+- name: Verify the strict host output policy is loaded
+  ansible.builtin.command: nft list chain inet host_backstop output
+  register: download_host_output_policy
+  changed_when: false
+  failed_when: >-
+    'policy drop' not in
+    (download_host_output_policy.stdout | regex_replace('\\s+', ' '))
+
+- name: Verify firewalld remains inactive beside the nftables owner
+  ansible.builtin.command: systemctl is-active firewalld.service
+  register: download_verify_firewalld_state
+  changed_when: false
+  failed_when: download_verify_firewalld_state.rc not in [3, 4]
+
+- name: Verify numeric HTTPS egress from the host remains fenced
+  ansible.builtin.command:
+    argv:
+      - curl
+      - -4
+      - --insecure
+      - --silent
+      - --show-error
+      - --output
+      - /dev/null
+      - --max-time
+      - "5"
+      - https://1.1.1.1/
   register: download_host_egress
   changed_when: false
   failed_when: download_host_egress.rc == 0
@@ -54,6 +79,49 @@
   changed_when: false
   no_log: true
   diff: false
+
+- name: Find fresh nonempty catalog backup artifacts
+  ansible.builtin.command:
+    argv:
+      - find
+      - /srv/backups/svc-download
+      - -maxdepth
+      - "1"
+      - -type
+      - f
+      - -size
+      - +0c
+      - -mtime
+      - "-2"
+      - -name
+      - "{{ item }}-*.tar.gz"
+      - -print
+      - -quit
+  loop: >-
+    {{ download_apps | dict2items | map(attribute='value.backup_paths')
+       | list | flatten | unique | list }}
+  loop_control:
+    label: "{{ item }}"
+  register: download_backup_artifact_gates
+  changed_when: false
+
+- name: Assert every catalog backup artifact is fresh and nonempty
+  ansible.builtin.assert:
+    that:
+      - >-
+        download_backup_artifact_gates.results
+        | selectattr('stdout', 'equalto', '') | list | length == 0
+    fail_msg: >-
+      A fresh nonempty download appdata backup is missing. Inspect
+      backup-dl-appdata.service and the NFS backup mount.
+
+- name: Validate every catalog backup archive
+  ansible.builtin.command:
+    argv: [tar, -tzf, "{{ item.stdout }}"]
+  loop: "{{ download_backup_artifact_gates.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  changed_when: false
 
 - name: Mark download verification complete
   ansible.builtin.set_fact:

@@ -1,0 +1,45 @@
+---
+# Pull immutable catalog images before any queued VPN restart can propagate to
+# the PartOf/BindsTo application units. The maintenance helper opens egress
+# only when the strict host backstop is already active and closes it fatally.
+- name: Check catalog image availability
+  ansible.builtin.command: "podman image exists {{ item.value.image }}"
+  loop: "{{ download_apps | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: download_image_checks
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Pull missing immutable images through guarded egress
+  when:
+    - not ansible_check_mode
+    - download_image_checks.results | selectattr('rc', 'ne', 0) | list | length > 0
+  block:
+    - name: Open maintenance egress for image pulls
+      ansible.builtin.command: /usr/local/sbin/homelab-maintenance-egress open
+      register: download_image_egress_open
+      changed_when: "'opened' in download_image_egress_open.stdout"
+
+    - name: Pull missing immutable catalog images
+      ansible.builtin.command: "podman pull {{ item.item.value.image }}"
+      loop: "{{ download_image_checks.results | selectattr('rc', 'ne', 0) | list }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+      changed_when: true
+  always:
+    - name: Restore strict backstop after image pulls
+      ansible.builtin.command: /usr/local/sbin/homelab-maintenance-egress close
+      register: download_image_egress_close
+      changed_when: "'closed' in download_image_egress_close.stdout"
+
+- name: Report missing immutable images during check mode
+  when:
+    - ansible_check_mode
+    - download_image_checks.results | selectattr('rc', 'ne', 0) | list | length > 0
+  ansible.builtin.debug:
+    msg: >-
+      Missing immutable images would be pulled through the guarded maintenance
+      window before any queued service restart.
+  changed_when: true

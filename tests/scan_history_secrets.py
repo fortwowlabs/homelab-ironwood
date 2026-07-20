@@ -18,6 +18,7 @@ NON_SECRET_VAULT_KEYS = {
     "vault_mullvad_wg_addr",
     "vault_pve_token_id",
     "vault_password_file",
+    "vault_re",
 }
 SECRET_KEY_PATTERN = (
     r"(?:vault_[a-z0-9_]+|[a-z0-9_.-]*(?:password|passwd|token_secret|"

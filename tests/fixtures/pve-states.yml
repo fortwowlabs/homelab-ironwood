@@ -1,0 +1,254 @@
+---
+defaults:
+  vmid: 130
+  name: svc-media
+  node: thurgadin
+  pool: homelab-svc
+  bridge: vmbr0
+  storage: nvme0pool
+  requested_gib: 100
+  existing_vm:
+    vmid: 130
+    type: qemu
+    name: svc-media
+    node: thurgadin
+    pool: homelab-svc
+    config:
+      name: svc-media
+      net0: "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr0"
+      ide2: "nvme0pool:vm-130-cloudinit,media=cdrom,size=4M"
+      efidisk0: "nvme0pool:vm-130-disk-0,efitype=4m,size=4M"
+      scsi0: "nvme0pool:vm-130-disk-1,discard=on,size=100G"
+      boot: "order=scsi0;ide2"
+
+cases:
+  - name: api_failure
+    api_error: "401 authentication failure"
+    expect: { outcome: fatal_api, ssh_probe: false, operations: [] }
+
+  - name: malformed_api_result
+    api_result: {}
+    expect: { outcome: fatal_api, ssh_probe: false, operations: [] }
+
+  - name: duplicate_api_result
+    api_result: [{ vmid: 130 }, { vmid: 130 }]
+    expect: { outcome: fatal_api, ssh_probe: false, operations: [] }
+
+  - name: absent
+    api_result: []
+    qm:
+      rc: 2
+      stderr: "Configuration file 'nodes/thurgadin/qemu-server/130.conf' does not exist"
+    expect: { outcome: create, ssh_probe: true, operations: [create] }
+
+  - name: absent_check_mode
+    api_result: []
+    check_mode: true
+    qm:
+      rc: 2
+      stderr: "Configuration file 'nodes/thurgadin/qemu-server/130.conf' does not exist"
+    expect:
+      outcome: create
+      ssh_probe: true
+      operations: [create]
+      check_changed: true
+      postconditions_deferred: true
+
+  - name: hidden_from_token
+    api_result: []
+    qm: { rc: 0, stdout: "status: stopped" }
+    expect: { outcome: fatal_hidden, ssh_probe: true, operations: [] }
+
+  - name: ambiguous_qm_failure
+    api_result: []
+    qm: { rc: 255, stderr: "connection closed by remote host" }
+    expect: { outcome: fatal_qm, ssh_probe: true, operations: [] }
+
+  - name: unrelated_missing_configuration
+    api_result: []
+    qm:
+      rc: 2
+      stderr: "Configuration file 'nodes/thurgadin/qemu-server/999.conf' does not exist"
+    expect: { outcome: fatal_qm, ssh_probe: true, operations: [] }
+
+  - name: existing_complete
+    existing: true
+    expect: { outcome: ready, ssh_probe: false, operations: [] }
+
+  - name: partial_base_only
+    existing: true
+    remove_config: [efidisk0, scsi0, boot]
+    expect:
+      outcome: resume
+      ssh_probe: false
+      operations: [attach_efi, import_scsi0, set_boot]
+
+  - name: partial_efi_only
+    existing: true
+    remove_config: [scsi0, boot]
+    expect:
+      outcome: resume
+      ssh_probe: false
+      operations: [import_scsi0, set_boot]
+
+  - name: partial_efi_and_scsi
+    existing: true
+    remove_config: [boot]
+    expect: { outcome: resume, ssh_probe: false, operations: [set_boot] }
+
+  - name: partial_boot_configured_but_undersized
+    existing: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,size=50G,discard=on"
+    expect: { outcome: resume, ssh_probe: false, operations: [grow_scsi0] }
+
+  - name: partial_check_mode
+    existing: true
+    check_mode: true
+    remove_config: [efidisk0, scsi0, boot]
+    expect:
+      outcome: resume
+      ssh_probe: false
+      operations: [attach_efi, import_scsi0, set_boot]
+      check_changed: true
+      postconditions_deferred: true
+
+  - name: undersized_check_mode
+    existing: true
+    check_mode: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,size=50G"
+    expect:
+      outcome: resume
+      ssh_probe: false
+      operations: [grow_scsi0]
+      check_changed: true
+      postconditions_deferred: true
+
+  - name: wrong_cloud_init_storage
+    existing: true
+    config_overrides:
+      ide2: "local-lvm:vm-130-cloudinit,media=cdrom,size=4M"
+    expect: { outcome: fatal_storage, ssh_probe: false, operations: [] }
+
+  - name: wrong_efi_storage
+    existing: true
+    config_overrides:
+      efidisk0: "local-lvm:vm-130-disk-0,size=4M"
+    expect: { outcome: fatal_storage, ssh_probe: false, operations: [] }
+
+  - name: wrong_boot_disk_storage
+    existing: true
+    config_overrides:
+      scsi0: "local-lvm:vm-130-disk-1,size=100G"
+    expect: { outcome: fatal_storage, ssh_probe: false, operations: [] }
+
+  - name: wrong_name
+    existing: true
+    vm_overrides: { name: unexpected-name }
+    expect: { outcome: fatal_identity, ssh_probe: false, operations: [] }
+
+  - name: wrong_config_name
+    existing: true
+    config_overrides: { name: unexpected-name }
+    expect: { outcome: fatal_identity, ssh_probe: false, operations: [] }
+
+  - name: wrong_pool
+    existing: true
+    vm_overrides: { pool: unexpected-pool }
+    expect: { outcome: fatal_identity, ssh_probe: false, operations: [] }
+
+  - name: wrong_node
+    existing: true
+    vm_overrides: { node: unexpected-node }
+    expect: { outcome: fatal_identity, ssh_probe: false, operations: [] }
+
+  - name: wrong_bridge
+    existing: true
+    config_overrides:
+      net0: "virtio=AA:BB:CC:DD:EE:FF,bridge=vmbr9"
+    expect: { outcome: fatal_identity, ssh_probe: false, operations: [] }
+
+  - name: cloud_init_without_cdrom_media
+    existing: true
+    config_overrides:
+      ide2: "nvme0pool:vm-130-cloudinit,size=4M"
+    expect: { outcome: fatal_identity, ssh_probe: false, operations: [] }
+
+  - name: ide2_is_not_cloud_init
+    existing: true
+    config_overrides:
+      ide2: "nvme0pool:iso/rocky.iso,media=cdrom,size=2G"
+    expect: { outcome: fatal_identity, ssh_probe: false, operations: [] }
+
+  - name: ide2_first_boot_order
+    existing: true
+    config_overrides: { boot: "order=ide2;scsi0" }
+    expect: { outcome: resume, ssh_probe: false, operations: [set_boot] }
+
+  - name: decimal_gib_size
+    existing: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,size=100.0G"
+    expect: { outcome: ready, ssh_probe: false, operations: [] }
+
+  - name: mebibyte_size
+    existing: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,size=102400M"
+    expect: { outcome: ready, ssh_probe: false, operations: [] }
+
+  - name: kibibyte_size
+    existing: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,size=104857600K"
+    expect: { outcome: ready, ssh_probe: false, operations: [] }
+
+  - name: tebibyte_size
+    existing: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,size=0.09765625T"
+    expect: { outcome: ready, ssh_probe: false, operations: [] }
+
+  - name: lowercase_size_unit
+    existing: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,size=100g"
+    expect: { outcome: ready, ssh_probe: false, operations: [] }
+
+  - name: oversized_disk
+    existing: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,size=101G"
+    expect: { outcome: fatal_size, ssh_probe: false, operations: [] }
+
+  - name: missing_disk_size
+    existing: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,discard=on"
+    expect: { outcome: fatal_size, ssh_probe: false, operations: [] }
+
+  - name: suffixless_disk_size
+    existing: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,size=100"
+    expect: { outcome: fatal_size, ssh_probe: false, operations: [] }
+
+  - name: unknown_disk_size_unit
+    existing: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,size=100P"
+    expect: { outcome: fatal_size, ssh_probe: false, operations: [] }
+
+  - name: duplicate_disk_size
+    existing: true
+    config_overrides:
+      scsi0: "nvme0pool:vm-130-disk-1,size=100G,size=99G"
+    expect: { outcome: fatal_size, ssh_probe: false, operations: [] }
+
+  - name: interrupted_import
+    existing: true
+    remove_config: [scsi0, boot]
+    config_overrides:
+      unused0: "nvme0pool:vm-130-disk-1"
+    expect: { outcome: fatal_unused, ssh_probe: false, operations: [] }

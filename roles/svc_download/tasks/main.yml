@@ -15,6 +15,12 @@
   ansible.builtin.import_tasks: nfs.yml
   tags: [nfs]
 
+- name: Acquire immutable download images
+  ansible.builtin.import_tasks: images.yml
+  # Image availability is a prerequisite for every handler flush: a files- or
+  # jail-tagged run must not restart a unit onto an unavailable digest.
+  tags: [always]
+
 - name: Converge VPN jail
   ansible.builtin.import_tasks: jail.yml
   tags: [jail]

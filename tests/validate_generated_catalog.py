@@ -155,6 +155,15 @@ def main() -> int:
     catalog_file_tasks = (
         ROOT / "roles/svc_download/tasks/files.yml"
     ).read_text(encoding="utf-8")
+    download_main_tasks = (
+        ROOT / "roles/svc_download/tasks/main.yml"
+    ).read_text(encoding="utf-8")
+    image_tasks = (
+        ROOT / "roles/svc_download/tasks/images.yml"
+    ).read_text(encoding="utf-8")
+    backup_tasks = (
+        ROOT / "roles/svc_download/tasks/backup.yml"
+    ).read_text(encoding="utf-8")
     if "download_apps | dict2items | selectattr('value.proxy') | list" not in verify_tasks:
         failures.append("verify: UI probes are not driven by proxy-eligible catalog entries")
     if disruptive_tasks.count("download_apps | dict2items") < 2:
@@ -166,6 +175,14 @@ def main() -> int:
     ):
         if stale_fact not in catalog_file_tasks:
             failures.append(f"removal convergence: missing {stale_fact}")
+    if download_main_tasks.index("images.yml") > download_main_tasks.index("jail.yml"):
+        failures.append("image acquisition must precede the jail handler flush")
+    if "not ansible_check_mode" not in image_tasks:
+        failures.append("image acquisition can mutate during check mode")
+    if "Restore strict backstop after image pulls" not in image_tasks:
+        failures.append("image acquisition lacks an always-close backstop path")
+    if "value.backup_paths" not in backup_tasks:
+        failures.append("initial backup artifact gates are not catalog-driven")
 
     homepage = environment.get_template(
         "roles/svc_media/templates/homepage/services.yaml.j2"

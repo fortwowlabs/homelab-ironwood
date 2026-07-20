@@ -32,8 +32,17 @@ def main() -> int:
     disruptive = (
         ROOT / "roles/svc_download/tasks/verify_disruptive.yml"
     ).read_text(encoding="utf-8")
-    if "always:" not in shared or "rm -f /srv/media/.homelab-verify" not in shared:
-        failures.append("shared NFS verification lacks an always cleanup path")
+    if (
+        "always:" not in shared
+        or shared.count("service_nfs_mounts") < 2
+        or "rm" not in shared
+        or ".homelab-verify-{{ inventory_hostname }}" not in shared
+    ):
+        failures.append("shared NFS verification lacks catalogued always-cleanup paths")
+    if "https://ifconfig.me" in combined:
+        failures.append("download host fencing still depends on DNS resolution")
+    if "https://1.1.1.1/" not in combined or "policy drop" not in combined:
+        failures.append("download host fencing lacks numeric egress and nftables policy gates")
     if media.count("trap 'rm -f $p' EXIT") < 2:
         failures.append("container NFS write probes lack trap-based cleanup")
     for required in (
@@ -42,7 +51,7 @@ def main() -> int:
         "Attempt to restore the VPN namespace when it was previously active",
         "Attempt to restore workloads that were previously active",
         "Attempt to restore the leak-canary timer when it was previously active",
-        "Stop any in-flight canary check",
+        "Wait for any in-flight canary check",
         "Assert every previously active service was restored",
         "verify_disruptive_inject_failure",
     ):

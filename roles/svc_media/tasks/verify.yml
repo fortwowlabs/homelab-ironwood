@@ -42,14 +42,58 @@
   delay: 10
   until: media_nfs_probe is not failed
 
-- name: Verify Seerr backup artifacts are produced
-  ansible.builtin.command: >-
-    setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups --
-    find /srv/backups/svc-media/appdata -maxdepth 1 -type f
-    -name 'seerr-*.tar.gz' -print -quit
-  register: media_seerr_backup_gate
+- name: Find fresh nonempty media backup artifacts
+  ansible.builtin.command:
+    argv:
+      - find
+      - "{{ item.directory }}"
+      - -maxdepth
+      - "1"
+      - -type
+      - f
+      - -size
+      - +0c
+      - -mtime
+      - "-2"
+      - -name
+      - "{{ item.pattern }}"
+      - -print
+      - -quit
+  loop: "{{ media_backup_artifacts }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: media_backup_artifact_gates
   changed_when: false
-  failed_when: media_seerr_backup_gate.stdout | length == 0
+
+- name: Assert every required media backup artifact is fresh and nonempty
+  ansible.builtin.assert:
+    that:
+      - >-
+        media_backup_artifact_gates.results
+        | selectattr('stdout', 'equalto', '') | list | length == 0
+    fail_msg: >-
+      A fresh nonempty Jellyfin, Seerr, RomM appdata, or RomM database backup
+      is missing. Inspect backup-media.service and the NFS backup mount.
+
+- name: Validate media tar archive structure
+  ansible.builtin.command:
+    argv: [tar, -tzf, "{{ item.stdout }}"]
+  loop: >-
+    {{ media_backup_artifact_gates.results
+       | selectattr('item.format', 'equalto', 'tar') | list }}
+  loop_control:
+    label: "{{ item.item.name }}"
+  changed_when: false
+
+- name: Validate compressed RomM database backup
+  ansible.builtin.command:
+    argv: [gzip, -t, "{{ item.stdout }}"]
+  loop: >-
+    {{ media_backup_artifact_gates.results
+       | selectattr('item.format', 'equalto', 'gzip') | list }}
+  loop_control:
+    label: "{{ item.item.name }}"
+  changed_when: false
 
 - name: Smoke-test every configured Caddy backend
   ansible.builtin.command: >-

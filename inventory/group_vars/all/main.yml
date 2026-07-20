@@ -41,22 +41,19 @@ pve_bridge:          vmbr0
 pve_cpu_type:        host
 
 # --- Rocky 10 GenericCloud image — PINNED (v5) --------------------------
-# Pin a DATED build, never the mutable `.latest` symlink: latest can change
-# upstream while the local .sha256 stamp keeps an old copy, and the old v4
-# check matched the hash against ANY line of the aggregate CHECKSUM file.
-# v5 fetches the per-image BSD-style CHECKSUM and matches the exact filename.
+# Pin a DATED build, never the mutable `.latest` symlink. The SHA-256 below is
+# committed with the filename and the PVE role hashes the actual image bytes
+# on every run; no stamp file is trusted.
 #
 # BUMP PROCEDURE (deliberate, not automatic):
 #   1. Browse https://dl.rockylinux.org/pub/rocky/10/images/x86_64/
-#   2. Update the three values below to the new dated build.
-#   3. rm the old image + .sha256 stamp in {{ pve_image_dir }} on thurgadin.
+#   2. Verify the signed Rocky CHECKSUM and update all three values below.
+#   3. Preserve or remove the old cached image only during planned maintenance.
 #   4. Note: Rocky prunes dated images of the PREVIOUS minor when a new one
 #      lands, so a stale pin eventually 404s — that is your cue to bump.
-#   Optional authenticity (not just transfer integrity): also fetch
-#   {{ rocky_checksum_url }}.asc and `gpg --verify` against the Rocky key.
 rocky_image_name: "Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2"
 rocky_image_url:  "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2"
-rocky_checksum_url: "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2.CHECKSUM"
+rocky_image_sha256: "9fc9e9ff16888bb68ac39b0392e25c9c92684d50c85f1cce6ab549363bbc4b48"
 
 # --- Admin SSH key injected into both VMs (public key CONTENT, not a path) ---
 # Paste your MBP ed25519 public key here (safe — it's a public key):
