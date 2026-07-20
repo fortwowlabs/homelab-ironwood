@@ -3,6 +3,9 @@
 inventory/group_vars/all/vault.yml
 .vault_pass
 
+# Raw session transcripts — contain decrypted secrets shown mid-session.
+docs/sessions/
+
 # Python venv (created by `make deps`)
 .venv/
 
