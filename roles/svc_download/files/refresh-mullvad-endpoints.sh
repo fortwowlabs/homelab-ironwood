@@ -31,9 +31,13 @@ mapfile -t ports < <(grep -iE '^\s*Endpoint\s*=' "$WG_CONF" \
 } > "$TMP"
 
 # Load the table first if absent. Avoid rewriting the generated file when its
-# semantic content is unchanged so steady-state convergence remains clean.
+# semantic content is unchanged so steady-state convergence remains clean —
+# but only declare convergence if the kernel set actually still holds the
+# endpoints. If the runtime set was flushed out-of-band, fall through and
+# reload so this periodic refresh keeps its self-healing property.
 nft list table inet host_backstop &>/dev/null || nft -f /etc/nftables/host-backstop.nft
-if [[ -f "$OUT" ]] && cmp -s "$TMP" "$OUT"; then
+if [[ -f "$OUT" ]] && cmp -s "$TMP" "$OUT" \
+   && nft list set inet host_backstop mullvad_wg 2>/dev/null | grep -qF "${ips[0]}"; then
     echo "unchanged: ips=${ips[*]} ports=${ports[*]}"
     exit 0
 fi

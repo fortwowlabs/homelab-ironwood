@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+{% set restart_parts = [] %}
+{% for app_name in download_apps %}{% set _ = restart_parts.append('dl-' ~ app_name ~ '.service') %}{% endfor %}
+{% set restart_cmd = restart_parts | join(' ') %}
 # leak-canary.sh — continuous verification of the jail invariants.
 # RENDERED BY ANSIBLE from roles/svc_download/templates/leak-canary.sh.j2.
 # Run by leak-canary.timer every 15 min. Converts "we leak-tested it once in
@@ -11,7 +14,7 @@
 #     green forever.
 #   - A leak writes a persistent tripped flag ($FLAG); every
 #     subsequent run keeps alerting until you clear it:
-#         rm /var/lib/leak-canary/tripped && systemctl start dl-{sabnzbd,prowlarr,sonarr,radarr}
+#         rm /var/lib/leak-canary/tripped && systemctl start {{ restart_cmd }}
 #   - Alerts actually fire (ntfy on the LAN — host-backstop opens that path).
 #   - Planned maintenance: `systemctl stop leak-canary.timer` first, or the
 #     "service not active" alert will ping you.
@@ -47,7 +50,7 @@ alert() {  # $1=priority $2=title $3=body — best effort, never gates logic
 fail_leak() {
     date -Is > "$FLAG"
     systemctl stop 'dl-*.service' 2>/dev/null
-    alert urgent "LEAK: download jail" "$1 — download stack STOPPED. Investigate, then: rm $FLAG && systemctl start dl-*.service"
+    alert urgent "LEAK: download jail" "$1 — download stack STOPPED. Investigate, then: rm $FLAG && systemctl start {{ restart_cmd }}"
     exit 1
 }
 

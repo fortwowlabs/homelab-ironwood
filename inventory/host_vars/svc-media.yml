@@ -22,10 +22,6 @@ service_packages:
   - cockpit-podman
   - cockpit-storaged
 # Remote access is handled by the dedicated subnet-router VM, not this role.
-vm_extra_packages:
-  - podman
-  - nfs-utils
-  - policycoreutils-python-utils
 
 # --- monitoring (mon role) ---
 cockpit_origin:     cockpit-media   # https://cockpit-media.<domain>

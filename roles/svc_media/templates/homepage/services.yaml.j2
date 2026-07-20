@@ -1,25 +1,21 @@
 # {{ ansible_managed }}
 # Rendered from caddy_services plus download_apps. `home` (Homepage itself)
-# is skipped. Icons come from the dashboard-icons pack.
-{% set groups = caddy_services | dict2items
-      | rejectattr('key', 'equalto', 'home') | list
-      | groupby('value.group') %}
-{% for group_name, entries in groups %}
+# is skipped. Icons come from the dashboard-icons pack. Both catalogs are
+# normalised into one tile list and grouped once, so a group name shared
+# across the two catalogs collapses into a single dashboard section instead
+# of emitting a duplicate YAML key.
+{% set tiles = [] %}
+{% for key, svc in caddy_services.items() if key != 'home' %}
+{%   set _ = tiles.append({'key': key, 'group': svc.group, 'icon': svc.icon | default(key)}) %}
+{% endfor %}
+{% for key, app in download_apps.items() if app.proxy %}
+{%   set _ = tiles.append({'key': key, 'group': app.dashboard.group, 'icon': app.dashboard.icon | default(key)}) %}
+{% endfor %}
+{% for group_name, entries in tiles | groupby('group') %}
 - {{ group_name }}:
 {% for e in entries %}
     - {{ e.key }}:
         href: https://{{ e.key }}.{{ service_domain }}
-        icon: {{ e.value.icon | default(e.key) }}.png
-{% endfor %}
-{% endfor %}
-{% set download_groups = download_apps | dict2items
-      | selectattr('value.proxy') | list
-      | groupby('value.dashboard.group') %}
-{% for group_name, entries in download_groups %}
-- {{ group_name }}:
-{% for e in entries %}
-    - {{ e.key }}:
-        href: https://{{ e.key }}.{{ service_domain }}
-        icon: {{ e.value.dashboard.icon | default(e.key) }}.png
+        icon: {{ e.icon }}.png
 {% endfor %}
 {% endfor %}

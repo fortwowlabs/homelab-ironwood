@@ -21,6 +21,26 @@
   changed_when: false
   check_mode: false
 
+# The initial backup runs a mariadb-dump as step 1 under `set -euo pipefail`;
+# forcing it before romm-db has finished its health-start window makes the dump
+# fail, which aborts the oneshot before any artifact is written and fails the
+# deploy. romm-db.service uses Notify=healthy, so is-active == 'active' only
+# once the database reports healthy — gate the initial backup on that.
+- name: Wait for the RomM database to report healthy before the initial backup
+  ansible.builtin.command: systemctl --user -M homelab@ is-active romm-db.service
+  register: media_romm_db_health
+  changed_when: false
+  failed_when: false
+  check_mode: false
+  retries: 12
+  delay: 5
+  until: media_romm_db_health.stdout == 'active'
+  when:
+    - not ansible_check_mode
+    - >-
+      media_backup_artifacts_before.results
+      | selectattr('stdout', 'equalto', '') | list | length > 0
+
 - name: Produce an initial media backup when any required artifact is absent
   ansible.builtin.systemd:
     name: backup-media.service
