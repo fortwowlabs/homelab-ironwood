@@ -1,0 +1,45 @@
+---
+- name: Apply systemd, backstop, and VPN secret handlers before jail startup
+  ansible.builtin.meta: flush_handlers
+
+- name: Assert the backstop preserves the configured admin network
+  ansible.builtin.command:
+    cmd: "grep -q 'define LAN_ADMIN = {{ lan_cidr }}' /etc/nftables/host-backstop.nft"
+  changed_when: false
+
+- name: Disable firewalld because nftables owns both directions
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: false
+    state: stopped
+  failed_when: false
+
+- name: Populate Mullvad endpoint sets and load the backstop
+  ansible.builtin.command: /usr/local/sbin/refresh-mullvad-endpoints.sh
+  register: download_endpoint_refresh
+  changed_when: download_endpoint_refresh.stdout is match('^changed:')
+
+- name: Persist the backstop include across reboot
+  ansible.builtin.lineinfile:
+    path: /etc/sysconfig/nftables.conf
+    line: 'include "/etc/nftables/host-backstop.nft"'
+    create: true
+    mode: "0644"
+
+- name: Enable nftables
+  ansible.builtin.systemd:
+    name: nftables
+    enabled: true
+    state: started
+
+- name: Verify SSH admission survived the backstop
+  ansible.builtin.command: nft list chain inet host_backstop input
+  register: download_nft_input
+  changed_when: false
+  failed_when: "'dport 22 accept' not in (download_nft_input.stdout | regex_replace('\\s+', ' '))"
+
+- name: Bring up the VPN namespace
+  ansible.builtin.systemd:
+    name: vpn-netns.service
+    enabled: true
+    state: started

@@ -56,13 +56,13 @@ table inet host_backstop {
         ip daddr $TRUENAS tcp dport 2049 accept
 {% set _ntfy_host = ntfy_url | urlsplit('hostname') %}
 {% set _ntfy_port = (ntfy_url | urlsplit('port')) or (443 if (ntfy_url | urlsplit('scheme')) == 'https' else 80) %}
-{% if _ntfy_host == svc_media_ip %}
+{% if _ntfy_host == hostvars['svc-media'].ansible_host %}
 
         # Leak-canary + backup alerts to the LAN ntfy on svc-media. Without
         # this the canary's fail() curl would be dropped by the very table
         # it defends (v4 gap). Only rendered when ntfy_url points at
         # svc-media; a public ntfy over 443 is deliberately NOT opened here.
-        ip daddr {{ svc_media_ip }} tcp dport {{ _ntfy_port }} accept
+        ip daddr {{ hostvars['svc-media'].ansible_host }} tcp dport {{ _ntfy_port }} accept
 {% endif %}
 
         udp dport { 67, 68 } accept              # DHCP, if ever non-static
@@ -73,7 +73,8 @@ table inet host_backstop {
         # proxy dies with "Failed to connect to remote host".
         oifname "veth-host" accept
 
-        # PATCH WINDOW: `nft -f patch-window.nft` flips egress on; see README.
+        # Maintenance egress is opened only by homelab-maintenance-egress,
+        # which restores this strict ruleset in an always/fatal close path.
 
         log prefix "host-backstop-out-drop " counter drop
     }
@@ -88,10 +89,9 @@ table inet host_backstop {
 
         ip saddr $LAN_ADMIN tcp dport 22 accept   # SSH from admin
 
-        # Jailed-service admin UIs via the veth socket proxies (proxies bind
-        # these ports on the LAN IP). v5: 5076 gone with NZBHydra2.
-        # 9090 = Cockpit (host, not jailed) reverse-proxied by svc-media.
-        ip saddr $LAN_ADMIN tcp dport { 8080, 9696, 8989, 7878, 9090, 5299 } accept
+        # Jailed-service UIs derive from download_apps. 9090 is Cockpit on
+        # the host itself and remains intentionally separate from the catalog.
+        ip saddr $LAN_ADMIN tcp dport { {{ download_apps | dict2items | selectattr('value.proxy') | map(attribute='value.ui_port') | join(', ') }}, 9090 } accept
 
         icmp type echo-request accept
 

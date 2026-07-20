@@ -5,4 +5,5 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+EnvironmentFile=/etc/homelab-notify.env
 ExecStart=/usr/local/sbin/disk-alert.sh

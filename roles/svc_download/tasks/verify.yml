@@ -1,0 +1,60 @@
+---
+- name: Verify VPN namespace egress identity
+  ansible.builtin.command: ip netns exec vpn curl -4 --max-time 15 https://am.i.mullvad.net/connected
+  register: download_mullvad_jail
+  changed_when: false
+  failed_when: "'You are connected to Mullvad' not in download_mullvad_jail.stdout"
+
+- name: Verify the host remains fenced
+  ansible.builtin.command: curl -4 --max-time 5 https://ifconfig.me
+  register: download_host_egress
+  changed_when: false
+  failed_when: download_host_egress.rc == 0
+
+- name: Verify every catalog container is in the VPN namespace
+  ansible.builtin.shell: |
+    set -euo pipefail
+    pid=$(podman inspect -f '{% raw %}{{.State.Pid}}{% endraw %}' {{ item.key | quote }})
+    test "$pid" -gt 0
+    test "$(stat -Lc %i /proc/$pid/ns/net)" = "$(stat -Lc %i /run/netns/vpn)"
+  args:
+    executable: /bin/bash
+  loop: "{{ download_apps | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  changed_when: false
+
+- name: Verify every catalog UI proxy answers
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:{{ item.value.ui_port }}"
+    status_code: [200, 301, 302, 303, 401, 403]
+  loop: "{{ download_apps | dict2items | selectattr('value.proxy') | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: download_proxy_gate
+  retries: 3
+  delay: 5
+  until: download_proxy_gate is not failed
+
+- name: Verify Mullvad from inside a workload
+  ansible.builtin.command: podman exec sabnzbd curl -4 -s --max-time 15 https://am.i.mullvad.net/connected
+  register: download_mullvad_container
+  changed_when: false
+  failed_when: "'You are connected to Mullvad' not in download_mullvad_container.stdout"
+
+- name: Run continuous leak canary immediately
+  ansible.builtin.command:
+    argv:
+      - /bin/bash
+      - -c
+      - >-
+        set -a; source /etc/homelab-notify.env;
+        exec /usr/local/sbin/leak-canary.sh
+  register: download_canary
+  changed_when: false
+  no_log: true
+  diff: false
+
+- name: Mark download verification complete
+  ansible.builtin.set_fact:
+    svc_download_verified: true

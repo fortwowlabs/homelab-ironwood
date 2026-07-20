@@ -1,12 +1,13 @@
 {{ ansible_managed | comment }}
 # {{ service_domain }} resolver — RENDERED from roles/svc_media/templates/
-# dnsmasq-fortwow.conf.j2, iterating the SAME caddy_services dict as the
-# Caddyfile. This box is the authority for {{ service_domain }} only; pfSense
+# dnsmasq-fortwow.conf.j2, iterating the media/infra catalog and the same
+# proxy-enabled download catalog as Caddy. This box is authoritative for
+# {{ service_domain }} only; pfSense
 # forwards the domain here (Domain Override) and Tailscale split-DNS points the
-# tailnet here too — see docs/dns-and-names.md.
+# tailnet here too — see docs/services.md.
 
 # Bind only the LAN IP so we never fight systemd-resolved on 127.0.0.53.
-listen-address={{ svc_media_ip }}
+listen-address={{ ansible_host }}
 bind-interfaces
 
 # We answer {{ service_domain }} and nothing else; no upstream forwarding.
@@ -15,12 +16,15 @@ domain-needed
 bogus-priv
 
 # Physical hosts by name.
-host-record=svc-media.{{ service_domain }},{{ svc_media_ip }}
-host-record=svc-download.{{ service_domain }},{{ svc_download_ip }}
+host-record=svc-media.{{ service_domain }},{{ ansible_host }}
+host-record=svc-download.{{ service_domain }},{{ hostvars['svc-download'].ansible_host }}
 host-record=truenas.{{ service_domain }},{{ truenas_ip }}
-host-record=thurgadin.{{ service_domain }},{{ pve_host_ip }}
+host-record=thurgadin.{{ service_domain }},{{ hostvars['thurgadin'].pve_api_host }}
 
 # Every service name -> Caddy on svc-media (which reverse-proxies by hostname).
 {% for name in caddy_services | dictsort | map('first') %}
-address=/{{ name }}.{{ service_domain }}/{{ svc_media_ip }}
+address=/{{ name }}.{{ service_domain }}/{{ ansible_host }}
+{% endfor %}
+{% for name, app in download_apps | dictsort if app.proxy %}
+address=/{{ name }}.{{ service_domain }}/{{ ansible_host }}
 {% endfor %}

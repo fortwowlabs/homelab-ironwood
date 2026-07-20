@@ -8,7 +8,7 @@
 Description=Homepage dashboard
 
 [Container]
-Image=ghcr.io/gethomepage/homepage:latest
+Image={{ media_images.homepage }}
 ContainerName=homepage
 PublishPort=127.0.0.1:3000:3000
 Volume=%h/appdata/homepage:/app/config:Z

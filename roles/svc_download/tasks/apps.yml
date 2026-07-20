@@ -1,0 +1,95 @@
+---
+- name: Check catalog image availability
+  ansible.builtin.command: "podman image exists {{ item.value.image }}"
+  loop: "{{ download_apps | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: download_image_checks
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Pull missing immutable images through guarded egress
+  when: download_image_checks.results | selectattr('rc', 'ne', 0) | list | length > 0
+  block:
+    - name: Open maintenance egress for image pulls
+      ansible.builtin.command: /usr/local/sbin/homelab-maintenance-egress open
+      register: download_image_egress_open
+      changed_when: "'opened' in download_image_egress_open.stdout"
+
+    - name: Pull missing immutable catalog images
+      ansible.builtin.command: "podman pull {{ item.item.value.image }}"
+      loop: "{{ download_image_checks.results | selectattr('rc', 'ne', 0) | list }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+      changed_when: true
+  always:
+    - name: Restore strict backstop after image pulls
+      ansible.builtin.command: /usr/local/sbin/homelab-maintenance-egress close
+      register: download_image_egress_close
+      changed_when: "'closed' in download_image_egress_close.stdout"
+
+- name: Queue restarts for changed generated download units
+  ansible.builtin.debug:
+    msg: "Applying changed catalog units."
+  changed_when: >-
+    (download_apps_to_restart + download_proxy_sockets_to_restart
+     + download_proxy_services_to_restart) | length > 0
+  notify: restart changed download units
+
+- name: Apply changed catalog unit handlers after immutable images exist
+  ansible.builtin.meta: flush_handlers
+
+- name: Ensure catalog applications are started
+  ansible.builtin.systemd:
+    name: "dl-{{ item.item.key }}.service"
+    state: started
+  loop: "{{ download_quadlet_templates.results }}"
+  loop_control:
+    label: "{{ item.item.key }}"
+
+- name: Allow socket proxy bind and connect operations under SELinux
+  ansible.posix.seboolean:
+    name: "{{ item }}"
+    state: true
+    persistent: true
+  loop: [systemd_socket_proxyd_bind_any, systemd_socket_proxyd_connect_any]
+
+- name: Install proxyd no-new-privileges SELinux policy source
+  ansible.builtin.copy:
+    src: proxyd-nnp.te
+    dest: /etc/nftables/proxyd-nnp.te
+    mode: "0644"
+  register: download_proxyd_policy_source
+
+- name: Check proxyd SELinux policy state
+  ansible.builtin.command: semodule -l
+  register: download_selinux_modules
+  changed_when: false
+
+- name: Compile and install proxyd SELinux policy
+  ansible.builtin.shell: |
+    set -euo pipefail
+    workdir=$(mktemp -d)
+    trap 'rm -rf "$workdir"' EXIT
+    checkmodule -M -m -o "$workdir/proxyd-nnp.mod" /etc/nftables/proxyd-nnp.te
+    semodule_package -o "$workdir/proxyd-nnp.pp" -m "$workdir/proxyd-nnp.mod"
+    semodule -i "$workdir/proxyd-nnp.pp"
+  when: download_proxyd_policy_source is changed or 'proxyd-nnp' not in download_selinux_modules.stdout
+  changed_when: true
+  notify: restart ui proxies
+
+- name: Enable catalog proxy sockets
+  ansible.builtin.systemd:
+    name: "{{ item.item.key }}-proxy.socket"
+    enabled: true
+    state: started
+  loop: "{{ download_proxy_socket_templates.results }}"
+  loop_control:
+    label: "{{ item.item.key }}-proxy.socket"
+
+- name: Arm continuous leak verification
+  ansible.builtin.systemd:
+    name: leak-canary.timer
+    enabled: true
+    state: started

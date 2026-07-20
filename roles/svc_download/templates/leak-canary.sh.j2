@@ -26,8 +26,12 @@ set -uo pipefail
 
 STATE_DIR=/var/lib/leak-canary
 FLAG="$STATE_DIR/tripped"
-NTFY="{{ ntfy_url }}/{{ ntfy_topic }}"
-expected=(sabnzbd prowlarr sonarr radarr lazylibrarian)
+NTFY="${NTFY_URL}/${NTFY_TOPIC}"
+AUTH=()
+if [[ -n "${NTFY_TOKEN:-}" ]]; then
+    AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+fi
+expected=({% for app_name in download_apps %}{{ app_name | quote }} {% endfor %})
 
 mkdir -p "$STATE_DIR"
 
@@ -35,9 +39,7 @@ alert() {  # $1=priority $2=title $3=body — best effort, never gates logic
     logger -p auth.crit -t leak-canary "$2 — $3"
     curl -fsS --max-time 5 -X POST \
         -H "Title: $2" -H "Priority: $1" -H "Tags: rotating_light" \
-{% if (vault_ntfy_token | default('')) | length > 0 %}
-        -H "Authorization: Bearer {{ vault_ntfy_token }}" \
-{% endif %}
+        "${AUTH[@]}" \
         -d "$3" "$NTFY" >/dev/null 2>&1 \
         || logger -p auth.crit -t leak-canary "ALERT DELIVERY FAILED (ntfy unreachable): $2"
 }
@@ -45,7 +47,7 @@ alert() {  # $1=priority $2=title $3=body — best effort, never gates logic
 fail_leak() {
     date -Is > "$FLAG"
     systemctl stop 'dl-*.service' 2>/dev/null
-    alert urgent "LEAK: download jail" "$1 — download stack STOPPED. Investigate, then: rm $FLAG && systemctl start dl-{sabnzbd,prowlarr,sonarr,radarr}"
+    alert urgent "LEAK: download jail" "$1 — download stack STOPPED. Investigate, then: rm $FLAG && systemctl start dl-*.service"
     exit 1
 }
 
@@ -73,7 +75,7 @@ for c in "${expected[@]}"; do
         || down "dl-$c.service is not active"
     pid=$(podman inspect -f '{% raw %}{{.State.Pid}}{% endraw %}' "$c")
     [[ "$pid" -gt 0 ]] || fail_leak "container $c has no running pid"
-    [[ "$(stat -Lc %i /proc/$pid/ns/net 2>/dev/null)" == "$want_inode" ]] \
+    [[ "$(stat -Lc %i /proc/"$pid"/ns/net 2>/dev/null)" == "$want_inode" ]] \
         || fail_leak "container $c is NOT in the vpn netns (pid: $pid)"
 done
 

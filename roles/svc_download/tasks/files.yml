@@ -1,0 +1,281 @@
+---
+- name: Ensure download configuration directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/containers/systemd
+    - /etc/nftables
+    - /etc/wireguard
+    - /etc/netns/vpn
+
+- name: Calculate the catalog-managed unit paths that should exist
+  ansible.builtin.set_fact:
+    download_expected_quadlet_paths: >-
+      {% set paths = [] %}
+      {% for name in download_apps %}
+      {% set _ = paths.append('/etc/containers/systemd/dl-' ~ name ~ '.container') %}
+      {% endfor %}
+      {{ paths }}
+    download_expected_proxy_socket_paths: >-
+      {% set paths = [] %}
+      {% for name, app in download_apps.items() if app.proxy %}
+      {% set _ = paths.append('/etc/systemd/system/' ~ name ~ '-proxy.socket') %}
+      {% endfor %}
+      {{ paths }}
+    download_expected_proxy_service_paths: >-
+      {% set paths = [] %}
+      {% for name, app in download_apps.items() if app.proxy %}
+      {% set _ = paths.append('/etc/systemd/system/' ~ name ~ '-proxy.service') %}
+      {% endfor %}
+      {{ paths }}
+  changed_when: false
+
+- name: Discover catalog-managed download Quadlets
+  ansible.builtin.find:
+    paths: /etc/containers/systemd
+    patterns: "dl-*.container"
+    file_type: file
+    contains: '^# homelab-iac catalog-managed$'
+  register: download_managed_quadlets
+  check_mode: false
+
+- name: Discover catalog-managed proxy sockets
+  ansible.builtin.find:
+    paths: /etc/systemd/system
+    patterns: "*-proxy.socket"
+    file_type: file
+    contains: '^# homelab-iac catalog-managed$'
+  register: download_managed_proxy_sockets
+  check_mode: false
+
+- name: Discover catalog-managed proxy services
+  ansible.builtin.find:
+    paths: /etc/systemd/system
+    patterns: "*-proxy.service"
+    file_type: file
+    contains: '^# homelab-iac catalog-managed$'
+  register: download_managed_proxy_services
+  check_mode: false
+
+- name: Calculate stale catalog-managed unit paths
+  ansible.builtin.set_fact:
+    download_stale_quadlet_paths: >-
+      {{
+        download_managed_quadlets.files | map(attribute='path') | list
+        | difference(download_expected_quadlet_paths)
+      }}
+    download_stale_proxy_socket_paths: >-
+      {{
+        download_managed_proxy_sockets.files | map(attribute='path') | list
+        | difference(download_expected_proxy_socket_paths)
+      }}
+    download_stale_proxy_service_paths: >-
+      {{
+        download_managed_proxy_services.files | map(attribute='path') | list
+        | difference(download_expected_proxy_service_paths)
+      }}
+  changed_when: false
+
+- name: Stop stale catalog-managed applications
+  ansible.builtin.systemd:
+    name: "{{ item | basename | regex_replace('\\.container$', '.service') }}"
+    state: stopped
+  loop: "{{ download_stale_quadlet_paths }}"
+
+- name: Stop and disable stale catalog-managed proxy sockets
+  ansible.builtin.systemd:
+    name: "{{ item | basename }}"
+    state: stopped
+    enabled: false
+  loop: "{{ download_stale_proxy_socket_paths }}"
+
+- name: Stop stale catalog-managed proxy services
+  ansible.builtin.systemd:
+    name: "{{ item | basename }}"
+    state: stopped
+  loop: "{{ download_stale_proxy_service_paths }}"
+
+- name: Remove stale catalog-managed unit files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: >-
+    {{
+      download_stale_quadlet_paths
+      + download_stale_proxy_socket_paths
+      + download_stale_proxy_service_paths
+    }}
+  notify: reload systemd
+
+- name: Install VPN namespace lifecycle scripts
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/usr/local/sbin/{{ item }}"
+    mode: "0750"
+  loop:
+    - vpn-netns-up.sh
+    - vpn-netns-down.sh
+  notify: restart vpn-netns when active
+
+- name: Install the Mullvad endpoint refresh helper
+  ansible.builtin.copy:
+    src: refresh-mullvad-endpoints.sh
+    dest: /usr/local/sbin/refresh-mullvad-endpoints.sh
+    mode: "0750"
+
+- name: Render operational scripts
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/usr/local/sbin/{{ item }}"
+    owner: root
+    group: root
+    mode: "0750"
+  loop:
+    - leak-canary.sh
+    - backup-dl-appdata.sh
+
+- name: Ensure persistent canary state directory exists
+  ansible.builtin.file:
+    path: /var/lib/leak-canary
+    state: directory
+    mode: "0750"
+
+- name: Install the VPN namespace unit
+  ansible.builtin.copy:
+    src: vpn-netns.service
+    dest: /etc/systemd/system/vpn-netns.service
+    mode: "0644"
+  notify:
+    - reload systemd
+    - restart vpn-netns when active
+
+- name: Install download timers and oneshot units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - leak-canary.service
+    - leak-canary.timer
+    - backup-dl-appdata.service
+    - backup-dl-appdata.timer
+  notify: reload systemd
+
+- name: Render application proxy sockets
+  ansible.builtin.template:
+    src: proxy.socket.j2
+    dest: "/etc/systemd/system/{{ item.key }}-proxy.socket"
+    mode: "0644"
+  loop: "{{ download_apps | dict2items | selectattr('value.proxy') | list }}"
+  loop_control:
+    label: "{{ item.key }}-proxy.socket"
+  register: download_proxy_socket_templates
+  notify: reload systemd
+
+- name: Render application proxy services
+  ansible.builtin.template:
+    src: proxy.service.j2
+    dest: "/etc/systemd/system/{{ item.key }}-proxy.service"
+    mode: "0644"
+  loop: "{{ download_apps | dict2items | selectattr('value.proxy') | list }}"
+  loop_control:
+    label: "{{ item.key }}-proxy.service"
+  register: download_proxy_service_templates
+  notify: reload systemd
+
+- name: Render download Quadlets from the application catalog
+  ansible.builtin.template:
+    src: download.container.j2
+    dest: "/etc/containers/systemd/dl-{{ item.key }}.container"
+    mode: "0644"
+  loop: "{{ download_apps | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: download_quadlet_templates
+  notify: reload systemd
+
+- name: Render strict nftables backstop
+  ansible.builtin.template:
+    src: host-backstop.nft.j2
+    dest: /etc/nftables/host-backstop.nft
+    mode: "0644"
+  notify: reload host-backstop
+
+- name: Seed dynamic Mullvad endpoint file
+  ansible.builtin.copy:
+    src: mullvad-endpoints.nft.seed
+    dest: /etc/nftables/mullvad-endpoints.nft
+    mode: "0644"
+    force: false
+
+- name: Configure network-namespace DNS
+  ansible.builtin.copy:
+    dest: /etc/netns/vpn/resolv.conf
+    content: "nameserver {{ mullvad_dns }}\n"
+    mode: "0644"
+
+- name: Create catalog application data directories
+  ansible.builtin.file:
+    path: "/srv/appdata/{{ item.key }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop: "{{ download_apps | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Create SABnzbd local incomplete-download directory
+  ansible.builtin.file:
+    path: /var/lib/sabnzbd-incomplete
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+
+- name: Render WireGuard peer configuration
+  ansible.builtin.template:
+    src: peer.conf.j2
+    dest: /etc/wireguard/peer.conf
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  notify: restart vpn-netns when active
+
+- name: Render VPN namespace environment
+  ansible.builtin.template:
+    src: vpn-netns.env.j2
+    dest: /etc/vpn-netns.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  notify: restart vpn-netns when active
+
+- name: Calculate catalog services whose generated units changed
+  ansible.builtin.set_fact:
+    download_apps_to_restart: >-
+      {{
+        download_quadlet_templates.results | selectattr('changed')
+        | map(attribute='item.key') | list
+      }}
+    download_proxy_sockets_to_restart: >-
+      {{
+        download_proxy_socket_templates.results | selectattr('changed')
+        | map(attribute='item.key') | list
+      }}
+    download_proxy_services_to_restart: >-
+      {{
+        download_proxy_service_templates.results | selectattr('changed')
+        | map(attribute='item.key') | list
+      }}
+  changed_when: >-
+    (download_apps_to_restart + download_proxy_sockets_to_restart
+     + download_proxy_services_to_restart) | length > 0

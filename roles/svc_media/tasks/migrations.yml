@@ -1,0 +1,44 @@
+---
+- name: Check whether the legacy Jellyseerr unit is active
+  ansible.builtin.command: systemctl --user -M homelab@ is-active jellyseerr.service
+  register: media_legacy_unit_active
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Stop the legacy Jellyseerr unit only when active
+  ansible.builtin.command: systemctl --user -M homelab@ stop jellyseerr.service
+  when: media_legacy_unit_active.rc == 0
+  changed_when: true
+
+- name: Check for a legacy Jellyseerr Quadlet
+  ansible.builtin.stat:
+    path: /opt/homelab/.config/containers/systemd/jellyseerr.container
+  register: media_legacy_quadlet
+
+- name: Remove the legacy Jellyseerr Quadlet only when present
+  ansible.builtin.file:
+    path: /opt/homelab/.config/containers/systemd/jellyseerr.container
+    state: absent
+  when: media_legacy_quadlet.stat.exists
+  notify: media configuration changed
+
+- name: Check for a legacy Jellyseerr container
+  ansible.builtin.command: >-
+    runuser -u homelab -- env XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}
+    podman container exists jellyseerr
+  args:
+    chdir: /tmp
+  register: media_legacy_container
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Remove the legacy Jellyseerr container only when present
+  ansible.builtin.command: >-
+    runuser -u homelab -- env XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}
+    podman rm -f jellyseerr
+  args:
+    chdir: /tmp
+  when: media_legacy_container.rc == 0
+  changed_when: true

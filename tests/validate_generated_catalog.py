@@ -62,17 +62,28 @@ def main() -> int:
         quote=shlex.quote,
         urlsplit=split_url,
     )
+    caddy_services = as_attr(
+        {
+            "home": {"group": "Infra", "icon": "homepage"},
+            "jellyfin": {"group": "Media", "icon": "jellyfin"},
+        }
+    )
     common = {
         "ansible_managed": "fixture managed",
         "ansible_host": "192.0.2.31",
+        "caddy_services": caddy_services,
         "download_apps": apps,
-        "hostvars": {"svc-media": AttrDict(ansible_host="192.0.2.30")},
+        "hostvars": {
+            "svc-download": AttrDict(ansible_host="192.0.2.31"),
+            "svc-media": AttrDict(ansible_host="192.0.2.30"),
+        },
         "lan_cidr": "192.0.2.0/24",
         "mullvad_dns": "10.64.0.1",
         "ntfy_topic": "fixture",
         "ntfy_url": "http://192.0.2.30:8080",
         "svc_gid": 10001,
         "svc_uid": 10001,
+        "service_domain": "fixture.invalid",
         "timezone": "Etc/UTC",
         "truenas_ip": "192.0.2.20",
         "backup_retention_days": 14,
@@ -141,10 +152,35 @@ def main() -> int:
     disruptive_tasks = (
         ROOT / "roles/svc_download/tasks/verify_disruptive.yml"
     ).read_text(encoding="utf-8")
+    catalog_file_tasks = (
+        ROOT / "roles/svc_download/tasks/files.yml"
+    ).read_text(encoding="utf-8")
     if "download_apps | dict2items | selectattr('value.proxy') | list" not in verify_tasks:
         failures.append("verify: UI probes are not driven by proxy-eligible catalog entries")
     if disruptive_tasks.count("download_apps | dict2items") < 2:
         failures.append("disruptive verify: capture and stop assertions are not catalog-driven")
+    for stale_fact in (
+        "download_stale_quadlet_paths",
+        "download_stale_proxy_socket_paths",
+        "download_stale_proxy_service_paths",
+    ):
+        if stale_fact not in catalog_file_tasks:
+            failures.append(f"removal convergence: missing {stale_fact}")
+
+    homepage = environment.get_template(
+        "roles/svc_media/templates/homepage/services.yaml.j2"
+    ).render(**common)
+    homepage_groups = yaml.safe_load(homepage)
+    homepage_names = [
+        service_name
+        for group in homepage_groups
+        for services in group.values()
+        for service in services
+        for service_name in service
+    ]
+    for name in eligible:
+        if homepage_names.count(name) != 1:
+            failures.append(f"{name}: expected one generated dashboard entry")
 
     if failures:
         print("Generated catalog validation failed:", file=sys.stderr)

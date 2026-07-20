@@ -1,0 +1,18 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Seerr
+
+[Container]
+Image={{ media_images.seerr }}
+ContainerName=seerr
+PublishPort=127.0.0.1:5055:5055
+Volume=%h/appdata/seerr:/app/config:Z
+Environment=TZ={{ timezone }}
+Environment=PORT=5055
+PodmanArgs=--init
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

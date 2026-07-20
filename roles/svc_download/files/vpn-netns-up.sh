@@ -22,6 +22,7 @@ VETH_HOST_IP=10.77.0.1/30
 VETH_NS_IP=10.77.0.2/30
 
 # Load overrides (WG_ADDR is mandatory)
+# shellcheck source=/dev/null
 [[ -f /etc/vpn-netns.env ]] && source /etc/vpn-netns.env
 [[ -n "${WG_ADDR}" ]] || { echo "FATAL: set WG_ADDR in /etc/vpn-netns.env" >&2; exit 1; }
 [[ -f "${WG_CONF}" ]]  || { echo "FATAL: ${WG_CONF} missing" >&2; exit 1; }

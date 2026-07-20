@@ -1,0 +1,79 @@
+---
+- name: Verify all rootless media services are active
+  ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item }}.service"
+  loop:
+    - jellyfin
+    - audiobookshelf
+    - romm-db
+    - romm
+    - seerr
+    - ntfy
+    - homepage
+  changed_when: false
+
+- name: Verify Jellyfin answers on its LAN-bound address
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:8096/System/Info/Public"
+    status_code: 200
+    timeout: 20
+  register: media_jellyfin_gate
+  retries: 6
+  delay: 10
+  until: media_jellyfin_gate.status == 200
+
+- name: Verify containers see NFS data and remove every write probe
+  ansible.builtin.command:
+    cmd: >-
+      runuser -u homelab -- env XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}
+      podman exec {{ item.container }} sh -c {{ item.probe | quote }}
+    chdir: /tmp
+  loop:
+    - container: jellyfin
+      probe: "test -r /media/movies"
+    - container: audiobookshelf
+      probe: "p=/audiobooks/.homelab-verify; trap 'rm -f $p' EXIT; touch $p"
+    - container: romm
+      probe: "p=/romm/library/.homelab-verify; trap 'rm -f $p' EXIT; touch $p"
+  loop_control:
+    label: "{{ item.container }}"
+  register: media_nfs_probe
+  changed_when: false
+  retries: 6
+  delay: 10
+  until: media_nfs_probe is not failed
+
+- name: Verify Seerr backup artifacts are produced
+  ansible.builtin.command: >-
+    setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups --
+    find /srv/backups/svc-media/appdata -maxdepth 1 -type f
+    -name 'seerr-*.tar.gz' -print -quit
+  register: media_seerr_backup_gate
+  changed_when: false
+  failed_when: media_seerr_backup_gate.stdout | length == 0
+
+- name: Smoke-test every configured Caddy backend
+  ansible.builtin.command: >-
+    curl -sk --max-time 15 -o /dev/null -w '%{http_code}'
+    --resolve {{ item }}.{{ service_domain }}:443:{{ ansible_host }}
+    https://{{ item }}.{{ service_domain }}
+  loop: >-
+    {{
+      (caddy_services.keys() | list)
+      + (
+        download_apps | dict2items | selectattr('value.proxy')
+        | map(attribute='key') | list
+      )
+    }}
+  register: media_caddy_gates
+  changed_when: false
+  failed_when: >-
+    media_caddy_gates.stdout == '000'
+    or media_caddy_gates.stdout is match('^5[0-9]{2}$')
+  retries: 3
+  delay: 5
+  until: media_caddy_gates is not failed
+  when: media_access_layer | default('manual') == 'caddy'
+
+- name: Mark svc-media verification complete
+  ansible.builtin.set_fact:
+    svc_media_verified: true

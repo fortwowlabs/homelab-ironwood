@@ -1,0 +1,121 @@
+---
+- name: Start firewalld before applying service rules
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: true
+    state: started
+
+- name: Open LAN-scoped media and notification ports
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family=ipv4 source address={{ lan_cidr }} port
+      port={{ item }} protocol=tcp accept
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: [8080, 8096]
+
+- name: Remove the legacy unscoped Jellyfin port opening
+  ansible.posix.firewalld:
+    port: 8096/tcp
+    permanent: true
+    immediate: true
+    state: disabled
+
+- name: Ensure dnsmasq loads managed configuration snippets
+  ansible.builtin.lineinfile:
+    path: /etc/dnsmasq.conf
+    line: "conf-dir=/etc/dnsmasq.d/,*.conf"
+    regexp: '^\s*#?\s*conf-dir=/etc/dnsmasq\.d'
+    create: true
+    mode: "0644"
+  notify: restart dnsmasq
+
+- name: Render the private service DNS zone
+  ansible.builtin.template:
+    src: dnsmasq-fortwow.conf.j2
+    dest: /etc/dnsmasq.d/fort-wow.conf
+    mode: "0644"
+    validate: "dnsmasq --test --conf-file=%s"
+  notify: restart dnsmasq
+
+- name: Open DNS to the LAN source range
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family=ipv4 source address={{ lan_cidr }} port port=53
+      protocol={{ item }} accept
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: [udp, tcp]
+
+- name: Enable the private DNS service
+  ansible.builtin.systemd:
+    name: dnsmasq
+    enabled: true
+    state: started
+
+- name: Apply DNS configuration before validation
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify private DNS resolves through the canonical service address
+  ansible.builtin.command: >-
+    dig +short +time=2 +tries=2 @{{ ansible_host }}
+    jellyfin.{{ service_domain }}
+  register: media_dns_gate
+  changed_when: false
+  failed_when: ansible_host not in media_dns_gate.stdout
+  check_mode: false
+
+- name: Configure Caddy access layer
+  when: media_access_layer | default('manual') == 'caddy'
+  block:
+    - name: Allow Caddy to connect to proxied backends under SELinux
+      ansible.posix.seboolean:
+        name: httpd_can_network_connect
+        state: true
+        persistent: true
+
+    - name: Open Caddy HTTPS to the LAN source range
+      ansible.posix.firewalld:
+        rich_rule: >-
+          rule family=ipv4 source address={{ lan_cidr }} port port=443
+          protocol=tcp accept
+        permanent: true
+        immediate: true
+        state: enabled
+
+    - name: Render Caddy configuration from service catalogs
+      ansible.builtin.template:
+        src: Caddyfile.j2
+        dest: /etc/caddy/Caddyfile
+        mode: "0644"
+        validate: "caddy validate --adapter caddyfile --config %s"
+      notify: restart caddy
+
+    - name: Enable Caddy
+      ansible.builtin.systemd:
+        name: caddy
+        enabled: true
+        state: started
+
+    - name: Apply Caddy configuration before validation
+      ansible.builtin.meta: flush_handlers
+
+    - name: Wait for the internal CA root
+      ansible.builtin.wait_for:
+        path: /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+        timeout: 30
+      when: not ansible_check_mode
+
+    - name: Fetch the public internal CA certificate
+      ansible.builtin.fetch:
+        src: /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+        dest: "{{ playbook_dir }}/{{ service_domain }}-root-ca.crt"
+        flat: true
+      when: not ansible_check_mode
+
+- name: Note a deliberately disabled Caddy layer
+  ansible.builtin.debug:
+    msg: "Caddy skipped (media_access_layer={{ media_access_layer | default('manual') }})."
+  when: media_access_layer | default('manual') != 'caddy'

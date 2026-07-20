@@ -5,4 +5,5 @@ After=vpn-netns.service
 
 [Service]
 Type=oneshot
+EnvironmentFile=/etc/homelab-notify.env
 ExecStart=/usr/local/sbin/leak-canary.sh

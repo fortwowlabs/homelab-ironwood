@@ -1,0 +1,33 @@
+{{ ansible_managed | comment }}
+# homelab-iac catalog-managed
+[Unit]
+Description={{ item.key }} (inside vpn netns)
+Requires=vpn-netns.service
+After=vpn-netns.service
+BindsTo=vpn-netns.service
+PartOf=vpn-netns.service
+{% if item.value.media_mount %}
+RequiresMountsFor=/srv/media
+{% endif %}
+
+[Container]
+Image={{ item.value.image }}
+ContainerName={{ item.key }}
+Environment=PUID={{ svc_uid }}
+Environment=PGID={{ svc_gid }}
+Environment=TZ={{ timezone }}
+PodmanArgs=--network=ns:/run/netns/vpn
+DNS={{ mullvad_dns }}
+{% for volume in item.value.volumes %}
+Volume={{ volume }}
+{% endfor %}
+
+[Service]
+{% if item.value.media_mount %}
+ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
+{% endif %}
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

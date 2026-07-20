@@ -5,8 +5,20 @@ vm_name:    svc-download
 vm_cores:   4
 vm_memory:  6144
 vm_disk_gb: 160
-vm_ip:      "{{ svc_download_ip }}"
 vm_startup: "order=3,up=30"
+service_guarded_egress: true
+service_repo_packages: [epel-release]
+service_packages:
+  - wireguard-tools
+  - podman
+  - curl
+  - nfs-utils
+  - nftables
+  - policycoreutils-python-utils
+  - checkpolicy
+  - cockpit
+  - cockpit-podman
+  - cockpit-storaged
 vm_extra_packages:
   - wireguard-tools
   - podman

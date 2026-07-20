@@ -6,4 +6,5 @@ RequiresMountsFor=/srv/backups
 
 [Service]
 Type=oneshot
+EnvironmentFile=/etc/homelab-notify.env
 ExecStart=/usr/local/sbin/backup-dl-appdata.sh

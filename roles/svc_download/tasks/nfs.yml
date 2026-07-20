@@ -1,0 +1,8 @@
+---
+- name: Create book library directories as the service UID
+  ansible.builtin.command:
+    cmd: >-
+      setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups --
+      mkdir -p /srv/media/{{ item }}
+    creates: "/srv/media/{{ item }}"
+  loop: [books, ebooks, audiobooks]

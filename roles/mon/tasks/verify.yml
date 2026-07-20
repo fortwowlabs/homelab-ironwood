@@ -1,0 +1,24 @@
+---
+- name: Verify Cockpit is listening
+  ansible.builtin.command: systemctl is-active cockpit.socket
+  changed_when: false
+
+- name: Verify the disk alert timer is active
+  ansible.builtin.command: systemctl is-active homelab-diskalert.timer
+  changed_when: false
+
+- name: Verify notification credentials are not executable or group-readable
+  ansible.builtin.stat:
+    path: /etc/homelab-notify.env
+  register: mon_notify_environment
+
+- name: Assert notification credential permissions
+  ansible.builtin.assert:
+    that:
+      - mon_notify_environment.stat.exists
+      - mon_notify_environment.stat.mode == '0600'
+      - mon_notify_environment.stat.pw_name == 'root'
+
+- name: Mark monitoring verification complete
+  ansible.builtin.set_fact:
+    mon_verified: true

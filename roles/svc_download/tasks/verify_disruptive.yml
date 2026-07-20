@@ -1,0 +1,135 @@
+---
+- name: Capture catalog service state before the fail-closed drill
+  ansible.builtin.command: "systemctl is-active dl-{{ item.key }}.service"
+  loop: "{{ download_apps | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: download_pre_drill_state
+  failed_when: false
+  changed_when: false
+
+- name: Capture leak-canary timer state before the drill
+  ansible.builtin.command: systemctl is-active leak-canary.timer
+  register: download_pre_drill_canary_state
+  failed_when: false
+  changed_when: false
+
+- name: Capture VPN namespace state before the drill
+  ansible.builtin.command: systemctl is-active vpn-netns.service
+  register: download_pre_drill_vpn_state
+  failed_when: false
+  changed_when: false
+
+- name: Exercise fail-closed propagation with guaranteed recovery
+  block:
+    - name: Pause the canary during the intentional outage
+      ansible.builtin.systemd:
+        name: leak-canary.timer
+        state: stopped
+
+    - name: Stop any in-flight canary check before the intentional outage
+      ansible.builtin.systemd:
+        name: leak-canary.service
+        state: stopped
+
+    - name: Check that no leak flag exists before the drill
+      ansible.builtin.stat:
+        path: /var/lib/leak-canary/tripped
+      register: download_pre_drill_trip_flag
+
+    - name: Refuse to drill while a real leak flag is unresolved
+      ansible.builtin.assert:
+        that: not download_pre_drill_trip_flag.stat.exists
+        fail_msg: >-
+          Clear and investigate /var/lib/leak-canary/tripped before running
+          an intentional fail-closed drill.
+
+    - name: Stop the VPN namespace
+      ansible.builtin.systemd:
+        name: vpn-netns.service
+        state: stopped
+
+    - name: Assert every catalog workload stopped with the namespace
+      ansible.builtin.command: "systemctl is-active dl-{{ item.key }}.service"
+      loop: "{{ download_apps | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: download_stopped_state
+      failed_when: download_stopped_state.rc == 0
+      changed_when: false
+
+    - name: Inject a drill failure for recovery testing
+      ansible.builtin.fail:
+        msg: "Injected disruptive-verification failure"
+      when: verify_disruptive_inject_failure | default(false) | bool
+  always:
+    - name: Attempt to restore the VPN namespace when it was previously active
+      ansible.builtin.systemd:
+        name: vpn-netns.service
+        state: started
+      when: download_pre_drill_vpn_state.stdout == 'active'
+      register: download_restore_vpn_attempt
+      failed_when: false
+
+    - name: Attempt to restore workloads that were previously active
+      ansible.builtin.systemd:
+        name: "dl-{{ item.item.key }}.service"
+        state: started
+      loop: "{{ download_pre_drill_state.results | selectattr('stdout', 'equalto', 'active') | list }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+      register: download_restore_app_attempts
+      failed_when: false
+
+    - name: Attempt to restore the leak-canary timer when it was previously active
+      ansible.builtin.systemd:
+        name: leak-canary.timer
+        state: started
+      when: download_pre_drill_canary_state.stdout == 'active'
+      register: download_restore_timer_attempt
+      failed_when: false
+
+    - name: Read restored VPN namespace state
+      ansible.builtin.command: systemctl is-active vpn-netns.service
+      when: download_pre_drill_vpn_state.stdout == 'active'
+      register: download_post_drill_vpn_state
+      failed_when: false
+      changed_when: false
+
+    - name: Read restored workload states
+      ansible.builtin.command: "systemctl is-active dl-{{ item.item.key }}.service"
+      loop: "{{ download_pre_drill_state.results | selectattr('stdout', 'equalto', 'active') | list }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+      register: download_post_drill_app_states
+      failed_when: false
+      changed_when: false
+
+    - name: Read restored leak-canary timer state
+      ansible.builtin.command: systemctl is-active leak-canary.timer
+      when: download_pre_drill_canary_state.stdout == 'active'
+      register: download_post_drill_timer_state
+      failed_when: false
+      changed_when: false
+
+    - name: Check that the drill introduced no persistent leak flag
+      ansible.builtin.stat:
+        path: /var/lib/leak-canary/tripped
+      register: download_post_drill_trip_flag
+
+    - name: Assert every previously active service was restored
+      ansible.builtin.assert:
+        that:
+          - >-
+            download_pre_drill_vpn_state.stdout != 'active'
+            or (download_post_drill_vpn_state.rc | default(1)) == 0
+          - >-
+            download_post_drill_app_states.results | default([])
+            | rejectattr('rc', 'equalto', 0) | list | length == 0
+          - >-
+            download_pre_drill_canary_state.stdout != 'active'
+            or (download_post_drill_timer_state.rc | default(1)) == 0
+          - not download_post_drill_trip_flag.stat.exists
+        fail_msg: >-
+          The recovery path attempted every prior service, but at least one
+          service is still inactive or the drill introduced a canary trip.

@@ -19,6 +19,13 @@ MODES = {
     "check": ["--check"],
     "diff": ["--check", "--diff"],
 }
+RENDERED_FILES = (
+    "peer.conf",
+    "vpn-netns.env",
+    "notify.env",
+    "romm.env",
+    "romm-db.env",
+)
 
 
 def main() -> int:
@@ -36,8 +43,8 @@ def main() -> int:
         local_temp.mkdir()
         environment["ANSIBLE_LOCAL_TEMP"] = str(local_temp)
         for mode, arguments in MODES.items():
-            rendered = output_dir / "secret.env"
-            rendered.unlink(missing_ok=True)
+            for filename in RENDERED_FILES:
+                (output_dir / filename).unlink(missing_ok=True)
             command = [
                 str(ansible),
                 "--inventory",
@@ -61,15 +68,21 @@ def main() -> int:
             if SENTINEL in combined_output:
                 failures.append(f"{mode}: sentinel appeared in Ansible output")
             if mode in {"normal", "verbose"}:
-                if not rendered.is_file() or SENTINEL not in rendered.read_text(encoding="utf-8"):
-                    failures.append(f"{mode}: fixture did not actually render the sentinel")
+                for filename in RENDERED_FILES:
+                    rendered = output_dir / filename
+                    if not rendered.is_file() or SENTINEL not in rendered.read_text(encoding="utf-8"):
+                        failures.append(
+                            f"{mode}: production template {filename} did not render the sentinel"
+                        )
 
     if failures:
         print("Secret output validation failed:", file=sys.stderr)
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
         return 1
-    print("Secret output suppression: normal, verbose, check, and diff OK")
+    print(
+        "Production secret output suppression: normal, verbose, check, and diff OK"
+    )
     return 0
 
 

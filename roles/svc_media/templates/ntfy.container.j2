@@ -1,0 +1,19 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=ntfy notification server
+
+[Container]
+Image={{ media_images.ntfy }}
+ContainerName=ntfy
+Exec=serve
+PublishPort={{ ansible_host }}:8080:80
+Volume=%h/appdata/ntfy/cache:/var/cache/ntfy:Z
+Volume=%h/appdata/ntfy/etc:/etc/ntfy:Z
+Environment=TZ={{ timezone }}
+Environment=NTFY_BASE_URL=http://{{ ansible_host }}:8080
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

@@ -15,11 +15,10 @@ svc_uid:         10001
 svc_gid:         10001
 timezone:        America/New_York
 
-# --- Hosts ---
-pve_host_ip:     192.168.1.10       # thurgadin (also pve_api_host in hosts.yml)
-truenas_ip:      192.168.1.20
-svc_media_ip:    192.168.1.30
-svc_download_ip: 192.168.1.31
+# --- Unmanaged storage host ---
+# Managed host addresses live only in inventory/hosts.yml (`ansible_host` for
+# service VMs and `pve_api_host` for thurgadin).
+truenas_ip: 192.168.1.20
 
 # --- TrueNAS NFS (created by hand in Phase 1 — NOT automated) ---
 # These live INSIDE the exported `tank` dataset (exports are tank + rust;
@@ -27,6 +26,9 @@ svc_download_ip: 192.168.1.31
 nfs_media_export:   "/mnt/sata_wd_14tb/tank/media"
 nfs_backups_export: "/mnt/sata_wd_14tb/tank/backups"
 nfs_opts: "hard,nofail,x-systemd.automount,x-systemd.mount-timeout=30"
+service_nfs_mounts:
+  - { path: /srv/media, export: "{{ nfs_media_export }}" }
+  - { path: /srv/backups, export: "{{ nfs_backups_export }}" }
 
 # --- Proxmox storage (from /etc/pve/storage.cfg) ---
 pve_storage:         nvme0pool           # VM disks
@@ -70,8 +72,8 @@ mullvad_dns: "10.64.0.1"
 # the push fails — v5 prints a loud WARNING in the play output instead of
 # swallowing it (v4 was silent). The svc-download leak canary alerts to
 # this same target; the host backstop opens egress to it automatically
-# when the ntfy host == svc_media_ip.
-ntfy_url:   "http://192.168.1.30:8080"     # LAN-internal ntfy on svc-media
+# when the ntfy host is the canonical svc-media inventory address.
+ntfy_url:   "http://{{ hostvars['svc-media'].ansible_host }}:8080"
 ntfy_topic: "homelab-deploy"
 
 # --- svc-media access layer -----------------------------------------------
@@ -83,13 +85,13 @@ media_access_layer: caddy
 # --- Service naming (v6) --------------------------------------------------
 # Every service is reachable at https://<key>.{{ service_domain }} instead of
 # an IP:port. Caddy on svc-media is the single reverse proxy (internal-CA TLS);
-# dnsmasq on svc-media answers *.{{ service_domain }} -> svc_media_ip. pfSense
+# dnsmasq on svc-media answers *.{{ service_domain }} -> its ansible_host. pfSense
 # forwards the domain to it and Tailscale split-DNS does the same for the
-# tailnet — both one-time, see docs/dns-and-names.md.
+# tailnet — both one-time; see docs/services.md and docs/deployment.md.
 #
-# THIS DICT IS THE SINGLE SOURCE OF TRUTH for the Caddy vhosts AND the DNS
-# records (roles/svc_media/templates/{Caddyfile,dnsmasq-fortwow.conf}.j2 both
-# iterate it). Add a service here and it gets a name + a vhost.
+# This catalog is the source of truth for media and infrastructure endpoints.
+# Download endpoints are derived from download_apps, so their ports and
+# dashboard metadata are never duplicated here.
 #   backend         host:port Caddy proxies to (127.0.0.1 = on svc-media)
 #   scheme          optional, default http (set to https for TLS backends)
 #   tls_skip_verify optional bool, for self-signed https backends
@@ -98,17 +100,12 @@ service_domain: fort.wow
 # group/icon are used by the Homepage dashboard; Caddy/dnsmasq ignore them.
 caddy_services:
   # Jellyfin publishes only on svc-media's LAN address, not loopback.
-  jellyfin:   { backend: "{{ svc_media_ip }}:8096",    group: Media,     icon: jellyfin }
+  jellyfin:   { backend: "{{ hostvars['svc-media'].ansible_host }}:8096", group: Media, icon: jellyfin }
   abs:        { backend: "127.0.0.1:13378",            group: Media,     icon: audiobookshelf }
   romm:       { backend: "127.0.0.1:8081",             group: Media,     icon: romm }
   seerr:      { backend: "127.0.0.1:5055",             group: Media,     icon: overseerr }
-  sonarr:     { backend: "{{ svc_download_ip }}:8989", group: Downloads, icon: sonarr }
-  radarr:     { backend: "{{ svc_download_ip }}:7878", group: Downloads, icon: radarr }
-  prowlarr:   { backend: "{{ svc_download_ip }}:9696", group: Downloads, icon: prowlarr }
-  sabnzbd:    { backend: "{{ svc_download_ip }}:8080", group: Downloads, icon: sabnzbd }
-  lazylibrarian: { backend: "{{ svc_download_ip }}:5299", group: Downloads, icon: lazylibrarian }
   # monitoring (feat/monitoring): Cockpit serves its own self-signed TLS
   home:          { backend: "127.0.0.1:3000",          group: Infra, icon: homepage }
-  ntfy:          { backend: "{{ svc_media_ip }}:8080", group: Infra, icon: ntfy }
+  ntfy:          { backend: "{{ hostvars['svc-media'].ansible_host }}:8080", group: Infra, icon: ntfy }
   cockpit-media: { backend: "127.0.0.1:9090",          group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }
-  cockpit-dl:    { backend: "{{ svc_download_ip }}:9090", group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }
+  cockpit-dl:    { backend: "{{ hostvars['svc-download'].ansible_host }}:9090", group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }

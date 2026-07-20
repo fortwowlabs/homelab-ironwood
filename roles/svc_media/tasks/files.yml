@@ -1,0 +1,139 @@
+---
+- name: Enable lingering for the rootless service account
+  ansible.builtin.command: loginctl enable-linger homelab
+  changed_when: false
+
+- name: Define rootless media Quadlets
+  ansible.builtin.set_fact:
+    media_quadlet_catalog:
+      - { name: jellyfin, src: jellyfin.container.j2 }
+      - { name: audiobookshelf, src: audiobookshelf.container.j2 }
+      - { name: romm-db, src: romm-db.container.j2 }
+      - { name: romm, src: romm.container.j2 }
+      - { name: seerr, src: seerr.container.j2 }
+      - { name: ntfy, src: ntfy.container.j2 }
+      - { name: homepage, src: homepage.container.j2 }
+  changed_when: false
+
+- name: Create rootless Quadlet and application directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop:
+    - /opt/homelab/.config/containers/systemd
+    - /opt/homelab/appdata/jellyfin/config
+    - /opt/homelab/appdata/jellyfin/cache
+    - /opt/homelab/appdata/audiobookshelf/config
+    - /opt/homelab/appdata/audiobookshelf/metadata
+    - /opt/homelab/appdata/seerr
+    - /opt/homelab/appdata/romm/resources
+    - /opt/homelab/appdata/romm/assets
+    - /opt/homelab/appdata/romm/config
+    - /opt/homelab/appdata/romm/redis-data
+    - /opt/homelab/appdata/romm/mysql
+    - /opt/homelab/appdata/homepage
+    - /opt/homelab/appdata/ntfy/cache
+    - /opt/homelab/appdata/ntfy/etc
+
+- name: Render rootless media Quadlets
+  ansible.builtin.template:
+    src: "{{ item.src }}"
+    dest: "/opt/homelab/.config/containers/systemd/{{ item.name }}.container"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  loop: "{{ media_quadlet_catalog }}"
+  loop_control:
+    label: "{{ item.name }}"
+  register: media_quadlet_templates
+
+- name: Install the RomM private network Quadlet
+  ansible.builtin.copy:
+    src: quadlets/romm.network
+    dest: /opt/homelab/.config/containers/systemd/romm.network
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: media_romm_network
+
+- name: Render Homepage configuration from the service catalogs
+  ansible.builtin.template:
+    src: "homepage/{{ item }}.j2"
+    dest: "/opt/homelab/appdata/homepage/{{ item }}"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  loop:
+    - services.yaml
+    - settings.yaml
+    - widgets.yaml
+    - bookmarks.yaml
+  register: media_homepage_templates
+
+- name: Require RomM database and authentication secrets
+  ansible.builtin.assert:
+    that:
+      - (vault_romm_db_password | default('')) | length > 0
+      - (vault_romm_db_root_password | default('')) | length > 0
+      - (vault_romm_auth_secret_key | default('')) | length >= 32
+    fail_msg: >-
+      Configure the RomM database passwords and an authentication secret of
+      at least 32 characters in the encrypted inventory.
+  no_log: true
+  diff: false
+
+- name: Render service-account-owned RomM secret files
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/opt/homelab/appdata/romm/{{ item }}"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0600"
+  loop: [romm.env, romm-db.env]
+  register: media_romm_secret_templates
+  no_log: true
+  diff: false
+
+- name: Render the media backup program
+  ansible.builtin.template:
+    src: backup-media.sh.j2
+    dest: /usr/local/sbin/backup-media.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render the media backup service
+  ansible.builtin.template:
+    src: backup-media.service.j2
+    dest: /etc/systemd/system/backup-media.service
+    mode: "0644"
+  notify: reload systemd
+
+- name: Install the media backup timer
+  ansible.builtin.copy:
+    src: backup-media.timer
+    dest: /etc/systemd/system/backup-media.timer
+    mode: "0644"
+  notify: reload systemd
+
+- name: Calculate media services whose rendered configuration changed
+  ansible.builtin.set_fact:
+    media_services_to_restart: >-
+      {{
+        (
+          (
+            media_quadlet_templates.results
+            | selectattr('changed')
+            | map(attribute='item.name')
+            | list
+          )
+          + (['romm-db', 'romm'] if media_romm_network.changed else [])
+          + (['homepage'] if (media_homepage_templates.results | selectattr('changed') | list | length > 0) else [])
+          + (['romm-db', 'romm'] if (media_romm_secret_templates.changed | default(false)) else [])
+        ) | unique | list
+      }}
+  changed_when: media_services_to_restart | length > 0
+  notify: media configuration changed

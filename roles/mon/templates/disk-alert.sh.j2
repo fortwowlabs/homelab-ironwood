@@ -6,12 +6,11 @@
 set -uo pipefail
 
 THRESH={{ disk_alert_threshold | default(85) }}
-NTFY="{{ ntfy_url }}/{{ ntfy_topic }}"
-{% if (vault_ntfy_token | default('')) | length > 0 %}
-AUTH=(-H "Authorization: Bearer {{ vault_ntfy_token }}")
-{% else %}
+NTFY="${NTFY_URL}/${NTFY_TOPIC}"
 AUTH=()
-{% endif %}
+if [[ -n "${NTFY_TOKEN:-}" ]]; then
+    AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+fi
 host=$(hostname -s)
 
 over=""

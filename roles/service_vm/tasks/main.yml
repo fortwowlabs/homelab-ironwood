@@ -1,0 +1,17 @@
+---
+- name: Validate VM bootstrap invariants
+  ansible.builtin.import_tasks: bootstrap.yml
+  tags: [always]
+
+- name: Install service VM packages
+  ansible.builtin.import_tasks: packages.yml
+  tags: [files]
+
+- name: Configure shared NFS mounts
+  ansible.builtin.import_tasks: nfs.yml
+  tags: [nfs]
+
+- name: Verify shared VM invariants
+  ansible.builtin.import_tasks: verify.yml
+  when: not ansible_check_mode
+  tags: [verify]

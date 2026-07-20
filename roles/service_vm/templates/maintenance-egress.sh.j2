@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Managed by Ansible. Temporarily opens package/registry egress only when the
+# svc-download backstop is already active; a fresh VM has normal bootstrap
+# egress and needs no temporary rules.
+set -euo pipefail
+
+state=/run/homelab-maintenance-egress.open
+backstop=/etc/nftables/host-backstop.nft
+
+case "${1:-}" in
+  open)
+    if ! nft list table inet host_backstop >/dev/null 2>&1; then
+      echo "inactive"
+      exit 0
+    fi
+    [[ ! -e "$state" ]] || { echo "maintenance egress is already open" >&2; exit 1; }
+    nft list chain inet host_backstop output | grep -q 'policy drop'
+    # Record the open transaction before changing the rules. The caller's
+    # always block can then restore safely even if a later insertion fails.
+    install -m 0600 /dev/null "$state"
+    nft insert rule inet host_backstop output ip daddr {{ lan_dns }} udp dport 53 accept
+    nft insert rule inet host_backstop output ip daddr {{ lan_dns }} tcp dport 53 accept
+    nft insert rule inet host_backstop output tcp dport '{ 80, 443 }' accept
+    echo "opened"
+    ;;
+  close)
+    if [[ ! -e "$state" ]]; then
+      echo "inactive"
+      exit 0
+    fi
+    nft -f "$backstop"
+    nft list chain inet host_backstop output | grep -q 'policy drop'
+    rm -f "$state"
+    echo "closed"
+    ;;
+  *)
+    echo "usage: $0 open|close" >&2
+    exit 64
+    ;;
+esac

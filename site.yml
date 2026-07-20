@@ -2,29 +2,23 @@
 # ============================================================================
 # site.yml — full unattended deploy. Run from the MBP:
 #     ansible-playbook site.yml --ask-vault-pass
-# Resume a slice (v5: tag routing actually works now — includes are tagged
-# `always` and the tasks inside each role carry the real tags):
-#     ansible-playbook site.yml --limit svc-download --tags jail,verify --ask-vault-pass
-#     ansible-playbook site.yml --tags provision --ask-vault-pass
-# Dry-run / drift check after day one (in-guest config only; VM shape is
-# reconciled separately — see `make reconcile`):
-#     ansible-playbook site.yml --check --diff --ask-vault-pass
+# Use the Make targets documented in README.md for deployment, scoped
+# convergence, safe verification, disruptive verification, and drift checks.
 #
-# Ordering matches DEPLOY.md: provision both VMs (API) -> cloud-init gates ->
+# Ordering is: provision both VMs (API) -> shared guest gates/packages/NFS ->
 # configure download (jail first, the critical path) -> configure media.
 # A failure anywhere posts to ntfy and stops (rescue tasks are tagged
 # `always` so alerting fires even on tag-sliced runs). Success posts a green
 # ntfy at the end of FULL runs only.
 #
-# PREREQUISITES (one-time, NOT automated — see DEPLOY.md + README):
+# PREREQUISITES (one-time, NOT automated — see docs/deployment.md):
 #   - TrueNAS Phase 1 done (homelab uid 10001, media+backups datasets, NFS
 #     exports restricted to .30/.31, IP pinned, encryption auto-unlock tested)
 #   - PVE pool `homelab-svc` + scoped API token created; vault filled
 #   - Mullvad configs generated; vault filled
-#   - admin_ssh_pubkey set in group_vars/all.yml
+#   - admin_ssh_pubkey set in inventory/group_vars/all/main.yml
 #   - vault_romm_* filled (RomM DB + optional metadata keys)
-# After deploy: the 3 DNS glue steps in docs/dns-and-names.md (pfSense domain
-# override, Tailscale split-DNS, install the Caddy CA). See DEPLOY-CHECKLIST.md.
+# After deploy, complete the DNS and Caddy CA steps in docs/deployment.md.
 # ============================================================================
 
 # ---------- Phase 3 & 5: provision both VMs via the PVE API ----------
@@ -47,7 +41,7 @@
             vm_cores:   "{{ hostvars[item].vm_cores }}"
             vm_memory:  "{{ hostvars[item].vm_memory }}"
             vm_disk_gb: "{{ hostvars[item].vm_disk_gb }}"
-            vm_ip:      "{{ hostvars[item].vm_ip }}"
+            vm_ip:      "{{ hostvars[item].ansible_host }}"
             vm_startup: "{{ hostvars[item].vm_startup }}"
             vm_extra_packages: "{{ hostvars[item].vm_extra_packages }}"
           loop:
@@ -71,47 +65,34 @@
             msg: "Provisioning failed — see above."
           tags: [always]
 
-# ---------- Cloud-init GATES: both guests, strict ----------
-# v5: strict — `degraded done` is now a FAILURE. It previously concealed dnf
-# package errors. If a benign degrade ever appears, inspect it with
-# `cloud-init status --long` on the guest before loosening this.
-- name: svc-download cloud-init gate
-  hosts: svc-download
+# ---------- Shared guest bootstrap, packages and NFS ----------
+- name: Prepare service VMs
+  hosts: service_vms
   gather_facts: false
   any_errors_fatal: true
   tasks:
-    - name: Wait for cloud-init to finish (strict)
-      ansible.builtin.command: cloud-init status --wait --long
-      changed_when: false
-      register: ci
-      failed_when: "'status: done' not in ci.stdout"
-      tags: [always]
-    - name: homelab uid/gid + SELinux enforcing
-      ansible.builtin.shell: "id homelab && getenforce"
-      register: idcheck
-      changed_when: false
-      failed_when: >-
-        ('uid=' ~ svc_uid) not in idcheck.stdout or 'Enforcing' not in idcheck.stdout
-      tags: [always]
-
-- name: svc-media cloud-init gate
-  hosts: svc-media
-  gather_facts: false
-  any_errors_fatal: true
-  tasks:
-    - name: Wait for cloud-init to finish (strict)
-      ansible.builtin.command: cloud-init status --wait --long
-      changed_when: false
-      register: ci
-      failed_when: "'status: done' not in ci.stdout"
-      tags: [always]
-    - name: homelab uid/gid + SELinux enforcing
-      ansible.builtin.shell: "id homelab && getenforce"
-      register: idcheck
-      changed_when: false
-      failed_when: >-
-        ('uid=' ~ svc_uid) not in idcheck.stdout or 'Enforcing' not in idcheck.stdout
-      tags: [always]
+    - name: Prepare service VM block
+      block:
+        - name: Run shared service VM role
+          ansible.builtin.include_role:
+            name: service_vm
+          tags: [always]
+      rescue:
+        - name: Notify shared guest preparation failure
+          ansible.builtin.include_role:
+            name: notify
+            apply:
+              tags: [always]
+          tags: [always]
+          vars:
+            ntfy_title: "homelab deploy FAILED ({{ inventory_hostname }})"
+            ntfy_result: "Shared package, identity, or NFS preparation failed."
+            ntfy_priority: high
+            ntfy_tags: rotating_light
+        - name: Abort shared guest preparation
+          ansible.builtin.fail:
+            msg: "service VM preparation failed on {{ inventory_hostname }}"
+          tags: [always]
 
 # ---------- Phase 4: the jail (critical path) ----------
 - name: Configure svc-download (netns jail + stack)
@@ -141,32 +122,7 @@
             msg: "svc-download failed — see above."
           tags: [always]
 
-# ---------- Phase 5-6: media ----------
-- name: Configure svc-media (rootless media stack)
-  hosts: svc-media
-  gather_facts: true
-  any_errors_fatal: true
-  tasks:
-    - block:
-        - ansible.builtin.include_role:
-            name: svc_media
-          tags: [always]
-      rescue:
-        - name: Notify media failure
-          ansible.builtin.include_role:
-            name: notify
-            apply:
-              tags: [always]
-          tags: [always]
-          vars:
-            ntfy_title: "homelab deploy: svc-media FAILED"
-            ntfy_result: "svc-media configuration failed, but the jail is up and verified."
-            ntfy_priority: "high"
-            ntfy_tags: "warning"
-        - ansible.builtin.fail:
-            msg: "svc-media failed — see above."
-          tags: [always]
-
+# Cockpit must answer before svc-media verifies every configured Caddy backend.
 - name: Monitoring (Cockpit + disk alarm on both VMs)
   hosts: service_vms
   gather_facts: true
@@ -197,6 +153,32 @@
             msg: "monitoring failed on {{ inventory_hostname }}"
           tags: [always]
 
+# ---------- Phase 5-6: media ----------
+- name: Configure svc-media (rootless media stack)
+  hosts: svc-media
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - block:
+        - ansible.builtin.include_role:
+            name: svc_media
+          tags: [always]
+      rescue:
+        - name: Notify media failure
+          ansible.builtin.include_role:
+            name: notify
+            apply:
+              tags: [always]
+          tags: [always]
+          vars:
+            ntfy_title: "homelab deploy: svc-media FAILED"
+            ntfy_result: "svc-media configuration failed, but the jail is up and verified."
+            ntfy_priority: "high"
+            ntfy_tags: "warning"
+        - ansible.builtin.fail:
+            msg: "svc-media failed — see above."
+          tags: [always]
+
 # ---------- Success notification (full runs only — deliberately untagged,
 # ---------- so tag-sliced runs don't claim a full deploy succeeded) ----------
 - name: Announce success
@@ -208,9 +190,12 @@
         that:
           - hostvars['svc-download'].svc_download_verified | default(false) | bool
           - hostvars['svc-media'].svc_media_verified | default(false) | bool
+          - hostvars['svc-download'].service_vm_verified | default(false) | bool
+          - hostvars['svc-media'].service_vm_verified | default(false) | bool
           - hostvars['svc-download'].mon_verified | default(false) | bool
           - hostvars['svc-media'].mon_verified | default(false) | bool
         fail_msg: "Refusing to send success: one or more deployment phases did not verify."
+      when: not ansible_check_mode
 
     - name: Green ntfy
       ansible.builtin.include_role:
@@ -218,9 +203,10 @@
       vars:
         ntfy_title: "homelab deploy OK"
         ntfy_result: >-
-          Both VMs provisioned and verified. Jail leak-tested (containers in
-          netns, Mullvad confirmed, fail-closed kill test passed, canary green).
-          Container-level NFS probes passed. Jellyfin answering on the LAN.
-          Next: app wiring (DEPLOY Phase 7).
+          Both VMs converged and passed non-disruptive verification: catalog
+          containers are in the VPN namespace, Mullvad and the canary are
+          green, NFS probes cleaned up, and media/Caddy services answer.
+          Run make verify-disruptive explicitly during a maintenance window.
         ntfy_priority: "default"
         ntfy_tags: "white_check_mark"
+      when: not ansible_check_mode

@@ -1,0 +1,13 @@
+{{ ansible_managed | comment }}
+# homelab-iac catalog-managed
+[Unit]
+Description={{ item.key }} UI proxy socket (LAN to VPN namespace)
+Wants=network-online.target
+After=network-online.target
+
+[Socket]
+ListenStream={{ ansible_host }}:{{ item.value.ui_port }}
+FreeBind=yes
+
+[Install]
+WantedBy=sockets.target

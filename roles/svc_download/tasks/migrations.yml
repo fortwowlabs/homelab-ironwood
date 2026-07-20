@@ -1,0 +1,70 @@
+---
+- name: Define obsolete download-stack units
+  ansible.builtin.set_fact:
+    download_legacy_unit_catalog:
+      - path: /etc/containers/systemd/dl-nzbhydra2.container
+        unit: dl-nzbhydra2.service
+      - path: /etc/systemd/system/hydra-proxy.socket
+        unit: hydra-proxy.socket
+      - path: /etc/systemd/system/hydra-proxy.service
+        unit: hydra-proxy.service
+      - path: /etc/systemd/system/sab-proxy.socket
+        unit: sab-proxy.socket
+      - path: /etc/systemd/system/sab-proxy.service
+        unit: sab-proxy.service
+      - path: /etc/systemd/system/ll-proxy.socket
+        unit: ll-proxy.socket
+      - path: /etc/systemd/system/ll-proxy.service
+        unit: ll-proxy.service
+  changed_when: false
+
+- name: Discover obsolete download-stack units
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop: "{{ download_legacy_unit_catalog }}"
+  loop_control:
+    label: "{{ item.unit }}"
+  register: download_legacy_units
+
+- name: Stop discovered obsolete download-stack units
+  ansible.builtin.systemd:
+    name: "{{ item.item.unit }}"
+    state: stopped
+  loop: "{{ download_legacy_units.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item.unit }}"
+
+- name: Disable discovered obsolete proxy sockets
+  ansible.builtin.systemd:
+    name: "{{ item.item.unit }}"
+    enabled: false
+  loop: >-
+    {{
+      download_legacy_units.results
+      | selectattr('stat.exists')
+      | selectattr('item.unit', 'match', '.*\\.socket$')
+      | list
+    }}
+  loop_control:
+    label: "{{ item.item.unit }}"
+
+- name: Remove discovered obsolete download-stack units
+  ansible.builtin.file:
+    path: "{{ item.item.path }}"
+    state: absent
+  loop: "{{ download_legacy_units.results | selectattr('stat.exists') | list }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  notify: reload systemd
+
+- name: Check for an obsolete NZBHydra2 container
+  ansible.builtin.command: podman container exists nzbhydra2
+  register: download_legacy_hydra_container
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Remove the obsolete NZBHydra2 container only when present
+  ansible.builtin.command: podman rm -f nzbhydra2
+  when: download_legacy_hydra_container.rc == 0
+  changed_when: true

@@ -1,0 +1,21 @@
+---
+- name: Ensure shared NFS mountpoints exist
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "0755"
+  loop: "{{ service_nfs_mounts }}"
+- name: Allow containers to use NFS-backed volumes
+  ansible.posix.seboolean:
+    name: virt_use_nfs
+    state: true
+    persistent: true
+
+- name: Mount shared NFS exports
+  ansible.posix.mount:
+    path: "{{ item.path }}"
+    src: "{{ truenas_ip }}:{{ item.export }}"
+    fstype: nfs4
+    opts: "{{ nfs_opts }}"
+    state: mounted
+  loop: "{{ service_nfs_mounts }}"

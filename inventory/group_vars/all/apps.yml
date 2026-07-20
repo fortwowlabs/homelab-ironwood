@@ -1,0 +1,69 @@
+---
+# Download-stack source of truth. Every consumer (Quadlet, socket proxy,
+# firewall, image pull, backup, canary and verification) derives from this map.
+# Image references are immutable manifests reviewed during the 2026-07 refactor.
+download_apps:
+  sabnzbd:
+    image: "lscr.io/linuxserver/sabnzbd@sha256:b67039e6739c2379f2eac8901248cdfcd78536ee34fe6948faea6b8ce8b4805b"
+    ui_port: 8080
+    volumes:
+      - /srv/appdata/sabnzbd:/config:Z
+      - /var/lib/sabnzbd-incomplete:/incomplete-downloads:Z
+      - /srv/media:/data
+    media_mount: true
+    backup_paths: [sabnzbd]
+    dashboard: { group: Downloads, icon: sabnzbd }
+    proxy: true
+
+  prowlarr:
+    image: "lscr.io/linuxserver/prowlarr@sha256:4fd7a166c8f46dd3370a871c250ee577d6c2ae97a0dbe0e3614b5ef736205620"
+    ui_port: 9696
+    volumes: [/srv/appdata/prowlarr:/config:Z]
+    media_mount: false
+    backup_paths: [prowlarr]
+    dashboard: { group: Downloads, icon: prowlarr }
+    proxy: true
+
+  sonarr:
+    image: "lscr.io/linuxserver/sonarr@sha256:24acea2956a0ccb11f103877d9f4f8576600fb34bff34820ed749c2256dab89f"
+    ui_port: 8989
+    volumes:
+      - /srv/appdata/sonarr:/config:Z
+      - /srv/media:/data
+    media_mount: true
+    backup_paths: [sonarr]
+    dashboard: { group: Downloads, icon: sonarr }
+    proxy: true
+
+  radarr:
+    image: "lscr.io/linuxserver/radarr@sha256:2b2c1c05eb3f648d2c80dfab9486147dd7bb0ad4d77fa972fc1c5de8f1da3738"
+    ui_port: 7878
+    volumes:
+      - /srv/appdata/radarr:/config:Z
+      - /srv/media:/data
+    media_mount: true
+    backup_paths: [radarr]
+    dashboard: { group: Downloads, icon: radarr }
+    proxy: true
+
+  lazylibrarian:
+    image: "lscr.io/linuxserver/lazylibrarian@sha256:bfa6da8414be2ebbcf3919cc951d8559dd2c8cec7c745ba4048c53d7d8af153d"
+    ui_port: 5299
+    volumes:
+      - /srv/appdata/lazylibrarian:/config:Z
+      - /srv/media:/data
+    media_mount: true
+    backup_paths: [lazylibrarian]
+    dashboard: { group: Downloads, icon: lazylibrarian }
+    proxy: true
+
+# Media/infra images remain separate because their Quadlets are intentionally
+# heterogeneous, but their references are immutable and centrally reviewed.
+media_images:
+  jellyfin: "docker.io/jellyfin/jellyfin@sha256:aefb67e6a7ff1debdd154a78a7bbb780fd0c873d8639210a7f6a2016ad2b35db"
+  audiobookshelf: "ghcr.io/advplyr/audiobookshelf@sha256:1eef6716183c52abafe5405e7d6be8390248ecd59c7488c44af871757ac8fc4d"
+  romm: "docker.io/rommapp/romm@sha256:c81778afcafe7c865bdf156d1c62349aec3dfca3aca5ec0d6c2c2e8bfa9fb071"
+  romm_db: "docker.io/library/mariadb@sha256:efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4"
+  seerr: "ghcr.io/seerr-team/seerr@sha256:c92d2dc117f62185e7bcb88cd56efd374ea79210eaf433275449e8d5988eb5a8"
+  ntfy: "docker.io/binwiederhier/ntfy@sha256:a6d335064ae927c4dbef118e1fa39656b3d2e01472b2a82af5915d5cebfe815f"
+  homepage: "ghcr.io/gethomepage/homepage@sha256:a0b71c8e757298d02560186bab9fbe3fc2d375c523a62cc1019177b37e48aa28"

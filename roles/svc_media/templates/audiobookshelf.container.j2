@@ -1,0 +1,21 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Audiobookshelf
+
+[Container]
+Image={{ media_images.audiobookshelf }}
+ContainerName=audiobookshelf
+PublishPort=127.0.0.1:13378:80
+Volume=%h/appdata/audiobookshelf/config:/config:Z
+Volume=%h/appdata/audiobookshelf/metadata:/metadata:Z
+Volume=/srv/media/audiobooks:/audiobooks
+Volume=/srv/media/ebooks:/ebooks:ro
+Volume=/srv/backups/audiobookshelf:/config/backups
+Environment=TZ={{ timezone }}
+
+[Service]
+ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null && stat /srv/backups/. >/dev/null && findmnt -t nfs4 -M /srv/backups >/dev/null'
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

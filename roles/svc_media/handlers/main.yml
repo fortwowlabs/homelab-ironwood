@@ -1,0 +1,26 @@
+---
+- name: Reload root systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: reload systemd
+
+- name: Reload homelab user systemd
+  ansible.builtin.command: systemctl --user -M homelab@ daemon-reload
+  changed_when: true
+  listen: media configuration changed
+
+- name: Restart only changed media services
+  ansible.builtin.command: "systemctl --user -M homelab@ restart {{ item }}.service"
+  loop: "{{ media_services_to_restart | default([]) }}"
+  changed_when: true
+  listen: media configuration changed
+
+- name: Restart dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    state: restarted
+
+- name: Restart caddy
+  ansible.builtin.systemd:
+    name: caddy
+    state: restarted

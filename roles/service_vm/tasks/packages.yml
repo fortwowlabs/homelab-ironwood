@@ -1,0 +1,57 @@
+---
+- name: Install guarded-egress helper before any package operation
+  ansible.builtin.template:
+    src: maintenance-egress.sh.j2
+    dest: /usr/local/sbin/homelab-maintenance-egress
+    owner: root
+    group: root
+    mode: "0750"
+  when: service_guarded_egress | bool
+
+- name: Gather installed package facts without refreshing repositories
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Calculate missing service packages
+  ansible.builtin.set_fact:
+    service_missing_repo_packages: >-
+      {{ service_repo_packages | difference(ansible_facts.packages.keys() | list) }}
+    service_missing_packages: >-
+      {{ service_packages | difference(ansible_facts.packages.keys() | list) }}
+
+- name: Install missing service packages
+  when: (service_missing_repo_packages + service_missing_packages) | length > 0
+  block:
+    - name: Open guarded maintenance egress when the backstop is active
+      ansible.builtin.command: /usr/local/sbin/homelab-maintenance-egress open
+      register: service_egress_open
+      changed_when: "'opened' in service_egress_open.stdout"
+      when: service_guarded_egress | bool
+
+    - name: Install missing repository packages first
+      ansible.builtin.dnf:
+        name: "{{ service_missing_repo_packages }}"
+        state: present
+      when: service_missing_repo_packages | length > 0
+
+    - name: Install missing runtime packages
+      ansible.builtin.dnf:
+        name: "{{ service_missing_packages }}"
+        state: present
+      when: service_missing_packages | length > 0
+  always:
+    - name: Restore and verify strict backstop after package operations
+      ansible.builtin.command: /usr/local/sbin/homelab-maintenance-egress close
+      register: service_egress_close
+      changed_when: "'closed' in service_egress_close.stdout"
+      when: service_guarded_egress | bool
+
+- name: Render host notification credentials
+  ansible.builtin.template:
+    src: notify.env.j2
+    dest: /etc/homelab-notify.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false

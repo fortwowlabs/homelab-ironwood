@@ -3,7 +3,7 @@
 #
 # Ports: 8096 published on the LAN IP ONLY — not 0.0.0.0 — so it isn't
 # exposed on unintended interfaces. LAN clients direct-play against
-# http://{{ svc_media_ip }}:8096 (firewalld rich rule scopes it to the LAN
+# http://{{ ansible_host }}:8096 (firewalld rich rule scopes it to the LAN
 # source range); everything else goes through Caddy at jellyfin.{{ service_domain }}
 # (reached over the tailnet via the subnet router).
 #
@@ -17,15 +17,15 @@
 Description=Jellyfin
 
 [Container]
-Image=docker.io/jellyfin/jellyfin:latest
+Image={{ media_images.jellyfin }}
 ContainerName=jellyfin
-PublishPort={{ svc_media_ip }}:8096:8096
+PublishPort={{ ansible_host }}:8096:8096
 Volume=%h/appdata/jellyfin/config:/config:Z
 Volume=%h/appdata/jellyfin/cache:/cache:Z
 Volume=/srv/media/tv:/media/tv:ro
 Volume=/srv/media/movies:/media/movies:ro
 Tmpfs=/cache/transcodes:size=6g
-Environment=JELLYFIN_PublishedServerUrl=http://{{ svc_media_ip }}:8096
+Environment=JELLYFIN_PublishedServerUrl=http://{{ ansible_host }}:8096
 
 [Service]
 # Refuse to start on a bare mountpoint: stat triggers the automount,

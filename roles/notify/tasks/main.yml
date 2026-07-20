@@ -25,6 +25,8 @@
   become: false
   register: ntfy_push
   failed_when: false     # never let a missing ntfy fail the whole run...
+  no_log: true
+  diff: false
 
 - name: WARN if the ntfy push failed
   ansible.builtin.debug:
@@ -35,4 +37,3 @@
       Fix ntfy on svc-media, or set ntfy_url to https://ntfy.sh/<topic>
       for bootstrap. ***
   when: (ntfy_push.status | default(-1)) not in [200, 201]
-

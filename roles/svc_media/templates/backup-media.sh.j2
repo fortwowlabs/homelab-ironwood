@@ -18,15 +18,17 @@ set -euo pipefail
 STAMP=$(date +%F)
 DB_DEST=/srv/backups/svc-media/romm-db
 APP_DEST=/srv/backups/svc-media/appdata
-NTFY="{{ ntfy_url }}/{{ ntfy_topic }}"
+NTFY="${NTFY_URL}/${NTFY_TOPIC}"
+AUTH=()
+if [[ -n "${NTFY_TOKEN:-}" ]]; then
+    AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+fi
 
 on_err() {
     logger -p daemon.err -t backup-media "backup FAILED"
     curl -fsS --max-time 5 -X POST -H "Title: svc-media backup FAILED" \
         -H "Priority: high" -H "Tags: floppy_disk" \
-{% if (vault_ntfy_token | default('')) | length > 0 %}
-        -H "Authorization: Bearer {{ vault_ntfy_token }}" \
-{% endif %}
+        "${AUTH[@]}" \
         -d "backup-media.sh failed — journalctl -u backup-media" \
         "$NTFY" >/dev/null 2>&1 || true
 }

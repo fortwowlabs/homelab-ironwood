@@ -9,21 +9,44 @@
   # The file ends with an include of mullvad-endpoints.nft, so the endpoint
   # sets repopulate atomically with the reload.
 
+- name: restart changed catalog applications
+  ansible.builtin.systemd:
+    name: "dl-{{ item }}.service"
+    state: restarted
+  loop: "{{ download_apps_to_restart | default([]) }}"
+  listen: restart changed download units
+
+- name: restart changed catalog proxy sockets
+  ansible.builtin.systemd:
+    name: "{{ item }}-proxy.socket"
+    state: restarted
+  loop: "{{ download_proxy_sockets_to_restart | default([]) }}"
+  listen: restart changed download units
+
+- name: try-restart changed catalog proxy services
+  ansible.builtin.command: "systemctl try-restart {{ item }}-proxy.service"
+  loop: "{{ download_proxy_services_to_restart | default([]) }}"
+  changed_when: false
+  listen: restart changed download units
+
 - name: restart ui proxies
   ansible.builtin.systemd:
-    name: "{{ item }}"
+    name: "{{ item.key }}-proxy.service"
     state: restarted
-  loop:
-    - sab-proxy.service
-    - prowlarr-proxy.service
-    - sonarr-proxy.service
-    - radarr-proxy.service
-  failed_when: false
+  loop: "{{ download_apps | dict2items | selectattr('value.proxy') | list }}"
+  loop_control:
+    label: "{{ item.key }}-proxy.service"
 
-- name: restart vpn-netns
+- name: Check whether vpn-netns is active before a configuration restart
+  ansible.builtin.command: systemctl is-active vpn-netns.service
+  register: download_vpn_handler_state
+  changed_when: false
+  failed_when: download_vpn_handler_state.rc not in [0, 3]
+  listen: restart vpn-netns when active
+
+- name: Restart vpn-netns after its active configuration changed
   ansible.builtin.systemd:
     name: vpn-netns.service
     state: restarted
-  # Only fires if the unit is already loaded; safe during initial run because
-  # the jail bring-up task starts it after secrets are in place.
-  failed_when: false
+  when: download_vpn_handler_state.rc == 0
+  listen: restart vpn-netns when active

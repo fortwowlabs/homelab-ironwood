@@ -2,14 +2,14 @@
 # Caddyfile — svc-media reverse proxy for *.{{ service_domain }}
 #
 # RENDERED from roles/svc_media/templates/Caddyfile.j2, iterating the
-# `caddy_services` dict in group_vars/all/main.yml (the single source of truth
-# shared with the dnsmasq records). Add a service there, not here.
+# media/infra `caddy_services` catalog and the proxy-enabled entries in
+# `download_apps`. Add services to those catalogs, not here.
 #
 # Every service is one hostname vhost on :443, bound to the LAN IP
-# ({{ svc_media_ip }}); dnsmasq answers <name>.{{ service_domain }} -> that IP,
+# ({{ ansible_host }}); dnsmasq answers <name>.{{ service_domain }} -> that IP,
 # and the tailnet reaches the same IP via the subnet router (Tailscale
 # split-DNS). TLS is Caddy's INTERNAL CA (fort.wow isn't a public domain) —
-# install its root once per device (docs/dns-and-names.md).
+# install its root once per device (docs/deployment.md).
 
 {
 	# Issue every site's cert from Caddy's own CA (no public ACME for a
@@ -25,7 +25,7 @@
 {% for name, svc in caddy_services | dictsort %}
 # --- {{ name }} ---
 https://{{ name }}.{{ service_domain }} {
-	bind {{ svc_media_ip }}
+	bind {{ ansible_host }}
 	reverse_proxy {{ svc.scheme | default('http') }}://{{ svc.backend }} {
 {% if svc.tls_skip_verify | default(false) %}
 		transport http {
@@ -33,6 +33,14 @@ https://{{ name }}.{{ service_domain }} {
 		}
 {% endif %}
 	}
+}
+
+{% endfor %}
+{% for name, app in download_apps | dictsort if app.proxy %}
+# --- {{ name }} (download catalog) ---
+https://{{ name }}.{{ service_domain }} {
+	bind {{ ansible_host }}
+	reverse_proxy http://{{ hostvars['svc-download'].ansible_host }}:{{ app.ui_port }}
 }
 
 {% endfor %}

@@ -1,0 +1,23 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=RomM MariaDB
+
+[Container]
+Image={{ media_images.romm_db }}
+ContainerName=romm-db
+Network=romm.network
+EnvironmentFile=%h/appdata/romm/romm-db.env
+Volume=%h/appdata/romm/mysql:/var/lib/mysql:Z
+Environment=TZ={{ timezone }}
+Notify=healthy
+HealthCmd=healthcheck.sh --connect --innodb_initialized
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

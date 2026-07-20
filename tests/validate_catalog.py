@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import re
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
 
@@ -69,9 +69,19 @@ def main() -> int:
             isinstance(volume, str) and ":" in volume for volume in volumes
         ):
             failures.append(f"{prefix}.volumes: require a non-empty list of source:target strings")
+            volume_sources: list[str] = []
+        else:
+            volume_sources = [volume.split(":", 1)[0] for volume in volumes]
 
         if not isinstance(app["media_mount"], bool):
             failures.append(f"{prefix}.media_mount: require a boolean")
+        elif app["media_mount"] != any(
+            source == "/srv/media" or source.startswith("/srv/media/")
+            for source in volume_sources
+        ):
+            failures.append(
+                f"{prefix}.media_mount: must match whether a /srv/media source is mounted"
+            )
         if not isinstance(app["proxy"], bool):
             failures.append(f"{prefix}.proxy: require a boolean")
 
@@ -79,10 +89,17 @@ def main() -> int:
         if not isinstance(backup_paths, list) or not backup_paths or not all(
             isinstance(path, str)
             and path.strip()
-            and ".." not in Path(path).parts
+            and not PurePosixPath(path).is_absolute()
+            and path != "."
+            and not path.startswith("-")
+            and all(part not in ("", ".", "..") for part in PurePosixPath(path).parts)
             for path in backup_paths
         ):
-            failures.append(f"{prefix}.backup_paths: require non-empty paths without '..'")
+            failures.append(f"{prefix}.backup_paths: require normalized safe relative paths")
+        elif any(f"/srv/appdata/{path}" not in volume_sources for path in backup_paths):
+            failures.append(
+                f"{prefix}.backup_paths: every path must have a matching /srv/appdata volume"
+            )
 
         dashboard = app["dashboard"]
         if not isinstance(dashboard, dict):

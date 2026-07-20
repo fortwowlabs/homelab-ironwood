@@ -38,9 +38,12 @@ def main() -> int:
         failures.append("container NFS write probes lack trap-based cleanup")
     for required in (
         "always:",
-        "Restore the VPN namespace",
-        "Restore workloads that were previously active",
-        "Restore the leak-canary timer when it was previously active",
+        "Capture VPN namespace state before the drill",
+        "Attempt to restore the VPN namespace when it was previously active",
+        "Attempt to restore workloads that were previously active",
+        "Attempt to restore the leak-canary timer when it was previously active",
+        "Stop any in-flight canary check",
+        "Assert every previously active service was restored",
         "verify_disruptive_inject_failure",
     ):
         if required not in disruptive:

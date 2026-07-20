@@ -1,0 +1,13 @@
+---
+- name: Assert the download application catalog is populated
+  ansible.builtin.assert:
+    that:
+      - download_apps is mapping
+      - download_apps | length > 0
+      - download_apps.sabnzbd is defined
+
+- name: Verify systemd-socket-proxyd is installed
+  ansible.builtin.stat:
+    path: /usr/lib/systemd/systemd-socket-proxyd
+  register: download_proxyd
+  failed_when: not download_proxyd.stat.exists

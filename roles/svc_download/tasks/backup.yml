@@ -1,0 +1,7 @@
+---
+- name: Arm nightly download appdata backup
+  ansible.builtin.systemd:
+    name: backup-dl-appdata.timer
+    enabled: true
+    state: started
+    daemon_reload: true

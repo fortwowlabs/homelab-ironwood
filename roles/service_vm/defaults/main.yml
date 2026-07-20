@@ -1,0 +1,5 @@
+---
+service_guarded_egress: false
+service_requires_subids: false
+service_repo_packages: []
+service_packages: []
