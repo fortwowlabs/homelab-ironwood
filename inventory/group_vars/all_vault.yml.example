@@ -2,9 +2,9 @@
 # ============================================================================
 # SECRETS. Copy to all/vault.yml (NOT group_vars/all_vault.yml — that name
 # maps to a nonexistent group and is silently ignored) and encrypt:
-#     cp all_vault.yml.example all/vault.yml
-#     $EDITOR all/vault.yml          # fill in real values
-#     ansible-vault encrypt all/vault.yml
+#     cp inventory/group_vars/all_vault.yml.example inventory/group_vars/all/vault.yml
+#     $EDITOR inventory/group_vars/all/vault.yml
+#     ansible-vault encrypt inventory/group_vars/all/vault.yml
 # Edit later with:  make vault-edit
 # all/vault.yml is .gitignored; only the .example (this file) is committed.
 # ============================================================================
@@ -63,7 +63,8 @@ vault_ntfy_token: ""
 # --- RomM (v6): DB creds + optional metadata providers -------------------
 # DB_PASSWD in romm.env must equal MARIADB_PASSWORD in romm-db.env — both
 # come from vault_romm_db_password. Adopting an already-running DB? set this
-# to the CURRENT value, or reset the mysql dir (no ROM data lost yet).
+# to the CURRENT value, then rotate it inside MariaDB during maintenance.
+# Never reset an initialized database directory during normal convergence.
 vault_romm_db_password:      "REPLACE_db_password"
 vault_romm_db_root_password: "REPLACE_db_root_password"
 vault_romm_auth_secret_key:  "REPLACE_openssl_rand_hex_32"   # openssl rand -hex 32

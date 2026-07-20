@@ -1,5 +1,0 @@
-# /etc/nftables/mullvad-endpoints.nft — SEED (no-op).
-# The mullvad_wg set is declared (empty) inside host-backstop.nft, so this
-# file only needs to exist for the include to succeed before the first
-# refresh. refresh-mullvad-endpoints.sh overwrites it with real endpoints.
-# (An empty interval set cannot be written as `{ }`, so we add nothing here.)

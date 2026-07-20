@@ -3,14 +3,18 @@
 inventory/group_vars/all/vault.yml
 .vault_pass
 
-# Raw session transcripts — contain decrypted secrets shown mid-session.
+# Raw session transcripts — may contain decrypted variables or command output.
+# Both names have been used locally; never commit either tree.
 docs/sessions/
+docs/transcripts/
 
-# Fetched Caddy internal-CA root (env-specific; regenerated per install)
-fort.wow-root-ca.crt
+# Fetched Caddy internal-CA roots (env-specific; regenerated per install)
+*-root-ca.crt
 
 # Python venv (created by `make deps`)
 .venv/
+__pycache__/
+*.py[cod]
 
 # Ansible cruft
 *.retry

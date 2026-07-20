@@ -1,8 +1,0 @@
-# /etc/systemd/system/leak-canary.service
-[Unit]
-Description=VPN jail leak canary
-After=vpn-netns.service
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/leak-canary.sh
