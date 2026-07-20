@@ -107,6 +107,7 @@ caddy_services:
   radarr:     { backend: "{{ svc_download_ip }}:7878", group: Downloads, icon: radarr }
   prowlarr:   { backend: "{{ svc_download_ip }}:9696", group: Downloads, icon: prowlarr }
   sabnzbd:    { backend: "{{ svc_download_ip }}:8080", group: Downloads, icon: sabnzbd }
+  lazylibrarian: { backend: "{{ svc_download_ip }}:5299", group: Downloads, icon: lazylibrarian }
   # monitoring (feat/monitoring): Cockpit serves its own self-signed TLS
   home:          { backend: "127.0.0.1:3000",          group: Infra, icon: homepage }
   ntfy:          { backend: "{{ svc_media_ip }}:8080", group: Infra, icon: ntfy }

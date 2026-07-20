@@ -117,6 +117,8 @@
     - proxies/sonarr-proxy.service
     - proxies/radarr-proxy.socket
     - proxies/radarr-proxy.service
+    - proxies/ll-proxy.socket
+    - proxies/ll-proxy.service
   notify: reload systemd
   tags: [files, backup]
 
@@ -130,6 +132,7 @@
     - dl-prowlarr.container
     - dl-sonarr.container
     - dl-radarr.container
+    - dl-lazylibrarian.container
   notify: reload systemd
   tags: [files]
 
@@ -195,6 +198,7 @@
     - /srv/appdata/prowlarr
     - /srv/appdata/sonarr
     - /srv/appdata/radarr
+    - /srv/appdata/lazylibrarian
     - /var/lib/sabnzbd-incomplete
   tags: [files]
 
@@ -258,6 +262,16 @@
     cmd: "setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups -- rm -f /srv/media/.probe-dl"
   changed_when: false
   tags: [nfs, verify]
+
+# Book/audiobook library dirs on NFS, created as the service uid (root-squash
+# rejects root mkdir). LazyLibrarian writes here; Audiobookshelf reads them.
+- name: Create book library dirs on NFS
+  ansible.builtin.command:
+    cmd: "setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups -- mkdir -p /srv/media/{{ item }}"
+  args:
+    creates: "/srv/media/{{ item }}"
+  loop: [books, ebooks, audiobooks]
+  tags: [nfs, files]
 
 # -------------------------------------------------------------------- jail ---
 # The backstop's input chain is default-drop. We assert LAN_ADMIN matches the
@@ -346,6 +360,7 @@
     - lscr.io/linuxserver/prowlarr:latest
     - lscr.io/linuxserver/sonarr:latest
     - lscr.io/linuxserver/radarr:latest
+    - lscr.io/linuxserver/lazylibrarian:latest
   register: dl_images
   failed_when: false
   changed_when: false
@@ -377,7 +392,7 @@
   ansible.builtin.systemd:
     name: "dl-{{ item }}.service"
     state: started
-  loop: [sabnzbd, prowlarr, sonarr, radarr]
+  loop: [sabnzbd, prowlarr, sonarr, radarr, lazylibrarian]
   tags: [containers]
 
 # The proxy sockets/services run as systemd_socket_proxyd_t, which SELinux
@@ -436,6 +451,7 @@
     - prowlarr-proxy.socket
     - sonarr-proxy.socket
     - radarr-proxy.socket
+    - ll-proxy.socket
   tags: [containers]
 
 - name: Arm the leak canary timer
@@ -463,7 +479,7 @@
       # Compare the main PID's netns inode. SandboxKey is EMPTY for
       # containers joined to a pre-made netns via --network=ns: (podman only
       # fills it for netns it created), so it cannot prove membership here.
-      for c in sabnzbd prowlarr sonarr radarr; do
+      for c in sabnzbd prowlarr sonarr radarr lazylibrarian; do
         pid=$(podman inspect -f '{{ '{{' }}.State.Pid{{ '}}' }}' "$c")
         [ "$pid" -gt 0 ] || { echo "LEAK: $c not running (pid=$pid)"; exit 1; }
         [ "$(stat -Lc %i /proc/$pid/ns/net)" = "$want" ] || { echo "LEAK: $c not in jail (pid=$pid)"; exit 1; }

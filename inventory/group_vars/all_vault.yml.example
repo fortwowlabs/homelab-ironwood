@@ -65,3 +65,19 @@ vault_tailscale_authkey: ""
 
 # --- ntfy auth (only if your ntfy requires a token; else leave empty) ---
 vault_ntfy_token: ""
+
+# --- RomM (v6): DB creds + optional metadata providers -------------------
+# DB_PASSWD in romm.env must equal MARIADB_PASSWORD in romm-db.env — both
+# come from vault_romm_db_password. Adopting an already-running DB? set this
+# to the CURRENT value, or reset the mysql dir (no ROM data lost yet).
+vault_romm_db_password:      "REPLACE_db_password"
+vault_romm_db_root_password: "REPLACE_db_root_password"
+vault_romm_auth_secret_key:  "REPLACE_openssl_rand_hex_32"   # openssl rand -hex 32
+# Metadata providers — all optional; leave "" to skip. Enrich ROMs you ingest.
+vault_romm_igdb_client_id:      ""   # https://api-docs.igdb.com (Twitch app)
+vault_romm_igdb_client_secret:  ""
+vault_screenscraper_user:       ""
+vault_screenscraper_password:   ""
+vault_steamgriddb_api_key:      ""
+vault_mobygames_api_key:        ""
+vault_retroachievements_api_key: ""

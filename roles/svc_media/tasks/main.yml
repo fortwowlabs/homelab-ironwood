@@ -191,27 +191,32 @@
   loop: [backup-media.service, backup-media.timer]
   tags: [files, backup]
 
-# ------------------------------------------------------- secrets pre-flight --
-- name: Check for romm.env + romm-db.env
-  ansible.builtin.stat:
-    path: "/opt/homelab/appdata/romm/{{ item }}"
-  register: romm_envs
-  loop: [romm.env, romm-db.env]
+# ------------------------------------------------------- secrets (from vault) --
+# v6: romm.env + romm-db.env are now IaC — rendered from the vault so metadata
+# provider keys are managed, not hand-edited on the box. If you're adopting an
+# already-initialised DB, set vault_romm_db_password to the CURRENT value or
+# reset the mysql dir (no ROM data is lost — see docs/media.md).
+- name: Require the RomM DB + auth secrets in the vault
+  ansible.builtin.assert:
+    that:
+      - (vault_romm_db_password | default('')) | length > 0
+      - (vault_romm_db_root_password | default('')) | length > 0
+      - (vault_romm_auth_secret_key | default('')) | length >= 32
+    fail_msg: >-
+      Set vault_romm_db_password, vault_romm_db_root_password, and
+      vault_romm_auth_secret_key (>=32 chars, `openssl rand -hex 32`) in the
+      vault. Metadata-provider keys (IGDB/ScreenScraper/…) are optional.
   tags: [media]
 
-- name: Fail clearly if either env file is absent
-  ansible.builtin.fail:
-    msg: >-
-      /opt/homelab/appdata/romm/{{ item.item }} is missing (owner 10001, mode
-      0600). v5 splits secrets: romm.env carries APP config (DB_HOST=romm-db,
-      DB_NAME, DB_USER, DB_PASSWD, ROMM_AUTH_SECRET_KEY=$(openssl rand -hex
-      32), metadata provider creds); romm-db.env carries ONLY the MariaDB
-      bootstrap (MARIADB_ROOT_PASSWORD, MARIADB_DATABASE=romm, MARIADB_USER,
-      MARIADB_PASSWORD matching DB_PASSWD). See the quadlet headers.
-  when: not item.stat.exists
-  loop: "{{ romm_envs.results }}"
-  loop_control:
-    label: "{{ item.item }}"
+- name: Render romm.env + romm-db.env from the vault (0600, uid 10001)
+  ansible.builtin.template:
+    src: "{{ item }}.j2"
+    dest: "/opt/homelab/appdata/romm/{{ item }}"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0600"
+  loop: [romm.env, romm-db.env]
+  no_log: true
   tags: [media]
 
 # -------------------------------------------------------------------- media --

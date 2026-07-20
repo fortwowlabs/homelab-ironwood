@@ -1,0 +1,31 @@
+# /etc/containers/systemd/dl-lazylibrarian.container   (rootful, inside vpn netns)
+#
+# Books + audiobooks grabber. Lives IN the jail like the other *arrs: indexer
+# API queries + NZB fetches ride wg0; imports are filesystem ops on the NFS
+# mount. Grabs via Prowlarr indexers + SABnzbd, writes the library under
+# /data (=/srv/media) for Audiobookshelf to read:
+#   /data/books  /data/ebooks  /data/audiobooks
+[Unit]
+Description=LazyLibrarian (inside vpn netns)
+Requires=vpn-netns.service
+After=vpn-netns.service
+RequiresMountsFor=/srv/media
+
+[Container]
+Image=lscr.io/linuxserver/lazylibrarian:latest
+ContainerName=lazylibrarian
+Environment=PUID=10001
+Environment=PGID=10001
+Environment=TZ=America/New_York
+PodmanArgs=--network=ns:/run/netns/vpn
+DNS=10.64.0.1
+Volume=/srv/appdata/lazylibrarian:/config:Z
+Volume=/srv/media:/data
+
+[Service]
+ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
