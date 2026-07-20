@@ -9,9 +9,10 @@
 #     list; the unresolvable name failed the WHOLE dnf transaction and
 #     silently took podman/nfs-utils with it. Tailscale now installs from
 #     its official EL10 repo here, under [access].
-#   - `tailscale up` is UNATTENDED when vault_tailscale_authkey is set;
-#     Caddy (ts.net vhosts) deploys once tailscale is Running. Both skip
-#     with a visible note otherwise — the deploy still succeeds.
+#   - `tailscale up` is UNATTENDED when vault_tailscale_authkey is set
+#     (remote access via the subnet router); skips with a visible note
+#     otherwise. v6: Caddy no longer depends on Tailscale — it serves
+#     *.fort.wow hostname vhosts with an internal CA, independent of ts_state.
 #   - Jellyfin publishes on the LAN IP only + firewalld rich rule scoped to
 #     lan_cidr (tailnet no longer implicitly exposed).
 #   - romm-db.env required alongside romm.env (secret split).

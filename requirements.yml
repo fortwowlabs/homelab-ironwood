@@ -5,5 +5,4 @@
 collections:
   - name: community.proxmox
     version: ">=2.0.0"      # replaces the deprecated community.general.proxmox_kvm
-  - name: community.general  # nfs mount, misc utilities
-  - name: ansible.posix      # mount, sysctl, seboolean
+  - name: ansible.posix      # mount, sysctl, seboolean, firewalld
