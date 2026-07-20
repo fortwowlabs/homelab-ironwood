@@ -54,14 +54,8 @@ vault_mullvad_endpoint_ip: "185.x.x.x"      # NUMERIC endpoint IP
 vault_mullvad_endpoint_port: 51820
 vault_mullvad_wg_addr:    "10.65.x.x/32"     # your assigned tunnel Address
 
-# --- Tailscale (svc-media) -------------------------------------------------
-# Pre-auth key from https://login.tailscale.com/admin/settings/keys
-#   Recommended: Reusable=NO, Ephemeral=NO, Pre-authorized=YES,
-#   Tags: tag:svc-media (if you use ACL tags), short expiry — the key is
-#   only needed once; the node keeps its own credentials afterwards.
-# Leave "" to keep `tailscale up` a manual step (role skips with a note,
-# and Caddy is skipped too since it binds to the tailscale address).
-vault_tailscale_authkey: ""
+# (v6: the service VMs no longer run Tailscale — remote access is via a
+# dedicated subnet-router VM — so there is no vault_tailscale_authkey here.)
 
 # --- ntfy auth (only if your ntfy requires a token; else leave empty) ---
 vault_ntfy_token: ""

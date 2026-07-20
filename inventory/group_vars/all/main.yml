@@ -75,11 +75,9 @@ ntfy_url:   "http://192.168.1.30:8080"     # LAN-internal ntfy on svc-media
 ntfy_topic: "homelab-deploy"
 
 # --- svc-media access layer -----------------------------------------------
-# caddy  = install Tailscale + Caddy and wire the ts.net vhosts, fully
-#          unattended IF vault_tailscale_authkey is set (skipped with a
-#          visible note when tailscaled isn't authenticated yet).
-# manual = v4 behavior: role stops at "containers healthy on the LAN";
-#          you run `tailscale up` + Caddy by hand (DEPLOY Phase 6).
+# caddy  = deploy the Caddy reverse proxy for *.fort.wow (internal-CA TLS).
+# manual = role stops at "containers healthy on the LAN"; you run Caddy by hand.
+# (v6: Tailscale removed from svc-media — remote access is via the subnet router.)
 media_access_layer: caddy
 
 # --- Service naming (v6) --------------------------------------------------

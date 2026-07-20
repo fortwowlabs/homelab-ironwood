@@ -1,11 +1,11 @@
 # ~homelab/.config/containers/systemd/jellyfin.container   (rootless)
 # RENDERED BY ANSIBLE from roles/svc_media/templates/jellyfin.container.j2
 #
-# Ports (v5): 8096 published on the LAN IP ONLY — not 0.0.0.0. Tailscale on
-# this VM means all-interfaces would silently expose Jellyfin to the whole
-# tailnet the moment tailscaled came up. LAN clients direct-play against
+# Ports: 8096 published on the LAN IP ONLY — not 0.0.0.0 — so it isn't
+# exposed on unintended interfaces. LAN clients direct-play against
 # http://{{ svc_media_ip }}:8096 (firewalld rich rule scopes it to the LAN
-# source range); tailnet clients go through Caddy on the ts.net name.
+# source range); everything else goes through Caddy at jellyfin.{{ service_domain }}
+# (reached over the tailnet via the subnet router).
 #
 # Transcoding: 3700X host, NO iGPU — CPU transcode. Fine for 1-2 concurrent
 # 1080p jobs on 4 vCPU; prefer direct-play clients. v5: tmpfs moved to

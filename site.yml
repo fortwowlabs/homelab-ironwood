@@ -22,8 +22,9 @@
 #   - PVE pool `homelab-svc` + scoped API token created; vault filled
 #   - Mullvad configs generated; vault filled
 #   - admin_ssh_pubkey set in group_vars/all.yml
-#   - Optional: vault_tailscale_authkey set -> Tailscale + Caddy come up
-#     unattended on svc-media; empty -> both are skipped with a visible note.
+#   - vault_romm_* filled (RomM DB + optional metadata keys)
+# After deploy: the 3 DNS glue steps in docs/dns-and-names.md (pfSense domain
+# override, Tailscale split-DNS, install the Caddy CA). See DEPLOY-CHECKLIST.md.
 # ============================================================================
 
 # ---------- Phase 3 & 5: provision both VMs via the PVE API ----------

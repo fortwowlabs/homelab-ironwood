@@ -136,17 +136,6 @@
   notify: reload systemd
   tags: [files]
 
-- name: Retire NZBHydra2 leftovers if upgrading from v4
-  ansible.builtin.file:
-    path: "{{ item }}"
-    state: absent
-  loop:
-    - /etc/containers/systemd/dl-nzbhydra2.container
-    - /etc/systemd/system/hydra-proxy.socket
-    - /etc/systemd/system/hydra-proxy.service
-  notify: reload systemd
-  tags: [files]
-
 - name: Render nftables backstop from template (NOT enabled yet)
   ansible.builtin.template:
     src: host-backstop.nft.j2

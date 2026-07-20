@@ -60,7 +60,7 @@ drift: check ## Alias for check — see what has drifted since last apply
 reconcile: ## Push cores/memory/onboot/startup from host_vars onto EXISTING VMs (opt-in)
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --tags provision -e pve_reconcile=true $(ARGS)
 
-access: ## (Re)run just the svc-media access layer (tailscale + caddy)
+access: ## (Re)run just the svc-media access layer (Caddy *.fort.wow)
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit svc-media --tags access $(ARGS)
 
 verify: ## Run ONLY the gate assertions (health check) + ntfy

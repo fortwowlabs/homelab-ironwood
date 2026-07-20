@@ -5,16 +5,12 @@
 #   files | nfs | media | access | backup | verify
 #
 # v5 changes:
-#   - Installs its own packages. v4 put tailscale in cloud-init's package
-#     list; the unresolvable name failed the WHOLE dnf transaction and
-#     silently took podman/nfs-utils with it. Tailscale now installs from
-#     its official EL10 repo here, under [access].
-#   - `tailscale up` is UNATTENDED when vault_tailscale_authkey is set
-#     (remote access via the subnet router); skips with a visible note
-#     otherwise. v6: Caddy no longer depends on Tailscale — it serves
-#     *.fort.wow hostname vhosts with an internal CA, independent of ts_state.
+#   - v6: svc-media no longer runs Tailscale (remote access is via a
+#     dedicated subnet-router VM). Caddy serves *.fort.wow hostname vhosts
+#     on the LAN IP with an internal CA — reached identically on LAN and
+#     tailnet (the subnet router advertises 192.168.1.0/24).
 #   - Jellyfin publishes on the LAN IP only + firewalld rich rule scoped to
-#     lan_cidr (tailnet no longer implicitly exposed).
+#     lan_cidr.
 #   - romm-db.env required alongside romm.env (secret split).
 #   - Container-level NFS probes: prove each container SEES its media, not
 #     just that the host mounted something.
@@ -267,77 +263,12 @@
     state: disabled
   tags: [media]
 
-# ------------------------------------------------------------------ access ---
-# Tailscale from the OFFICIAL EL10 repo (verified 2026-07-15).
-- name: Tailscale repo
-  ansible.builtin.yum_repository:
-    name: tailscale-stable
-    description: Tailscale stable (EL10)
-    baseurl: "https://pkgs.tailscale.com/stable/rhel/10/$basearch"
-    gpgkey: "https://pkgs.tailscale.com/stable/rhel/10/repo.gpg"
-    gpgcheck: true
-    repo_gpgcheck: true
-    enabled: true
-  tags: [access]
-
-- name: Install tailscale
-  ansible.builtin.dnf:
-    name: tailscale
-    state: present
-  tags: [access]
-
-- name: Enable tailscaled
-  ansible.builtin.systemd:
-    name: tailscaled
-    enabled: true
-    state: started
-  tags: [access]
-
-- name: Read tailscale backend state
-  ansible.builtin.command: tailscale status --json
-  register: ts_raw
-  changed_when: false
-  failed_when: false
-  tags: [access]
-
-- name: Parse backend state
-  ansible.builtin.set_fact:
-    ts_state: "{{ ((ts_raw.stdout or '{}') | from_json).BackendState | default('Unknown') }}"
-  tags: [access]
-
-- name: Authenticate unattended (authkey in vault)
-  when:
-    - (vault_tailscale_authkey | default('')) | length > 0
-    - ts_state != 'Running'
-  block:
-    - name: tailscale up --authkey
-      ansible.builtin.command:
-        cmd: "tailscale up --authkey={{ vault_tailscale_authkey }}"
-      no_log: true
-      changed_when: true
-    - name: Re-read state
-      ansible.builtin.command: tailscale status --json
-      register: ts_raw2
-      changed_when: false
-    - name: Confirm Running
-      ansible.builtin.set_fact:
-        ts_state: "{{ (ts_raw2.stdout | from_json).BackendState }}"
-    - name: Gate on Running
-      ansible.builtin.assert:
-        that: [ts_state == 'Running']
-        fail_msg: "tailscale up ran but BackendState={{ ts_state }} — check the authkey (expired? not pre-authorized?)."
-  tags: [access]
-
-- name: NOTE — tailscale needs manual auth (no authkey in vault)
-  ansible.builtin.debug:
-    msg: >-
-      *** Tailscale installed but NOT authenticated (vault_tailscale_authkey
-      empty). Run `tailscale up` on svc-media interactively, then re-run with
-      --tags access to deploy Caddy. Skipping Caddy for now. ***
-  when: ts_state != 'Running'
-  tags: [access]
-
 # --------------------------------------------------------------------- dns ---
+# NOTE (v6): svc-media no longer runs Tailscale. Remote access is via the
+# dedicated subnet-router VM on thurgadin's network (it advertises
+# 192.168.1.0/24), so the tailnet reaches svc-media's LAN IP directly and
+# Caddy serves *.fort.wow the same way on LAN and tailnet. Nothing here
+# depends on a tailnet identity anymore.
 # svc-media is the authority for *.{{ service_domain }}. pfSense forwards the
 # domain here and Tailscale split-DNS points the tailnet here (both one-time,
 # docs/dns-and-names.md). Records come from the same caddy_services dict.

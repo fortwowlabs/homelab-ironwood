@@ -25,9 +25,10 @@ drift checks use the same code.
 | **Service DNS names (v6)**   | Yes    | dnsmasq + Caddy hostname routing → `*.fort.wow`. 3 one-time glue steps ([docs/dns-and-names.md](docs/dns-and-names.md)) |
 | **Monitoring (v6)**          | Yes    | Cockpit (both VMs) + Homepage dashboard + disk-space ntfy alarms. PVE zpool guard installs by hand ([docs/monitoring.md](docs/monitoring.md)) |
 
-Mullvad key generation is manual by nature. Tailscale is used for remote access
-via the subnet router; `vault_tailscale_authkey` still enables unattended
-`tailscale up` on svc-media (skipped with a visible note otherwise).
+Mullvad key generation is manual by nature. Remote access is via a dedicated
+subnet-router VM on thurgadin's network (advertising `192.168.1.0/24`), so the
+service VMs themselves don't run Tailscale — the tailnet reaches their LAN IPs
+directly and `*.fort.wow` resolves the same way on LAN and tailnet.
 
 **New here? Start with [docs/DEPLOY-CHECKLIST.md](docs/DEPLOY-CHECKLIST.md)** — the
 ordered runbook (base install + v6), which links the per-feature docs in `docs/`.
@@ -104,7 +105,7 @@ make check         # dry-run with diff (drift detection)
 make verify        # gate assertions only + ntfy
 make dl            # just svc-download   (ARGS="--tags jail" etc.)
 make media         # just svc-media
-make access        # (re)run tailscale + caddy on svc-media, e.g. after adding the authkey
+make access        # (re)run the svc-media Caddy access layer (*.fort.wow)
 make reconcile     # push cores/memory/onboot/startup onto EXISTING VMs (opt-in drift repair)
 make vault-edit    # edit the encrypted secrets
 ```
