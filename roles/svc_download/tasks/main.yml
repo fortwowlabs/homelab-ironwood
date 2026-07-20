@@ -23,7 +23,17 @@
   ansible.builtin.shell:
     cmd: "rpm -q {{ _dl_packages | join(' ') }} >/dev/null 2>&1 || rpm -q {{ _dl_packages | join(' ') }} 2>&1 | awk '/is not installed/{print $2}'"
   vars:
-    _dl_packages: [epel-release, wireguard-tools, podman, curl, nfs-utils, policycoreutils-python-utils, checkpolicy]
+    _dl_packages:
+      - epel-release
+      - wireguard-tools
+      - podman
+      - curl
+      - nfs-utils
+      - policycoreutils-python-utils
+      - checkpolicy
+      - cockpit
+      - cockpit-podman
+      - cockpit-storaged
   register: dl_pkgs_missing
   changed_when: false
   tags: [files]
@@ -487,7 +497,7 @@
   ansible.builtin.uri:
     url: "http://{{ ansible_host }}:{{ item }}"
     status_code: [200, 301, 302, 303, 401, 403]
-  loop: [8080, 9696, 8989, 7878]
+  loop: [8080, 9696, 8989, 7878, 5299]
   register: proxy_gate
   retries: 3
   delay: 5
@@ -508,7 +518,7 @@
       set -uo pipefail
       systemctl stop vpn-netns
       st=$(systemctl is-active dl-sabnzbd || true)
-      systemctl start vpn-netns dl-sabnzbd dl-prowlarr dl-sonarr dl-radarr
+      systemctl start vpn-netns dl-sabnzbd dl-prowlarr dl-sonarr dl-radarr dl-lazylibrarian
       [ "$st" = "inactive" ] || { echo "FAIL: dl-sabnzbd stayed $st when jail stopped"; exit 1; }
       echo "fail-closed-ok"
     executable: /bin/bash

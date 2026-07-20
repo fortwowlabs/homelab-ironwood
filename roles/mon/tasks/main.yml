@@ -9,15 +9,8 @@
 #                        in its nftables backstop template instead.
 
 # ------------------------------------------------------------------ cockpit ---
-- name: Install Cockpit
-  ansible.builtin.dnf:
-    name:
-      - cockpit
-      - cockpit-podman      # rootful podman on svc-download; system view on both
-      - cockpit-storaged    # disks / filesystems / LVM / NFS
-    state: present
-  tags: [cockpit]
-
+# Host roles install these packages before svc-download closes its guarded
+# maintenance-egress window. This shared role performs no network installs.
 # Behind Caddy, Cockpit needs its external origin allow-listed and to trust the
 # proxy's X-Forwarded-Proto (else it rejects the WebSocket as cross-origin).
 - name: Cockpit reverse-proxy config
@@ -73,3 +66,8 @@
     state: started
     daemon_reload: "{{ diskalert_units is changed }}"
   tags: [diskalert]
+
+- name: Mark monitoring verified
+  ansible.builtin.set_fact:
+    mon_verified: true
+  tags: [mon, cockpit, diskalert]

@@ -97,7 +97,8 @@ service_domain: fort.wow
 
 # group/icon are used by the Homepage dashboard; Caddy/dnsmasq ignore them.
 caddy_services:
-  jellyfin:   { backend: "127.0.0.1:8096",             group: Media,     icon: jellyfin }
+  # Jellyfin publishes only on svc-media's LAN address, not loopback.
+  jellyfin:   { backend: "{{ svc_media_ip }}:8096",    group: Media,     icon: jellyfin }
   abs:        { backend: "127.0.0.1:13378",            group: Media,     icon: audiobookshelf }
   romm:       { backend: "127.0.0.1:8081",             group: Media,     icon: romm }
   seerr:      { backend: "127.0.0.1:5055",             group: Media,     icon: overseerr }

@@ -34,6 +34,9 @@
       - python3-firewall   # firewalld ansible module bindings (not in cloud image)
       - curl
       - bind-utils         # dig, for the DNS gate
+      - cockpit
+      - cockpit-podman
+      - cockpit-storaged
     state: present
   tags: [files]
 
@@ -254,14 +257,6 @@
   changed_when: true
   tags: [media]
 
-- name: Open ntfy 8080 + Homepage path to the LAN (ntfy is the alert sink)
-  ansible.posix.firewalld:
-    rich_rule: "rule family=ipv4 source address={{ lan_cidr }} port port=8080 protocol=tcp accept"
-    permanent: true
-    immediate: true
-    state: enabled
-  tags: [media, mon]
-
 # Running before the rich rules: the firewalld module needs the daemon up
 # (zone ops fail with INVALID_ZONE otherwise). Default zone permits ssh.
 - name: Enable + start firewalld
@@ -270,6 +265,14 @@
     enabled: true
     state: started
   tags: [media]
+
+- name: Open ntfy 8080 + Homepage path to the LAN (ntfy is the alert sink)
+  ansible.posix.firewalld:
+    rich_rule: "rule family=ipv4 source address={{ lan_cidr }} port port=8080 protocol=tcp accept"
+    permanent: true
+    immediate: true
+    state: enabled
+  tags: [media, mon]
 
 - name: "Open Jellyfin 8096 to the LAN source range only (v5 rich rule)"
   ansible.posix.firewalld:

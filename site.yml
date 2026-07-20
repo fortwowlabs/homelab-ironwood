@@ -31,6 +31,7 @@
 - name: Provision service VMs
   hosts: pve
   gather_facts: false
+  any_errors_fatal: true
   tasks:
     - name: Provision block
       block:
@@ -77,6 +78,7 @@
 - name: svc-download cloud-init gate
   hosts: svc-download
   gather_facts: false
+  any_errors_fatal: true
   tasks:
     - name: Wait for cloud-init to finish (strict)
       ansible.builtin.command: cloud-init status --wait --long
@@ -95,6 +97,7 @@
 - name: svc-media cloud-init gate
   hosts: svc-media
   gather_facts: false
+  any_errors_fatal: true
   tasks:
     - name: Wait for cloud-init to finish (strict)
       ansible.builtin.command: cloud-init status --wait --long
@@ -114,6 +117,7 @@
 - name: Configure svc-download (netns jail + stack)
   hosts: svc-download
   gather_facts: true
+  any_errors_fatal: true
   tasks:
     - block:
         - ansible.builtin.include_role:
@@ -141,6 +145,7 @@
 - name: Configure svc-media (rootless media stack)
   hosts: svc-media
   gather_facts: true
+  any_errors_fatal: true
   tasks:
     - block:
         - ansible.builtin.include_role:
@@ -165,10 +170,32 @@
 - name: Monitoring (Cockpit + disk alarm on both VMs)
   hosts: service_vms
   gather_facts: true
+  any_errors_fatal: true
   tasks:
-    - ansible.builtin.include_role:
-        name: mon
-      tags: [mon, always]
+    - name: Configure monitoring
+      block:
+        - name: Run monitoring role
+          ansible.builtin.include_role:
+            name: mon
+            apply:
+              tags: [mon]
+          tags: [always]
+      rescue:
+        - name: Notify monitoring failure
+          ansible.builtin.include_role:
+            name: notify
+            apply:
+              tags: [always]
+          tags: [always]
+          vars:
+            ntfy_title: "homelab deploy FAILED (monitoring)"
+            ntfy_result: "Monitoring configuration failed on {{ inventory_hostname }}."
+            ntfy_priority: high
+            ntfy_tags: rotating_light
+        - name: Abort after monitoring failure
+          ansible.builtin.fail:
+            msg: "monitoring failed on {{ inventory_hostname }}"
+          tags: [always]
 
 # ---------- Success notification (full runs only — deliberately untagged,
 # ---------- so tag-sliced runs don't claim a full deploy succeeded) ----------
@@ -176,6 +203,15 @@
   hosts: localhost
   gather_facts: false
   tasks:
+    - name: Assert every deployment phase completed
+      ansible.builtin.assert:
+        that:
+          - hostvars['svc-download'].svc_download_verified | default(false) | bool
+          - hostvars['svc-media'].svc_media_verified | default(false) | bool
+          - hostvars['svc-download'].mon_verified | default(false) | bool
+          - hostvars['svc-media'].mon_verified | default(false) | bool
+        fail_msg: "Refusing to send success: one or more deployment phases did not verify."
+
     - name: Green ntfy
       ansible.builtin.include_role:
         name: notify
