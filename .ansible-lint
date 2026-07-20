@@ -1,0 +1,11 @@
+---
+# The legacy roles do not yet satisfy the style profiles. The minimum profile
+# still makes parser, load, internal, and syntax errors fatal; raise the profile
+# incrementally as the structural refactor settles.
+profile: min
+offline: true
+exclude_paths:
+  - .ansible/
+  - .venv/
+  - collections/
+  - tests/fixtures/

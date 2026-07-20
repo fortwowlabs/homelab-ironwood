@@ -7,6 +7,7 @@
 set -uo pipefail
 
 # Config file: NTFY_URL, NTFY_TOPIC, THRESH, NTFY_TOKEN (optional).
+# shellcheck source=/dev/null
 [ -f /etc/homelab-diskguard.env ] && . /etc/homelab-diskguard.env
 THRESH="${THRESH:-85}"
 NTFY_URL="${NTFY_URL:-http://192.168.1.30:8080}"

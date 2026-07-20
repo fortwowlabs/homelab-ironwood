@@ -1,0 +1,52 @@
+---
+- name: Authenticate Proxmox control paths
+  hosts: pve
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Require explicit Proxmox API and SSH settings
+      ansible.builtin.assert:
+        that:
+          - pve_api_host is defined
+          - pve_node is defined
+          - pve_ssh_host is defined
+          - pve_ssh_host | length > 0
+          - vault_pve_token_id is defined
+          - vault_pve_token_secret is defined
+        fail_msg: >-
+          Define pve_api_host, pve_node, pve_ssh_host, and the vaulted API
+          token before running preflight.
+      no_log: true
+      diff: false
+
+    - name: Authenticate to the scoped Proxmox API
+      community.proxmox.proxmox_vm_info:
+        api_host: "{{ pve_api_host }}"
+        api_user: "{{ vault_pve_token_id.split('!')[0] }}"
+        api_token_id: "{{ vault_pve_token_id.split('!')[1] }}"
+        api_token_secret: "{{ vault_pve_token_secret }}"
+        validate_certs: "{{ pve_validate_certs | default(true) }}"
+        node: "{{ pve_node }}"
+      changed_when: false
+      no_log: true
+      diff: false
+
+    - name: Authenticate to the explicit Proxmox SSH endpoint
+      ansible.builtin.command:
+        argv:
+          - ssh
+          - -o
+          - BatchMode=yes
+          - -o
+          - ConnectTimeout=10
+          - "{{ pve_ssh_host }}"
+          - "true"
+      changed_when: false
+
+- name: Require service VM connectivity
+  hosts: service_vms
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Authenticate to the service VM
+      ansible.builtin.ping:

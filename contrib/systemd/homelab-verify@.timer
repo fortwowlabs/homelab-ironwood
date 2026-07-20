@@ -1,0 +1,14 @@
+# Enable one instance for the unprivileged Linux account that owns the repo:
+#   systemctl enable --now homelab-verify@alice.timer
+[Unit]
+Description=Run homelab-iac non-disruptive verification nightly for %i
+ConditionOS=linux
+
+[Timer]
+Unit=homelab-verify@%i.service
+OnCalendar=*-*-* 03:30:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,5 @@
+-r requirements.txt
+
+# Offline validation toolchain.
+ansible-lint==26.6.0
+yamllint==1.38.0

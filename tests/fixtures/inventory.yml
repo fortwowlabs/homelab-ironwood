@@ -1,0 +1,25 @@
+---
+# Non-secret, loopback-only inventory for syntax and lint validation. Nothing
+# in hosted CI may load the production inventory or address the homelab.
+all:
+  children:
+    pve:
+      hosts:
+        fixture-pve:
+          ansible_connection: local
+          ansible_host: 127.0.0.1
+          ansible_python_interpreter: "{{ ansible_playbook_python }}"
+          pve_api_host: 127.0.0.1
+          pve_node: fixture
+          pve_ssh_host: fixture.invalid
+    service_vms:
+      hosts:
+        svc-download:
+          ansible_connection: local
+          ansible_host: 127.0.0.1
+        svc-media:
+          ansible_connection: local
+          ansible_host: 127.0.0.1
+      vars:
+        ansible_user: fixture
+        ansible_become: false

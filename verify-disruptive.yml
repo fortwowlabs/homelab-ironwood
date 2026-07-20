@@ -1,0 +1,36 @@
+---
+- name: Exercise and recover the download fail-closed boundary
+  hosts: svc-download
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Run disruptive verification with failure notification
+      block:
+        - name: Run the catalog-driven fail-closed drill
+          ansible.builtin.include_role:
+            name: svc_download
+            tasks_from: verify_disruptive
+      rescue:
+        - name: Notify disruptive verification failure
+          ansible.builtin.include_role:
+            name: notify
+          vars:
+            ntfy_title: homelab DISRUPTIVE VERIFY FAILED
+            ntfy_result: >-
+              The drill failed; its always block attempted to restore every
+              workload that was running before the test. Inspect service state.
+            ntfy_priority: urgent
+            ntfy_tags: rotating_light
+
+        - name: Abort after the recovery path completes
+          ansible.builtin.fail:
+            msg: "Disruptive verification failed after attempting full recovery."
+
+    - name: Send disruptive verification success notification
+      ansible.builtin.include_role:
+        name: notify
+      vars:
+        ntfy_title: homelab disruptive verify OK
+        ntfy_result: Fail-closed propagation and catalog service recovery passed.
+        ntfy_tags: white_check_mark
+      when: notify_on_success | default(true) | bool
