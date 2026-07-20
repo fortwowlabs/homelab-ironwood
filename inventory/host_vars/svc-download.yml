@@ -12,3 +12,7 @@ vm_extra_packages:
   - podman
   - nfs-utils
   - policycoreutils-python-utils
+
+# --- monitoring (mon role) ---
+cockpit_origin:     cockpit-dl      # https://cockpit-dl.<domain>
+mon_open_firewalld: false           # svc-download uses the nftables backstop (:9090 opened there)

@@ -90,7 +90,8 @@ table inet host_backstop {
 
         # Jailed-service admin UIs via the veth socket proxies (proxies bind
         # these ports on the LAN IP). v5: 5076 gone with NZBHydra2.
-        ip saddr $LAN_ADMIN tcp dport { 8080, 9696, 8989, 7878 } accept
+        # 9090 = Cockpit (host, not jailed) reverse-proxied by svc-media.
+        ip saddr $LAN_ADMIN tcp dport { 8080, 9696, 8989, 7878, 9090 } accept
 
         icmp type echo-request accept
 

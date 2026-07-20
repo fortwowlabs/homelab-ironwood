@@ -1,0 +1,11 @@
+# {{ ansible_managed }}
+- Homelab:
+    - pfSense:
+        - abbr: PF
+          href: https://192.168.1.1
+    - Proxmox:
+        - abbr: PVE
+          href: https://thurgadin.{{ service_domain }}:8006
+    - TrueNAS:
+        - abbr: NAS
+          href: https://truenas.{{ service_domain }}

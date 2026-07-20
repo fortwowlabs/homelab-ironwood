@@ -97,12 +97,18 @@ media_access_layer: caddy
 #   tls_skip_verify optional bool, for self-signed https backends
 service_domain: fort.wow
 
+# group/icon are used by the Homepage dashboard; Caddy/dnsmasq ignore them.
 caddy_services:
-  jellyfin:   { backend: "127.0.0.1:8096" }
-  abs:        { backend: "127.0.0.1:13378" }
-  romm:       { backend: "127.0.0.1:8081" }
-  jellyseerr: { backend: "127.0.0.1:5055" }
-  sonarr:     { backend: "{{ svc_download_ip }}:8989" }
-  radarr:     { backend: "{{ svc_download_ip }}:7878" }
-  prowlarr:   { backend: "{{ svc_download_ip }}:9696" }
-  sabnzbd:    { backend: "{{ svc_download_ip }}:8080" }
+  jellyfin:   { backend: "127.0.0.1:8096",             group: Media,     icon: jellyfin }
+  abs:        { backend: "127.0.0.1:13378",            group: Media,     icon: audiobookshelf }
+  romm:       { backend: "127.0.0.1:8081",             group: Media,     icon: romm }
+  jellyseerr: { backend: "127.0.0.1:5055",             group: Media,     icon: jellyseerr }
+  sonarr:     { backend: "{{ svc_download_ip }}:8989", group: Downloads, icon: sonarr }
+  radarr:     { backend: "{{ svc_download_ip }}:7878", group: Downloads, icon: radarr }
+  prowlarr:   { backend: "{{ svc_download_ip }}:9696", group: Downloads, icon: prowlarr }
+  sabnzbd:    { backend: "{{ svc_download_ip }}:8080", group: Downloads, icon: sabnzbd }
+  # monitoring (feat/monitoring): Cockpit serves its own self-signed TLS
+  home:          { backend: "127.0.0.1:3000",          group: Infra, icon: homepage }
+  ntfy:          { backend: "{{ svc_media_ip }}:8080", group: Infra, icon: ntfy }
+  cockpit-media: { backend: "127.0.0.1:9090",          group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }
+  cockpit-dl:    { backend: "{{ svc_download_ip }}:9090", group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }

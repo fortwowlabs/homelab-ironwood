@@ -1,0 +1,75 @@
+---
+# Monitoring common to BOTH service VMs: Cockpit (web console for systemd,
+# storage, logs, podman) + a disk-space ntfy alarm (the thing that would have
+# caught the 2026-07-20 rpool-full outage before services died).
+#
+# Per-host knobs come from host_vars:
+#   cockpit_origin       short name -> https://<origin>.<domain> reverse proxy
+#   mon_open_firewalld   true on svc-media (firewalld); svc-download opens :9090
+#                        in its nftables backstop template instead.
+
+# ------------------------------------------------------------------ cockpit ---
+- name: Install Cockpit
+  ansible.builtin.dnf:
+    name:
+      - cockpit
+      - cockpit-podman      # rootful podman on svc-download; system view on both
+      - cockpit-storaged    # disks / filesystems / LVM / NFS
+    state: present
+  tags: [cockpit]
+
+# Behind Caddy, Cockpit needs its external origin allow-listed and to trust the
+# proxy's X-Forwarded-Proto (else it rejects the WebSocket as cross-origin).
+- name: Cockpit reverse-proxy config
+  ansible.builtin.copy:
+    dest: /etc/cockpit/cockpit.conf
+    mode: "0644"
+    content: |
+      [WebService]
+      Origins = https://{{ cockpit_origin }}.{{ service_domain }}
+      ProtocolHeader = X-Forwarded-Proto
+  register: cockpit_conf
+  tags: [cockpit]
+
+- name: Enable + start cockpit.socket
+  ansible.builtin.systemd:
+    name: cockpit.socket
+    enabled: true
+    state: "{{ 'restarted' if cockpit_conf is changed else 'started' }}"
+  tags: [cockpit]
+
+- name: Open Cockpit 9090 to the LAN (firewalld hosts only)
+  ansible.posix.firewalld:
+    rich_rule: "rule family=ipv4 source address={{ lan_cidr }} port port=9090 protocol=tcp accept"
+    permanent: true
+    immediate: true
+    state: enabled
+  when: mon_open_firewalld | default(false)
+  tags: [cockpit]
+
+# --------------------------------------------------------------- disk alarm ---
+- name: Disk-alarm script
+  ansible.builtin.template:
+    src: disk-alert.sh.j2
+    dest: /usr/local/sbin/disk-alert.sh
+    mode: "0750"
+  tags: [diskalert]
+
+- name: Disk-alarm units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - homelab-diskalert.service
+    - homelab-diskalert.timer
+  register: diskalert_units
+  tags: [diskalert]
+
+- name: Enable + start the disk-alarm timer
+  ansible.builtin.systemd:
+    name: homelab-diskalert.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ diskalert_units is changed }}"
+  tags: [diskalert]

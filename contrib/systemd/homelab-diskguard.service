@@ -1,0 +1,8 @@
+[Unit]
+Description=PVE ZFS pool + filesystem capacity alarm (ntfy)
+After=network-online.target zfs.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/pve-diskguard.sh

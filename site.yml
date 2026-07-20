@@ -161,6 +161,14 @@
             msg: "svc-media failed — see above."
           tags: [always]
 
+- name: Monitoring (Cockpit + disk alarm on both VMs)
+  hosts: service_vms
+  gather_facts: true
+  tasks:
+    - ansible.builtin.include_role:
+        name: mon
+      tags: [mon, always]
+
 # ---------- Success notification (full runs only — deliberately untagged,
 # ---------- so tag-sliced runs don't claim a full deploy succeeded) ----------
 - name: Announce success

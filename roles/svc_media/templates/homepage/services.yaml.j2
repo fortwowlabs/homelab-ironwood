@@ -1,0 +1,14 @@
+# {{ ansible_managed }}
+# Rendered from caddy_services; grouped by each entry's `group`. `home`
+# (Homepage itself) is skipped. Icons come from the dashboard-icons pack.
+{% set groups = caddy_services | dict2items
+      | rejectattr('key', 'equalto', 'home') | list
+      | groupby('value.group') %}
+{% for group_name, entries in groups %}
+- {{ group_name }}:
+{% for e in entries %}
+    - {{ e.key }}:
+        href: https://{{ e.key }}.{{ service_domain }}
+        icon: {{ e.value.icon | default(e.key) }}.png
+{% endfor %}
+{% endfor %}

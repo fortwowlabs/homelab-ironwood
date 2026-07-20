@@ -123,6 +123,9 @@
     - /opt/homelab/appdata/romm/config
     - /opt/homelab/appdata/romm/redis-data    # embedded Valkey state (upstream layout)
     - /opt/homelab/appdata/romm/mysql
+    - /opt/homelab/appdata/homepage           # dashboard config (templated below)
+    - /opt/homelab/appdata/ntfy/cache          # ntfy message cache
+    - /opt/homelab/appdata/ntfy/etc            # ntfy server.yml (optional)
   tags: [files]
 
 - name: Install rootless quadlets (static)
@@ -138,6 +141,7 @@
     - romm.container
     - romm-db.container
     - romm.network
+    - ntfy.container
   tags: [files, media]
 
 - name: Render jellyfin quadlet (LAN-IP publish)
@@ -148,6 +152,29 @@
     group: "{{ svc_gid }}"
     mode: "0644"
   tags: [files, media]
+
+- name: Render Homepage quadlet (needs domain for ALLOWED_HOSTS)
+  ansible.builtin.template:
+    src: homepage.container.j2
+    dest: /opt/homelab/.config/containers/systemd/homepage.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  tags: [files, mon]
+
+- name: Render Homepage config (services/settings/widgets/bookmarks from caddy_services)
+  ansible.builtin.template:
+    src: "homepage/{{ item }}.j2"
+    dest: "/opt/homelab/appdata/homepage/{{ item }}"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  loop:
+    - services.yaml
+    - settings.yaml
+    - widgets.yaml
+    - bookmarks.yaml
+  tags: [files, mon]
 
 - name: Render backup script
   ansible.builtin.template:
@@ -197,9 +224,17 @@
 - name: Start media containers (rootless; romm waits on healthy DB)
   ansible.builtin.command:
     cmd: "systemctl --user -M homelab@ start {{ item }}"
-  loop: [jellyfin, audiobookshelf, romm-db, romm, jellyseerr]
+  loop: [jellyfin, audiobookshelf, romm-db, romm, jellyseerr, ntfy, homepage]
   changed_when: true
   tags: [media]
+
+- name: Open ntfy 8080 + Homepage path to the LAN (ntfy is the alert sink)
+  ansible.posix.firewalld:
+    rich_rule: "rule family=ipv4 source address={{ lan_cidr }} port port=8080 protocol=tcp accept"
+    permanent: true
+    immediate: true
+    state: enabled
+  tags: [media, mon]
 
 # Running before the rich rules: the firewalld module needs the daemon up
 # (zone ops fail with INVALID_ZONE otherwise). Default zone permits ssh.

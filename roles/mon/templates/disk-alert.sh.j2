@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# disk-alert.sh — ntfy alarm when any local filesystem crosses a threshold.
+# Runs from homelab-diskalert.timer. Never exits nonzero (a failed push must
+# not mark the unit failed); it just tries the ntfy and moves on.
+set -uo pipefail
+
+THRESH={{ disk_alert_threshold | default(85) }}
+NTFY="{{ ntfy_url }}/{{ ntfy_topic }}"
+{% if (vault_ntfy_token | default('')) | length > 0 %}
+AUTH=(-H "Authorization: Bearer {{ vault_ntfy_token }}")
+{% else %}
+AUTH=()
+{% endif %}
+host=$(hostname -s)
+
+over=""
+# Real, local filesystems only — skip tmpfs/overlay/nfs (NFS free space is the
+# server's concern, and its own guard covers it).
+while read -r _fs _size _used avail pct mount; do
+    p=${pct%\%}
+    [[ "$p" =~ ^[0-9]+$ ]] || continue
+    if [ "$p" -ge "$THRESH" ]; then
+        over+=$'\n'"${mount} ${p}% used (${avail} free)"
+    fi
+done < <(df -P -x tmpfs -x devtmpfs -x overlay -x squashfs -x nfs -x nfs4 | tail -n +2)
+
+[ -z "$over" ] && exit 0
+
+curl -fsS --max-time 10 "${AUTH[@]}" \
+    -H "Title: DISK alarm on ${host}" \
+    -H "Priority: high" \
+    -H "Tags: warning,floppy_disk" \
+    -d "Filesystems at/over ${THRESH}%:${over}" \
+    "$NTFY" >/dev/null 2>&1 || \
+    logger -t disk-alert "ntfy push failed; ${host} over ${THRESH}%:${over}"
+exit 0

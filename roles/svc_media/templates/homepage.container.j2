@@ -1,0 +1,23 @@
+# ~homelab/.config/containers/systemd/homepage.container   (rootless)
+# RENDERED from roles/svc_media/templates/homepage.container.j2.
+#
+# Landing page / launcher for every service. Reverse-proxied by Caddy at
+# home.{{ service_domain }}. Config (services/settings/widgets) is templated
+# from the caddy_services dict, so the dashboard stays in sync with the names.
+[Unit]
+Description=Homepage dashboard
+
+[Container]
+Image=ghcr.io/gethomepage/homepage:latest
+ContainerName=homepage
+PublishPort=127.0.0.1:3000:3000
+Volume=%h/appdata/homepage:/app/config:Z
+Environment=TZ={{ timezone }}
+# Homepage validates the Host header; it's reached via Caddy as home.<domain>.
+Environment=HOMEPAGE_ALLOWED_HOSTS=home.{{ service_domain }}
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
