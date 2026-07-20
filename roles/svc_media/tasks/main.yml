@@ -36,6 +36,7 @@
       - firewalld          # svc-media's firewall; GenericCloud ships without it
       - python3-firewall   # firewalld ansible module bindings (not in cloud image)
       - curl
+      - bind-utils         # dig, for the DNS gate
     state: present
   tags: [files]
 
@@ -295,121 +296,121 @@
   when: ts_state != 'Running'
   tags: [access]
 
-- name: Deploy Caddy access layer (ts.net vhosts)
-  when:
-    - media_access_layer | default('manual') == 'caddy'
-    - ts_state == 'Running'
+# --------------------------------------------------------------------- dns ---
+# svc-media is the authority for *.{{ service_domain }}. pfSense forwards the
+# domain here and Tailscale split-DNS points the tailnet here (both one-time,
+# docs/dns-and-names.md). Records come from the same caddy_services dict.
+- name: Install dnsmasq
+  ansible.builtin.dnf:
+    name: dnsmasq
+    state: present
+  tags: [dns]
+
+- name: Ensure dnsmasq loads /etc/dnsmasq.d
+  ansible.builtin.lineinfile:
+    path: /etc/dnsmasq.conf
+    line: "conf-dir=/etc/dnsmasq.d/,*.conf"
+    regexp: '^\s*#?\s*conf-dir=/etc/dnsmasq\.d'
+    create: true
+    mode: "0644"
+  tags: [dns]
+
+- name: Render the {{ service_domain }} zone
+  ansible.builtin.template:
+    src: dnsmasq-fortwow.conf.j2
+    dest: /etc/dnsmasq.d/fort-wow.conf
+    mode: "0644"
+    validate: "dnsmasq --test --conf-file=%s"
+  register: dnsmasq_zone
+  tags: [dns]
+
+- name: Open DNS 53 (udp+tcp) to the LAN source range
+  ansible.posix.firewalld:
+    rich_rule: "rule family=ipv4 source address={{ lan_cidr }} port port=53 protocol={{ item }} accept"
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: [udp, tcp]
+  tags: [dns]
+
+- name: Enable + (re)start dnsmasq
+  ansible.builtin.systemd:
+    name: dnsmasq
+    enabled: true
+    state: "{{ 'restarted' if dnsmasq_zone is changed else 'started' }}"
+  tags: [dns]
+
+- name: "GATE: dnsmasq resolves a service name to Caddy"
+  ansible.builtin.command:
+    cmd: "dig +short +time=2 +tries=2 @{{ svc_media_ip }} jellyfin.{{ service_domain }}"
+  register: dns_gate
+  changed_when: false
+  failed_when: svc_media_ip not in dns_gate.stdout
+  tags: [dns]
+
+- name: Deploy Caddy reverse proxy (*.{{ service_domain }}, internal CA)
+  when: media_access_layer | default('manual') == 'caddy'
   block:
-    - name: Install caddy (EPEL; if dnf can't find it, see files/tailscale-serve.sh fallback)
+    - name: Install caddy
       ansible.builtin.dnf:
         name: caddy
         state: present
 
-    - name: tailscaled drop-in dir
-      ansible.builtin.file:
-        path: /etc/systemd/system/tailscaled.service.d
-        state: directory
-        mode: "0755"
+    # Confined caddy (httpd_t) proxies to backends on 127.0.0.1 AND to
+    # svc-download over the LAN; without this remote reverse_proxy connects
+    # get EACCES (localhost happens to be allowed, remote is not).
+    - name: Allow caddy outbound network connects (SELinux)
+      ansible.posix.seboolean:
+        name: httpd_can_network_connect
+        state: true
+        persistent: true
 
-    - name: tailscaled drop-in — let the caddy user fetch ts.net certs
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/tailscaled.service.d/permit-cert.conf
-        content: |
-          [Service]
-          Environment=TS_PERMIT_CERT_UID=caddy
-        mode: "0644"
-      register: ts_dropin
+    - name: Open Caddy 443 to the LAN source range (v6 rich rule)
+      ansible.posix.firewalld:
+        rich_rule: "rule family=ipv4 source address={{ lan_cidr }} port port=443 protocol=tcp accept"
+        permanent: true
+        immediate: true
+        state: enabled
 
-    - name: Restart tailscaled to pick up the drop-in
-      ansible.builtin.systemd:
-        name: tailscaled
-        state: restarted
-        daemon_reload: true
-      when: ts_dropin is changed
-
-    - name: Learn this node's ts.net name + address
-      ansible.builtin.command: tailscale status --json
-      register: ts_self
-      changed_when: false
-
-    - name: caddy drop-in dir
-      ansible.builtin.file:
-        path: /etc/systemd/system/caddy.service.d
-        state: directory
-        mode: "0755"
-
-    - name: caddy drop-in — TS_HOST/TS_IP for the Caddyfile
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/caddy.service.d/ts-env.conf
-        content: |
-          [Service]
-          Environment=TS_HOST={{ ((ts_self.stdout | from_json).Self.DNSName).rstrip('.') }}
-          Environment=TS_IP={{ (ts_self.stdout | from_json).TailscaleIPs[0] | default((ts_self.stdout | from_json).Self.TailscaleIPs[0]) }}
-        mode: "0644"
-      register: caddy_env
-
-    - name: Install Caddyfile
-      ansible.builtin.copy:
-        src: caddy/Caddyfile
+    - name: Render Caddyfile from caddy_services
+      ansible.builtin.template:
+        src: Caddyfile.j2
         dest: /etc/caddy/Caddyfile
         mode: "0644"
+        validate: "caddy validate --adapter caddyfile --config %s"
       register: caddyfile
-
-    # Confined caddy (httpd_t) must reach tailscaled's localapi socket for
-    # ts.net certs; no boolean covers a unix-socket connect to
-    # unconfined_service_t, so ship a minimal policy module.
-    - name: Install checkpolicy (compiles the SELinux module)
-      ansible.builtin.dnf:
-        name: checkpolicy
-        state: present
-
-    - name: caddy-tailscale SELinux module source
-      ansible.builtin.copy:
-        src: caddy-tailscale.te
-        dest: /etc/caddy/caddy-tailscale.te
-        mode: "0644"
-      register: caddy_ts_te
-
-    - name: Is the caddy-tailscale module loaded?
-      ansible.builtin.shell: "semodule -l | grep -qw caddy-tailscale"
-      register: caddy_ts_mod
-      failed_when: false
-      changed_when: false
-
-    - name: Compile + load caddy-tailscale module
-      ansible.builtin.shell: |
-        set -euo pipefail
-        d=$(mktemp -d)
-        trap 'rm -rf "$d"' EXIT
-        checkmodule -M -m -o "$d/caddy-tailscale.mod" /etc/caddy/caddy-tailscale.te
-        semodule_package -o "$d/caddy-tailscale.pp" -m "$d/caddy-tailscale.mod"
-        semodule -i "$d/caddy-tailscale.pp"
-      when: caddy_ts_te is changed or caddy_ts_mod.rc != 0
-      changed_when: true
-
-    # 8443 is already http_port_t; the other vhost ports are not, and
-    # confined caddy gets EACCES binding them. 8448/8449 pre-labeled for the
-    # commented-out vhosts in the Caddyfile.
-    - name: Label Caddy vhost ports http_port_t (SELinux)
-      community.general.seport:
-        ports: 8444,8445,8447,8448,8449
-        proto: tcp
-        setype: http_port_t
-        state: present
 
     - name: Enable + (re)start caddy
       ansible.builtin.systemd:
         name: caddy
         enabled: true
-        state: "{{ 'restarted' if (caddy_env is changed or caddyfile is changed) else 'started' }}"
+        state: "{{ 'restarted' if caddyfile is changed else 'started' }}"
         daemon_reload: true
 
-    - name: "GATE: Caddy answering on the tailnet vhost port"
+    # local_certs writes the CA root here on first start. Fetch it so the
+    # user can install it on their devices for trusted HTTPS. Public cert
+    # (no private key) — safe, but env-specific, so it's gitignored.
+    - name: Wait for the internal CA root to exist
+      ansible.builtin.wait_for:
+        path: /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+        timeout: 30
+
+    - name: Fetch the internal CA root to the control node
+      ansible.builtin.fetch:
+        src: /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
+        dest: "{{ playbook_dir }}/{{ service_domain }}-root-ca.crt"
+        flat: true
+
+    - name: "GATE: Caddy answers a hostname vhost with a cert"
       ansible.builtin.command:
-        cmd: "curl -sk --max-time 10 -o /dev/null -w '%{http_code}' https://{{ ((ts_self.stdout | from_json).Self.DNSName).rstrip('.') }}:8447"
+        # --resolve so the gate doesn't depend on DNS being wired yet
+        cmd: >-
+          curl -sk --max-time 10 -o /dev/null -w '%{http_code}'
+          --resolve jellyseerr.{{ service_domain }}:443:{{ svc_media_ip }}
+          https://jellyseerr.{{ service_domain }}
       register: caddy_gate
       changed_when: false
-      failed_when: caddy_gate.stdout not in ['200', '307', '302']
+      failed_when: caddy_gate.stdout not in ['200', '307', '302', '401']
       retries: 3
       delay: 5
       until: caddy_gate is not failed
@@ -417,8 +418,8 @@
 
 - name: NOTE — Caddy skipped
   ansible.builtin.debug:
-    msg: "*** Caddy skipped (media_access_layer={{ media_access_layer | default('manual') }}, tailscale={{ ts_state }}). ***"
-  when: media_access_layer | default('manual') != 'caddy' or ts_state != 'Running'
+    msg: "*** Caddy skipped (media_access_layer={{ media_access_layer | default('manual') }}). ***"
+  when: media_access_layer | default('manual') != 'caddy'
   tags: [access]
 
 # ------------------------------------------------------------------ backup ---

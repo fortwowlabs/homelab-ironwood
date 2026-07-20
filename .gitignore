@@ -6,6 +6,9 @@ inventory/group_vars/all/vault.yml
 # Raw session transcripts — contain decrypted secrets shown mid-session.
 docs/sessions/
 
+# Fetched Caddy internal-CA root (env-specific; regenerated per install)
+fort.wow-root-ca.crt
+
 # Python venv (created by `make deps`)
 .venv/
 

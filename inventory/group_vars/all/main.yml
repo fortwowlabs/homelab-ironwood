@@ -16,6 +16,7 @@ svc_gid:         10001
 timezone:        America/New_York
 
 # --- Hosts ---
+pve_host_ip:     192.168.1.10       # thurgadin (also pve_api_host in hosts.yml)
 truenas_ip:      192.168.1.20
 svc_media_ip:    192.168.1.30
 svc_download_ip: 192.168.1.31
@@ -80,3 +81,28 @@ ntfy_topic: "homelab-deploy"
 # manual = v4 behavior: role stops at "containers healthy on the LAN";
 #          you run `tailscale up` + Caddy by hand (DEPLOY Phase 6).
 media_access_layer: caddy
+
+# --- Service naming (v6) --------------------------------------------------
+# Every service is reachable at https://<key>.{{ service_domain }} instead of
+# an IP:port. Caddy on svc-media is the single reverse proxy (internal-CA TLS);
+# dnsmasq on svc-media answers *.{{ service_domain }} -> svc_media_ip. pfSense
+# forwards the domain to it and Tailscale split-DNS does the same for the
+# tailnet — both one-time, see docs/dns-and-names.md.
+#
+# THIS DICT IS THE SINGLE SOURCE OF TRUTH for the Caddy vhosts AND the DNS
+# records (roles/svc_media/templates/{Caddyfile,dnsmasq-fortwow.conf}.j2 both
+# iterate it). Add a service here and it gets a name + a vhost.
+#   backend         host:port Caddy proxies to (127.0.0.1 = on svc-media)
+#   scheme          optional, default http (set to https for TLS backends)
+#   tls_skip_verify optional bool, for self-signed https backends
+service_domain: fort.wow
+
+caddy_services:
+  jellyfin:   { backend: "127.0.0.1:8096" }
+  abs:        { backend: "127.0.0.1:13378" }
+  romm:       { backend: "127.0.0.1:8081" }
+  jellyseerr: { backend: "127.0.0.1:5055" }
+  sonarr:     { backend: "{{ svc_download_ip }}:8989" }
+  radarr:     { backend: "{{ svc_download_ip }}:7878" }
+  prowlarr:   { backend: "{{ svc_download_ip }}:9696" }
+  sabnzbd:    { backend: "{{ svc_download_ip }}:8080" }
