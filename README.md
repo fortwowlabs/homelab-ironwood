@@ -18,12 +18,19 @@ drift checks use the same code.
 | 2 PVE host prep (RAM, order) | Partly | Snippet content + boot order are one-liners in DEPLOY; do those once. |
 | 3/5 VM creation              | Yes    | `pve_vm` role via the API |
 | 4 Jail + stack               | Yes    | `svc_download` role, gates as assertions |
-| 6 Media stack                | Yes    | `svc_media` role, incl. Tailscale + Caddy **when `vault_tailscale_authkey` is set** (skipped with a visible note otherwise) |
-| 7 App wiring                 | No     | Clicking through SAB/Prowlarr/arr/Jellyseerr UIs |
-| 9 Backups                    | Yes    | Nightly timers on both VMs: RomM DB dump + appdata tars (media, 03:05), arr/SAB appdata tars (download, 03:10), 14-day retention. ABS uses its built-in backup to the NFS-mounted `/config/backups` — schedule it once in the UI. **Restore is manual; test it quarterly.** |
-| 9 ntfy server                | No     | Stand it up on svc-media once; until then every push prints a loud WARNING in play output (or point `ntfy_url` at ntfy.sh/<random-topic> to bootstrap) |
+| 6 Media stack                | Yes    | `svc_media` role. Media apps + LazyLibrarian (books/audiobooks) + RomM (ROM presentation + metadata). |
+| 7 App wiring                 | No     | Clicking through SAB/Prowlarr/arr/LazyLibrarian/Jellyseerr UIs — see [docs/DEPLOY-CHECKLIST.md](docs/DEPLOY-CHECKLIST.md) |
+| 9 Backups                    | Yes    | Nightly timers on both VMs: RomM DB dump + appdata tars (media, 03:05), arr/SAB/LazyLibrarian appdata tars (download, 03:10), 14-day retention. ABS uses its built-in backup to the NFS-mounted `/config/backups` — schedule it once in the UI. **Restore is manual; test it quarterly.** |
+| 9 ntfy server                | Yes (v6) | Rootless container on svc-media (`ntfy.fort.wow`), bound to the LAN IP so the canary/deploy/disk alarms deliver. |
+| **Service DNS names (v6)**   | Yes    | dnsmasq + Caddy hostname routing → `*.fort.wow`. 3 one-time glue steps ([docs/dns-and-names.md](docs/dns-and-names.md)) |
+| **Monitoring (v6)**          | Yes    | Cockpit (both VMs) + Homepage dashboard + disk-space ntfy alarms. PVE zpool guard installs by hand ([docs/monitoring.md](docs/monitoring.md)) |
 
-Mullvad key generation is manual by nature.
+Mullvad key generation is manual by nature. Tailscale is used for remote access
+via the subnet router; `vault_tailscale_authkey` still enables unattended
+`tailscale up` on svc-media (skipped with a visible note otherwise).
+
+**New here? Start with [docs/DEPLOY-CHECKLIST.md](docs/DEPLOY-CHECKLIST.md)** — the
+ordered runbook (base install + v6), which links the per-feature docs in `docs/`.
 
 ## One-time setup
 
@@ -63,9 +70,9 @@ done
 
 # 2. secrets — MUST live inside group_vars/all/ (a file named all_vault.yml
 #    maps to a group called "all_vault", which doesn't exist, and is silently
-#    never loaded)
+#    never loaded). v6 adds the vault_romm_* block (DB creds + metadata keys).
 cp inventory/group_vars/all_vault.yml.example inventory/group_vars/all/vault.yml
-$EDITOR inventory/group_vars/all/vault.yml      # token secret + Mullvad fields
+$EDITOR inventory/group_vars/all/vault.yml      # token secret + Mullvad + vault_romm_*
 .venv/bin/ansible-vault encrypt inventory/group_vars/all/vault.yml
 
 # 3. your public SSH key
@@ -74,6 +81,12 @@ $EDITOR inventory/group_vars/all/main.yml       # set admin_ssh_pubkey
 # 4. confirm you can reach PVE root over SSH (image fetch/snippet render use it)
 ssh root@192.168.1.10 true
 ```
+
+After the deploy, three one-time glue steps make the `*.fort.wow` names resolve
+(pfSense domain override, Tailscale split-DNS, install the Caddy root CA) — all
+in [docs/dns-and-names.md](docs/dns-and-names.md). The full ordered runbook,
+including the v6 features and app wiring, is
+[docs/DEPLOY-CHECKLIST.md](docs/DEPLOY-CHECKLIST.md).
 
 ## Deploy
 
