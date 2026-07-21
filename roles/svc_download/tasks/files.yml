@@ -13,25 +13,23 @@
     - /etc/netns/vpn
 
 - name: Calculate the catalog-managed unit paths that should exist
+  vars:
+    proxy_app_names: >-
+      {{ download_apps | dict2items | selectattr('value.proxy') | map(attribute='key') | list }}
   ansible.builtin.set_fact:
+    # A single bare `{{ expr }}` template (no {% %} statements) is evaluated
+    # as one native expression and returns a real list. The equivalent
+    # {% set %}/{% for %}/append idiom instead renders the WHOLE block as
+    # text, so set_fact stores a *string* repr of a list (leading whitespace
+    # and all) — list.difference() against that string then iterates its
+    # characters instead of paths, so nothing is ever excluded and every
+    # catalog-managed unit is (mis)treated as stale on every run.
     download_expected_quadlet_paths: >-
-      {% set paths = [] %}
-      {% for name in download_apps %}
-      {% set _ = paths.append('/etc/containers/systemd/dl-' ~ name ~ '.container') %}
-      {% endfor %}
-      {{ paths }}
+      {{ download_apps.keys() | map('regex_replace', '^(.*)$', '/etc/containers/systemd/dl-\1.container') | list }}
     download_expected_proxy_socket_paths: >-
-      {% set paths = [] %}
-      {% for name, app in download_apps.items() if app.proxy %}
-      {% set _ = paths.append('/etc/systemd/system/' ~ name ~ '-proxy.socket') %}
-      {% endfor %}
-      {{ paths }}
+      {{ proxy_app_names | map('regex_replace', '^(.*)$', '/etc/systemd/system/\1-proxy.socket') | list }}
     download_expected_proxy_service_paths: >-
-      {% set paths = [] %}
-      {% for name, app in download_apps.items() if app.proxy %}
-      {% set _ = paths.append('/etc/systemd/system/' ~ name ~ '-proxy.service') %}
-      {% endfor %}
-      {{ paths }}
+      {{ proxy_app_names | map('regex_replace', '^(.*)$', '/etc/systemd/system/\1-proxy.service') | list }}
   changed_when: false
 
 - name: Discover catalog-managed download Quadlets

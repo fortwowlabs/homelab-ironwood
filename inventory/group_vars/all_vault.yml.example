@@ -21,6 +21,15 @@
 #   # VM lifecycle inside the pool only:
 #   pveum aclmod /pool/homelab-svc -user automation@pve -role PVEVMAdmin
 #   pveum aclmod /pool/homelab-svc -token 'automation@pve!ansible' -role PVEVMAdmin
+#   # PVEVMAdmin does NOT include Pool.Audit, so /cluster/resources omits the
+#   # `pool` field for this token even though it fully manages the VM through
+#   # the pool ACL. roles/pve_vm's immutable-identity check on an EXISTING VM
+#   # asserts pve_existing_vm.pool == pve_vm_pool, so without this grant that
+#   # assertion always fails ('' != 'homelab-svc') the first time the role
+#   # runs against an already-provisioned VM. PVEPoolUser is stock and is
+#   # exactly Pool.Audit (no allocate/write capability) — grant it too:
+#   pveum aclmod /pool/homelab-svc -user automation@pve -role PVEPoolUser
+#   pveum aclmod /pool/homelab-svc -token 'automation@pve!ansible' -role PVEPoolUser
 #   # Disk allocation on the VM storage + snippet/image storage:
 #   pveum aclmod /storage/nvme0pool -user automation@pve -role PVEDatastoreUser
 #   pveum aclmod /storage/nvme0pool -token 'automation@pve!ansible' -role PVEDatastoreUser

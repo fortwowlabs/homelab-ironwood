@@ -27,3 +27,4 @@ collections/ansible_collections/
 # Editor / OS
 *.swp
 .DS_Store
+.secrets/
