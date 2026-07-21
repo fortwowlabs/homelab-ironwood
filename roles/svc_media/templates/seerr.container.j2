@@ -5,6 +5,12 @@ Description=Seerr
 [Container]
 Image={{ media_images.seerr }}
 ContainerName=seerr
+# The image bakes in USER node:node. Under rootless Podman that non-root user
+# maps to a host subuid that does NOT own the homelab-owned %h/appdata/seerr
+# volume, so Seerr can't create /app/config/logs and crashes on boot. Run as
+# container-root (maps to the host homelab uid that owns appdata) — exactly how
+# the predecessor Jellyseerr image ran.
+User=0
 PublishPort=127.0.0.1:5055:5055
 Volume=%h/appdata/seerr:/app/config:Z
 Environment=TZ={{ timezone }}

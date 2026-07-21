@@ -19,8 +19,10 @@
   ansible.builtin.systemd:
     name: dnsmasq
     state: restarted
+  listen: restart dnsmasq
 
 - name: Restart caddy
   ansible.builtin.systemd:
     name: caddy
     state: restarted
+  listen: restart caddy
