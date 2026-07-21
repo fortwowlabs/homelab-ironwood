@@ -1,16 +1,18 @@
 {{ ansible_managed | comment }}
 # ~homelab/.config/containers/systemd/{{ item.key }}.container   (rootless)
 # RENDERED from roles/svc_infra/templates/infra-app.container.j2, driven by
-# the infra_apps catalog entry "{{ item.key }}". Published on 127.0.0.1
-# only — LAN/external reach is via Caddy on {{ media_host }}
-# (https://{{ item.key }}.{{ service_domain }}, added to caddy_services).
+# the infra_apps catalog entry "{{ item.key }}". Published on svc-infra's
+# LAN IP, NOT loopback — Caddy runs on {{ media_host }}, a different host,
+# and needs to reach this directly (see caddy_services in
+# group_vars/all/main.yml, https://{{ item.key }}.{{ service_domain }});
+# svc_infra's files.yml opens ui_port to lan_cidr via firewalld to match.
 [Unit]
 Description={{ item.key }}
 
 [Container]
 Image={{ item.value.image }}
 ContainerName={{ item.key }}
-PublishPort=127.0.0.1:{{ item.value.ui_port }}:{{ item.value.container_port | default(item.value.ui_port) }}
+PublishPort={{ ansible_host }}:{{ item.value.ui_port }}:{{ item.value.container_port | default(item.value.ui_port) }}
 {% for volume in item.value.volumes %}
 Volume={{ volume }}
 {% endfor %}

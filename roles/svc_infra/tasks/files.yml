@@ -49,6 +49,28 @@
     label: "{{ item.key }}"
   register: infra_quadlet_templates
 
+- name: Start firewalld before opening catalog service ports
+  ansible.builtin.systemd:
+    name: firewalld
+    enabled: true
+    state: started
+  when: infra_apps | length > 0
+
+# Every catalog app publishes on svc-infra's LAN IP (see
+# infra-app.container.j2) so Caddy on {{ media_host }} can reach it —
+# open each ui_port to the LAN here, matching svc_media's equivalent task.
+- name: Open LAN-scoped infra catalog service ports
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family=ipv4 source address={{ lan_cidr }} port
+      port={{ item.value.ui_port }} protocol=tcp accept
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: "{{ infra_apps | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
 - name: Calculate infra services whose rendered configuration changed
   ansible.builtin.set_fact:
     infra_services_to_restart: >-

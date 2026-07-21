@@ -123,3 +123,9 @@ caddy_services:
   cockpit-media: { backend: "127.0.0.1:9090",          group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }
   cockpit-dl:    { backend: "{{ hostvars[download_host].ansible_host }}:9090", group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }
   cockpit-infra: { backend: "{{ hostvars[infra_host].ansible_host }}:9090", group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }
+  # infra_apps catalog services (svc-infra) — the backend is always
+  # hostvars[infra_host].ansible_host, never 127.0.0.1: Caddy runs on
+  # svc-media, a different host, so the generic infra Quadlet template
+  # publishes each app on svc-infra's LAN IP (not loopback) for Caddy to
+  # reach; the catalog's ui_port must match here.
+  uptime-kuma: { backend: "{{ hostvars[infra_host].ansible_host }}:3001", group: Infra, icon: uptime-kuma }
