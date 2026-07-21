@@ -123,6 +123,11 @@
     label: "{{ item.item }}"
   changed_when: false
 
+- name: Verify the Beszel agent is active
+  ansible.builtin.command: systemctl is-active beszel-agent.service
+  changed_when: false
+  when: beszel_agent_enabled | bool
+
 - name: Mark download verification complete
   ansible.builtin.set_fact:
     svc_download_verified: true

@@ -48,10 +48,30 @@ infra_apps:
     volumes:
       - /opt/homelab/appdata/syncthing:/var/syncthing:Z
     env:
-      PUID: "{{ svc_uid }}"
-      PGID: "{{ svc_gid }}"
+      # Rootless podman maps container-internal UID 0 directly to the
+      # invoking host user (homelab) — the same trick as seerr.container.j2's
+      # User=0 fix. Any NON-zero PUID/PGID (e.g. svc_uid) instead goes through
+      # the subuid range, so files land owned by an opaque high host UID that
+      # svc_uid/svc_gid-based backup/read tasks can't touch. Force root.
+      PUID: "0"
+      PGID: "0"
     extra_ports:
       - { port: 22000, protocol: tcp }
       - { port: 22000, protocol: udp }
       - { port: 21027, protocol: udp }
     backup_paths: [syncthing]
+
+  # Beszel monitoring hub. Agents (one per VM, including this one) are
+  # bespoke quadlets, not catalog entries — see roles/*/templates/
+  # beszel-agent.container.j2 in svc_infra/svc_media/svc_download. The hub
+  # itself needs no manual setup to deploy; the *agents* need a one-time
+  # universal token + public key from the hub's own UI (see
+  # docs/services.md "Beszel monitoring setup") before they'll start.
+  beszel-hub:
+    image: "docker.io/henrygd/beszel@sha256:a849ad80814b6a1a3be665304dcace5d4854b3bed7bde4dd1227e8ce1b82d477"
+    ui_port: 8090
+    volumes:
+      - /opt/homelab/appdata/beszel-hub/data:/beszel_data:Z
+    env:
+      APP_URL: "https://beszel.{{ service_domain }}"
+    backup_paths: [beszel-hub]

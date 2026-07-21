@@ -1,11 +1,13 @@
 ---
 # Bespoke multi-container services (a database/cache sidecar) aren't in the
 # single-container infra_apps catalog (inventory/group_vars/all/infra-apps.yml)
-# — each such service's branch appends its container name(s) here so
-# apps.yml/verify.yml/backup.yml still cover it uniformly. See
+# — each such service's branch appends a `+ ([...] if condition else [])`
+# clause here so apps.yml/verify.yml/backup.yml still cover it uniformly,
+# without needing to know which category a service belongs to. See
 # roles/svc_media/tasks/files.yml + apps.yml for the equivalent hand-maintained
 # pattern (media_quadlet_catalog there mixes catalog and bespoke entries).
-infra_extra_service_names: []
+infra_extra_service_names: >-
+  {{ ['beszel-agent'] if beszel_agent_enabled | bool else [] }}
 
 # Every infra service, whether catalog-driven or bespoke, funnels through
 # this one name list so apps.yml/verify.yml don't need to know which category

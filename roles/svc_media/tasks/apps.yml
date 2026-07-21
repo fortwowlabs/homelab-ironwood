@@ -4,7 +4,8 @@
 
 - name: Read rootless media service state
   ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item.name }}.service"
-  loop: "{{ media_quadlet_catalog }}"
+  loop: >-
+    {{ media_quadlet_catalog + ([{'name': 'beszel-agent'}] if beszel_agent_enabled | bool else []) }}
   loop_control:
     label: "{{ item.name }}"
   register: media_service_states

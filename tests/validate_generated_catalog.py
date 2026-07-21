@@ -79,6 +79,8 @@ def main() -> int:
         },
         "download_host": "svc-download",
         "media_host": "svc-media",
+        "infra_host": "svc-infra",
+        "beszel_agent_enabled": False,
         "inventory_hostname": "svc-download",
         "lan_cidr": "192.0.2.0/24",
         "mullvad_dns": "10.64.0.1",

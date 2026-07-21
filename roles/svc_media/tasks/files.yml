@@ -97,6 +97,37 @@
   no_log: true
   diff: false
 
+- name: Ensure the Beszel agent appdata directory exists
+  ansible.builtin.file:
+    path: /opt/homelab/appdata/beszel-agent
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  when: beszel_agent_enabled | bool
+
+- name: Render the Beszel agent Quadlet
+  ansible.builtin.template:
+    src: beszel-agent.container.j2
+    dest: /opt/homelab/.config/containers/systemd/beszel-agent.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: media_beszel_agent_template
+  when: beszel_agent_enabled | bool
+  no_log: true
+  diff: false
+
+- name: WARN that the Beszel agent is not yet configured
+  ansible.builtin.debug:
+    msg: >-
+      *** WARNING: the Beszel token and key are empty — the
+      Beszel agent on {{ inventory_hostname }} is NOT deployed. Visit
+      https://beszel.{{ service_domain }}, create a universal token under
+      Settings > Tokens, fill both vault vars, and re-run the deploy. See
+      docs/services.md "Beszel monitoring setup". ***
+  when: not (beszel_agent_enabled | bool)
+
 - name: Render the media backup program
   ansible.builtin.template:
     src: backup-media.sh.j2
@@ -133,6 +164,7 @@
           + (['romm-db', 'romm'] if media_romm_network.changed else [])
           + (['homepage'] if (media_homepage_templates.results | selectattr('changed') | list | length > 0) else [])
           + (['romm-db', 'romm'] if (media_romm_secret_templates.changed | default(false)) else [])
+          + (['beszel-agent'] if (media_beszel_agent_template.changed | default(false)) else [])
         ) | unique | list
       }}
   changed_when: media_services_to_restart | length > 0

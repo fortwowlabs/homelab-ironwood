@@ -49,6 +49,37 @@
     label: "{{ item.key }}"
   register: infra_quadlet_templates
 
+- name: Ensure the Beszel agent appdata directory exists
+  ansible.builtin.file:
+    path: /opt/homelab/appdata/beszel-agent
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  when: beszel_agent_enabled | bool
+
+- name: Render the Beszel agent Quadlet
+  ansible.builtin.template:
+    src: beszel-agent.container.j2
+    dest: /opt/homelab/.config/containers/systemd/beszel-agent.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_beszel_agent_template
+  when: beszel_agent_enabled | bool
+  no_log: true
+  diff: false
+
+- name: WARN that the Beszel agent is not yet configured
+  ansible.builtin.debug:
+    msg: >-
+      *** WARNING: the Beszel token and key are empty — the
+      Beszel agent on {{ inventory_hostname }} is NOT deployed. Visit
+      https://beszel.{{ service_domain }}, create a universal token under
+      Settings > Tokens, fill both vault vars, and re-run the deploy. See
+      docs/services.md "Beszel monitoring setup". ***
+  when: not (beszel_agent_enabled | bool)
+
 - name: Start firewalld before opening catalog service ports
   ansible.builtin.systemd:
     name: firewalld
@@ -92,10 +123,12 @@
   ansible.builtin.set_fact:
     infra_services_to_restart: >-
       {{
-        infra_quadlet_templates.results
-        | selectattr('changed')
-        | map(attribute='item.key')
-        | list
+        (
+          infra_quadlet_templates.results
+          | selectattr('changed')
+          | map(attribute='item.key')
+          | list
+        ) + (['beszel-agent'] if (infra_beszel_agent_template.changed | default(false)) else [])
       }}
   changed_when: infra_services_to_restart | length > 0
   notify: infra configuration changed

@@ -1,14 +1,11 @@
 ---
 - name: Verify all rootless media services are active
   ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item }}.service"
-  loop:
-    - jellyfin
-    - audiobookshelf
-    - romm-db
-    - romm
-    - seerr
-    - ntfy
-    - homepage
+  loop: >-
+    {{
+      ['jellyfin', 'audiobookshelf', 'romm-db', 'romm', 'seerr', 'ntfy', 'homepage']
+      + (['beszel-agent'] if beszel_agent_enabled | bool else [])
+    }}
   changed_when: false
 
 - name: Verify Jellyfin answers on its LAN-bound address

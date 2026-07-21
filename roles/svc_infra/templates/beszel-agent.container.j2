@@ -1,0 +1,21 @@
+{{ ansible_managed | comment }}
+# ~homelab/.config/containers/systemd/beszel-agent.container   (rootless)
+# Reports this host's metrics to the beszel-hub catalog entry. Outbound-only
+# (connects TO the hub) — no published port, no firewalld rule needed here.
+[Unit]
+Description=Beszel monitoring agent
+
+[Container]
+Image={{ beszel_agent_image }}
+ContainerName=beszel-agent
+Environment=HUB_URL=http://{{ hostvars[infra_host].ansible_host }}:8090
+Environment=TOKEN={{ vault_beszel_token }}
+Environment=KEY={{ vault_beszel_key }}
+Volume=%h/appdata/beszel-agent:/var/lib/beszel-agent:Z
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

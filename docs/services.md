@@ -124,6 +124,31 @@ The book flow is:
 LazyLibrarian -> Prowlarr/SABnzbd -> NFS books/audiobooks -> Audiobookshelf
 ```
 
+## Beszel monitoring setup
+
+Beszel's hub (svc-infra, `beszel.{{ service_domain }}`) deploys fully
+automated — but the agent on each of the three service VMs needs one manual
+step first, because the credentials it needs only exist after the hub itself
+has been visited once (there's no API/CLI to generate them ahead of time):
+
+1. Deploy normally (`make deploy` or `make infra`). The hub comes up; every
+   agent skips itself with a loud WARNING in the play output — this is
+   expected on a fresh install, not a failure.
+2. Visit `https://beszel.{{ service_domain }}` and create the admin account.
+3. Under **Settings > Tokens**, create (or copy) the **universal token** —
+   this single token authenticates every agent, no per-host token needed.
+4. The **key** is the hub's public key, also shown on that same tokens page
+   (or when manually adding a system) — copy it in full, including the
+   `ssh-ed25519 ...` prefix.
+5. `make vault-edit`, set `vault_beszel_token` and `vault_beszel_key` to
+   those two values, save.
+6. Re-run `make deploy` (or `make dl`/`make media`/`make infra`
+   individually). Every agent now renders, starts, and reports in — check
+   the hub UI for three connected systems.
+
+`vault_beszel_token`/`vault_beszel_key` are shared by all three agents; there
+is nothing host-specific to configure per VM.
+
 ## Seerr and RomM migration notes
 
 Seerr replaces Jellyseerr on the same application port. The role retires legacy

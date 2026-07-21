@@ -235,6 +235,36 @@
     group: "{{ svc_gid }}"
     mode: "0755"
 
+- name: Ensure the Beszel agent appdata directory exists
+  ansible.builtin.file:
+    path: /srv/appdata/beszel-agent
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: beszel_agent_enabled | bool
+
+- name: Render the Beszel agent Quadlet
+  ansible.builtin.template:
+    src: beszel-agent.container.j2
+    dest: /etc/containers/systemd/beszel-agent.container
+    mode: "0644"
+  register: download_beszel_agent_template
+  when: beszel_agent_enabled | bool
+  no_log: true
+  diff: false
+  notify: reload systemd
+
+- name: WARN that the Beszel agent is not yet configured
+  ansible.builtin.debug:
+    msg: >-
+      *** WARNING: the Beszel token and key are empty — the
+      Beszel agent on {{ inventory_hostname }} is NOT deployed. Visit
+      https://beszel.{{ service_domain }}, create a universal token under
+      Settings > Tokens, fill both vault vars, and re-run the deploy. See
+      docs/services.md "Beszel monitoring setup". ***
+  when: not (beszel_agent_enabled | bool)
+
 - name: Render WireGuard peer configuration
   ansible.builtin.template:
     src: peer.conf.j2

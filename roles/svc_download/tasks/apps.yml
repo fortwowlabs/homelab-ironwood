@@ -18,6 +18,12 @@
   loop_control:
     label: "{{ item.item.key }}"
 
+- name: Ensure the Beszel agent is started
+  ansible.builtin.systemd:
+    name: beszel-agent.service
+    state: "{{ 'restarted' if (download_beszel_agent_template.changed | default(false)) else 'started' }}"
+  when: beszel_agent_enabled | bool
+
 - name: Allow socket proxy bind and connect operations under SELinux
   ansible.posix.seboolean:
     name: "{{ item }}"

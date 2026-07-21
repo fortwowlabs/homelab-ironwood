@@ -65,6 +65,14 @@ table inet host_backstop {
         ip daddr {{ hostvars[media_host].ansible_host }} tcp dport {{ _ntfy_port }} accept
 {% endif %}
 
+{% if beszel_agent_enabled %}
+
+        # Beszel monitoring agent (init ns, not the jail) reports to the hub
+        # on {{ infra_host }}. Only rendered once the Beszel token and key are
+        # filled in — see docs/services.md "Beszel monitoring setup".
+        ip daddr {{ hostvars[infra_host].ansible_host }} tcp dport 8090 accept
+{% endif %}
+
         udp dport { 67, 68 } accept              # DHCP, if ever non-static
         icmp type echo-request accept            # outbound ping for sanity
 
