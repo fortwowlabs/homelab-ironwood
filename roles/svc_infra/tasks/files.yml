@@ -49,6 +49,62 @@
     label: "{{ item.key }}"
   register: infra_quadlet_templates
 
+- name: Create Paperless-ngx appdata directories
+  ansible.builtin.file:
+    path: "/opt/homelab/appdata/paperless/{{ item }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop: [data, media, export, consume]
+
+- name: Create the Paperless-ngx redis appdata directory
+  ansible.builtin.file:
+    path: /opt/homelab/appdata/paperless-redis
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+
+- name: Install the Paperless-ngx private network Quadlet
+  ansible.builtin.copy:
+    src: quadlets/paperless.network
+    dest: /opt/homelab/.config/containers/systemd/paperless.network
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_paperless_network
+
+- name: Render the Paperless-ngx redis Quadlet
+  ansible.builtin.template:
+    src: paperless-redis.container.j2
+    dest: /opt/homelab/.config/containers/systemd/paperless-redis.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_paperless_redis_template
+
+- name: Require the Paperless-ngx secret key
+  ansible.builtin.assert:
+    that:
+      - (vault_paperless_secret_key | default('')) | length > 0
+    fail_msg: >-
+      Configure vault_paperless_secret_key (openssl rand -hex 32) in the
+      encrypted inventory.
+  no_log: true
+  diff: false
+
+- name: Render the Paperless-ngx Quadlet
+  ansible.builtin.template:
+    src: paperless.container.j2
+    dest: /opt/homelab/.config/containers/systemd/paperless.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_paperless_template
+  no_log: true
+  diff: false
+
 - name: Ensure the Beszel agent appdata directory exists
   ansible.builtin.file:
     path: /opt/homelab/appdata/beszel-agent
@@ -119,6 +175,15 @@
   loop_control:
     label: "{{ item.port }}/{{ item.protocol }}"
 
+- name: Open Paperless-ngx to the LAN
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family=ipv4 source address={{ lan_cidr }} port
+      port=8000 protocol=tcp accept
+    permanent: true
+    immediate: true
+    state: enabled
+
 - name: Calculate infra services whose rendered configuration changed
   ansible.builtin.set_fact:
     infra_services_to_restart: >-
@@ -128,7 +193,11 @@
           | selectattr('changed')
           | map(attribute='item.key')
           | list
-        ) + (['beszel-agent'] if (infra_beszel_agent_template.changed | default(false)) else [])
+        )
+        + (['beszel-agent'] if (infra_beszel_agent_template.changed | default(false)) else [])
+        + (['paperless-redis', 'paperless'] if (infra_paperless_network.changed | default(false)) else [])
+        + (['paperless-redis'] if (infra_paperless_redis_template.changed | default(false)) else [])
+        + (['paperless'] if (infra_paperless_template.changed | default(false)) else [])
       }}
   changed_when: infra_services_to_restart | length > 0
   notify: infra configuration changed

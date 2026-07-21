@@ -30,6 +30,9 @@ runuser -u homelab -- mkdir -p "$DEST"
 {%     set _ = infra_backup_paths.append(backup_path) %}
 {%   endfor %}
 {% endfor %}
+{% for backup_path in infra_extra_backup_paths %}
+{%   set _ = infra_backup_paths.append(backup_path) %}
+{% endfor %}
 for app in{% for backup_path in infra_backup_paths | unique %} {{ backup_path | quote }}{% endfor %}; do
     runuser -u homelab -- tar -C /opt/homelab/appdata -czf "$DEST/${app}-${STAMP}.tar.gz" "$app"
 done

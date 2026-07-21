@@ -145,3 +145,4 @@ caddy_services:
   uptime-kuma: { backend: "{{ hostvars[infra_host].ansible_host }}:3001", group: Infra, icon: uptime-kuma }
   syncthing:   { backend: "{{ hostvars[infra_host].ansible_host }}:8384", group: Infra, icon: syncthing }
   beszel:      { backend: "{{ hostvars[infra_host].ansible_host }}:8090", group: Infra, icon: beszel }
+  paperless:   { backend: "{{ hostvars[infra_host].ansible_host }}:8000", group: Infra, icon: paperless-ngx }

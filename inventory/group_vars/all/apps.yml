@@ -67,3 +67,9 @@ media_images:
   seerr: "ghcr.io/seerr-team/seerr@sha256:c92d2dc117f62185e7bcb88cd56efd374ea79210eaf433275449e8d5988eb5a8"
   ntfy: "docker.io/binwiederhier/ntfy@sha256:a6d335064ae927c4dbef118e1fa39656b3d2e01472b2a82af5915d5cebfe815f"
   homepage: "ghcr.io/gethomepage/homepage@sha256:a0b71c8e757298d02560186bab9fbe3fc2d375c523a62cc1019177b37e48aa28"
+
+# Paperless-ngx (svc-infra) — bespoke two-container app (webserver + its
+# own redis broker), same reasoning as media_images above.
+paperless_images:
+  webserver: "docker.io/paperlessngx/paperless-ngx@sha256:6c86cad803970ea782683a8e80e7403444c5bf3cf70de63b4d3c8e87500db92f"
+  redis: "docker.io/library/redis@sha256:234c902a2db49461a129e2d4aeff85b28cf20187ed274a67f6e50995fa713c7b"

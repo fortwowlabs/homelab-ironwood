@@ -1,0 +1,5 @@
+# ~homelab/.config/containers/systemd/paperless.network
+# Private bridge for the Paperless-ngx app<->redis pair (RomM's
+# romm.network is the same pattern on svc-media).
+[Network]
+NetworkName=paperless

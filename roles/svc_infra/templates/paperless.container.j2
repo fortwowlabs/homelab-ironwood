@@ -1,0 +1,35 @@
+{{ ansible_managed | comment }}
+# ~homelab/.config/containers/systemd/paperless.container   (rootless)
+# Published on svc-infra's LAN IP (not loopback) — Caddy runs on
+# {{ media_host }}, a different host. USERMAP_UID/GID=0: rootless podman
+# maps container-internal UID 0 straight to the host's homelab user; any
+# other UID goes through the subuid range and ends up unreadable by
+# svc_uid-based tasks (bit Syncthing with the equivalent PUID/PGID first).
+[Unit]
+Description=Paperless-ngx
+Requires=paperless-redis.service
+After=paperless-redis.service
+
+[Container]
+Image={{ paperless_images.webserver }}
+ContainerName=paperless
+Network=paperless.network
+PublishPort={{ ansible_host }}:8000:8000
+Volume=%h/appdata/paperless/data:/usr/src/paperless/data:Z
+Volume=%h/appdata/paperless/media:/usr/src/paperless/media:Z
+Volume=%h/appdata/paperless/export:/usr/src/paperless/export:Z
+Volume=%h/appdata/paperless/consume:/usr/src/paperless/consume:Z
+Environment=TZ={{ timezone }}
+Environment=USERMAP_UID=0
+Environment=USERMAP_GID=0
+Environment=PAPERLESS_REDIS=redis://paperless-redis:6379
+Environment=PAPERLESS_URL=https://paperless.{{ service_domain }}
+Environment=PAPERLESS_TIME_ZONE={{ timezone }}
+Environment=PAPERLESS_OCR_LANGUAGE=eng
+Environment=PAPERLESS_SECRET_KEY={{ vault_paperless_secret_key }}
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

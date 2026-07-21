@@ -1,0 +1,22 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Paperless-ngx Redis broker
+
+[Container]
+Image={{ paperless_images.redis }}
+ContainerName=paperless-redis
+Network=paperless.network
+# Deliberately OUTSIDE appdata/paperless/ (not paperless/redis): the stock
+# redis image runs as its own non-root internal user, which rootless podman
+# maps through the subuid range rather than to the host homelab user (the
+# same lesson as Syncthing's PUID/PGID fix) — nesting it under paperless/
+# would make the nightly `tar paperless` backup fail on permission-denied.
+# It's just a cache/task-queue broker anyway; not worth backing up.
+Volume=%h/appdata/paperless-redis:/data:Z
+Environment=TZ={{ timezone }}
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

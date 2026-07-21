@@ -7,7 +7,13 @@
 # roles/svc_media/tasks/files.yml + apps.yml for the equivalent hand-maintained
 # pattern (media_quadlet_catalog there mixes catalog and bespoke entries).
 infra_extra_service_names: >-
-  {{ ['beszel-agent'] if beszel_agent_enabled | bool else [] }}
+  {{ (['beszel-agent'] if beszel_agent_enabled | bool else [])
+     + ['paperless-redis', 'paperless'] }}
+
+# Backup coverage for bespoke (non-catalog) services with real data worth
+# keeping — appended the same way as infra_extra_service_names above.
+# beszel-agent/paperless-redis are deliberately excluded (no real state).
+infra_extra_backup_paths: [paperless]
 
 # Every infra service, whether catalog-driven or bespoke, funnels through
 # this one name list so apps.yml/verify.yml don't need to know which category
