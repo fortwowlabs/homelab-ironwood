@@ -8,7 +8,7 @@
 # Every service is one hostname vhost on :443, bound to the LAN IP
 # ({{ ansible_host }}); dnsmasq answers <name>.{{ service_domain }} -> that IP,
 # and the tailnet reaches the same IP via the subnet router (Tailscale
-# split-DNS). TLS is Caddy's INTERNAL CA (fort.wow isn't a public domain) —
+# split-DNS). TLS is Caddy's INTERNAL CA ({{ service_domain }} isn't a public domain) —
 # install its root once per device (docs/deployment.md).
 
 {

@@ -33,10 +33,19 @@
 
 - name: Render the private service DNS zone
   ansible.builtin.template:
-    src: dnsmasq-fortwow.conf.j2
-    dest: /etc/dnsmasq.d/fort-wow.conf
+    src: dnsmasq-services.conf.j2
+    dest: /etc/dnsmasq.d/services.conf
     mode: "0644"
     validate: "dnsmasq --test --conf-file=%s"
+  notify: restart dnsmasq
+
+# v6: this snippet was named after the hardcoded "fort.wow" domain before
+# service_domain became fully configurable. Clean up the old filename so a
+# renamed/re-domained deploy never loads two copies of the same zone.
+- name: Remove the legacy fort-wow.conf dnsmasq snippet
+  ansible.builtin.file:
+    path: /etc/dnsmasq.d/fort-wow.conf
+    state: absent
   notify: restart dnsmasq
 
 - name: Open DNS to the LAN source range

@@ -253,3 +253,27 @@ existing backup directories under the old name to need a manual move (the
 role only creates/reads `/srv/backups/<new-name>`, it won't migrate the old
 one). Any bookmarks or DNS caches pointed at `<old-name>.{{ service_domain }}`
 break until they're updated too.
+
+## Changing the internal domain
+
+`service_domain` (`inventory/group_vars/all/main.yml`, `fort.wow` today) is
+the single source for the private TLD every service is reachable under —
+Caddy's vhosts, dnsmasq's zone file, cloud-init's guest search domain
+(`search_domain` follows it by default), and every `<name>.{{ service_domain
+}}` reference in a template derive from this one value.
+
+This is more disruptive than an IP or hostname change because two **manual,
+external** integrations are keyed to the domain string and are NOT
+Ansible-managed (see docs/deployment.md and docs/services.md):
+
+- pfSense's DNS Resolver **Domain Override**, which forwards the old TLD to
+  the media VM — it must be repointed at the new domain.
+- Every client device's installed copy of Caddy's **internal CA root** stays
+  valid (the CA isn't domain-scoped), but each device still needs the new
+  `*.{{ service_domain }}` names resolvable via the updated pfSense override
+  (and Tailscale split-DNS, if used) before HTTPS to them works again.
+
+To change it: update `service_domain` (and `search_domain` only if it should
+diverge), re-run the playbooks so Caddy/dnsmasq re-render under the new TLD,
+then update the pfSense override and any split-DNS entry. Expect a brief
+window where the old and new names both need to resolve during the cutover.
