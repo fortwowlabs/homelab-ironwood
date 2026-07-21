@@ -100,3 +100,16 @@ infra_apps:
       PGID: "0"
       PORT: "8001"
     backup_paths: [bambuddy]
+
+  # Home Assistant. Published on 8123 only (no host networking under rootless
+  # podman) — auto-discovery of LAN devices via mDNS/SSDP is therefore
+  # limited; integrations added by IP work fine. Revisit host networking if
+  # the user needs zeroconf discovery later. The image runs as container-root
+  # by default, which under rootless podman maps to the host homelab user, so
+  # /config stays writable and backup-readable without a PUID/PGID override.
+  home-assistant:
+    image: "ghcr.io/home-assistant/home-assistant@sha256:6937c6c51d2f5d6aa66d97e4a68f845bcccd5f9b62cd91992bd6d79b20fe2b3c"
+    ui_port: 8123
+    volumes:
+      - /opt/homelab/appdata/home-assistant:/config:Z
+    backup_paths: [home-assistant]
