@@ -57,6 +57,17 @@ download_apps:
     dashboard: { group: Downloads, icon: lazylibrarian }
     proxy: true
 
+  bazarr:
+    image: "lscr.io/linuxserver/bazarr@sha256:4c30dc0bb9a5d223075e7f5d12c77bd293c4b460f86d696dbe64763104c1e88c"
+    ui_port: 6767
+    volumes:
+      - /srv/appdata/bazarr:/config:Z
+      - /srv/media:/data
+    media_mount: true
+    backup_paths: [bazarr]
+    dashboard: { group: Downloads, icon: bazarr }
+    proxy: true
+
 # Media/infra images remain separate because their Quadlets are intentionally
 # heterogeneous, but their references are immutable and centrally reviewed.
 media_images:
