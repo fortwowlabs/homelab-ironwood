@@ -9,8 +9,8 @@
       - --
       - mkdir
       - -p
-      - /srv/backups/svc-download
-    creates: /srv/backups/svc-download
+      - /srv/backups/{{ inventory_hostname }}
+    creates: /srv/backups/{{ inventory_hostname }}
 
 - name: Arm nightly download appdata backup
   ansible.builtin.systemd:
@@ -22,8 +22,8 @@
 - name: Check for fresh nonempty catalog backup artifacts
   ansible.builtin.shell: |
     set -euo pipefail
-    [[ -d /srv/backups/svc-download ]] || exit 0
-    find /srv/backups/svc-download -maxdepth 1 -type f -size +0c -mtime -2 \
+    [[ -d /srv/backups/{{ inventory_hostname }} ]] || exit 0
+    find /srv/backups/{{ inventory_hostname }} -maxdepth 1 -type f -size +0c -mtime -2 \
       -name {{ (item ~ '-*.tar.gz') | quote }} -print -quit
   args:
     executable: /bin/bash

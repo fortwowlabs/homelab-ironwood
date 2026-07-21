@@ -1,6 +1,6 @@
 ---
 - name: Exercise and recover the download fail-closed boundary
-  hosts: svc-download
+  hosts: download_vms
   gather_facts: false
   any_errors_fatal: true
   tasks:

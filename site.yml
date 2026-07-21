@@ -42,9 +42,7 @@
             vm_memory:  "{{ hostvars[item].vm_memory }}"
             vm_disk_gb: "{{ hostvars[item].vm_disk_gb }}"
             vm_startup: "{{ hostvars[item].vm_startup }}"
-          loop:
-            - svc-download
-            - svc-media
+          loop: "{{ groups['service_vms'] }}"
       # If provisioning fails, tell me and stop before touching guests.
       rescue:
         - name: Notify provisioning failure
@@ -93,8 +91,8 @@
           tags: [always]
 
 # ---------- Phase 4: the jail (critical path) ----------
-- name: Configure svc-download (netns jail + stack)
-  hosts: svc-download
+- name: Configure the download VM (netns jail + stack)
+  hosts: download_vms
   gather_facts: true
   any_errors_fatal: true
   tasks:
@@ -110,14 +108,14 @@
               tags: [always]
           tags: [always]
           vars:
-            ntfy_title: "homelab deploy FAILED (svc-download)"
+            ntfy_title: "homelab deploy FAILED ({{ inventory_hostname }})"
             ntfy_result: >-
-              svc-download configuration failed. NO real download traffic has
-              flowed (gates block it). Check the failed task above.
+              {{ inventory_hostname }} configuration failed. NO real download
+              traffic has flowed (gates block it). Check the failed task above.
             ntfy_priority: "high"
             ntfy_tags: "rotating_light"
         - ansible.builtin.fail:
-            msg: "svc-download failed — see above."
+            msg: "{{ inventory_hostname }} failed — see above."
           tags: [always]
 
 # Cockpit must answer before svc-media verifies every configured Caddy backend.
@@ -152,8 +150,8 @@
           tags: [always]
 
 # ---------- Phase 5-6: media ----------
-- name: Configure svc-media (rootless media stack)
-  hosts: svc-media
+- name: Configure the media VM (rootless media stack)
+  hosts: media_vms
   gather_facts: true
   any_errors_fatal: true
   tasks:
@@ -169,12 +167,12 @@
               tags: [always]
           tags: [always]
           vars:
-            ntfy_title: "homelab deploy: svc-media FAILED"
-            ntfy_result: "svc-media configuration failed, but the jail is up and verified."
+            ntfy_title: "homelab deploy: {{ inventory_hostname }} FAILED"
+            ntfy_result: "{{ inventory_hostname }} configuration failed, but the jail is up and verified."
             ntfy_priority: "high"
             ntfy_tags: "warning"
         - ansible.builtin.fail:
-            msg: "svc-media failed — see above."
+            msg: "{{ inventory_hostname }} failed — see above."
           tags: [always]
 
 # ---------- Success notification (full runs only — deliberately untagged,
@@ -186,12 +184,12 @@
     - name: Assert every deployment phase completed
       ansible.builtin.assert:
         that:
-          - hostvars['svc-download'].svc_download_verified | default(false) | bool
-          - hostvars['svc-media'].svc_media_verified | default(false) | bool
-          - hostvars['svc-download'].service_vm_verified | default(false) | bool
-          - hostvars['svc-media'].service_vm_verified | default(false) | bool
-          - hostvars['svc-download'].mon_verified | default(false) | bool
-          - hostvars['svc-media'].mon_verified | default(false) | bool
+          - hostvars[download_host].svc_download_verified | default(false) | bool
+          - hostvars[media_host].svc_media_verified | default(false) | bool
+          - hostvars[download_host].service_vm_verified | default(false) | bool
+          - hostvars[media_host].service_vm_verified | default(false) | bool
+          - hostvars[download_host].mon_verified | default(false) | bool
+          - hostvars[media_host].mon_verified | default(false) | bool
         fail_msg: "Refusing to send success: one or more deployment phases did not verify."
       when: not ansible_check_mode
 

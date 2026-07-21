@@ -124,11 +124,11 @@ preflight: ## Authenticate, show the safe inventory graph, and require VM connec
 deploy: ## Full provision, configuration, and verification
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) $(ARGS)
 
-dl: ## Configure and verify svc-download
-	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit svc-download $(ARGS)
+dl: ## Configure and verify the download VM
+	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit download_vms $(ARGS)
 
-media: ## Configure and verify svc-media
-	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit svc-media $(ARGS)
+media: ## Configure and verify the media VM
+	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit media_vms $(ARGS)
 
 check: ## Safe check mode without displaying file diffs
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --check $(ARGS)
@@ -141,8 +141,8 @@ drift: check-diff ## Alias for the sanitized diff check
 reconcile: ## Reconcile cores, memory, onboot, and startup on existing VMs
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --tags provision -e pve_reconcile=true $(ARGS)
 
-access: ## Re-run the svc-media Caddy access layer
-	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit svc-media --tags access $(ARGS)
+access: ## Re-run the media VM's Caddy access layer
+	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit media_vms --tags access $(ARGS)
 
 verify: ## Run the non-disruptive verification playbook
 	$(ANSIBLE) $(VERIFY_PLAYBOOK) $(VAULT) $(ARGS)

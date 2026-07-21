@@ -84,7 +84,7 @@
   ansible.builtin.command:
     argv:
       - find
-      - /srv/backups/svc-download
+      - "/srv/backups/{{ inventory_hostname }}"
       - -maxdepth
       - "1"
       - -type

@@ -15,7 +15,7 @@
 
         - name: Verify the host-specific service stack
           ansible.builtin.include_role:
-            name: "{{ 'svc_download' if inventory_hostname == 'svc-download' else 'svc_media' }}"
+            name: "{{ 'svc_download' if 'download_vms' in group_names else 'svc_media' }}"
             tasks_from: verify
 
         - name: Verify host monitoring
@@ -43,12 +43,12 @@
     - name: Assert all host verification facts
       ansible.builtin.assert:
         that:
-          - hostvars['svc-download'].service_vm_verified | default(false) | bool
-          - hostvars['svc-download'].svc_download_verified | default(false) | bool
-          - hostvars['svc-download'].mon_verified | default(false) | bool
-          - hostvars['svc-media'].service_vm_verified | default(false) | bool
-          - hostvars['svc-media'].svc_media_verified | default(false) | bool
-          - hostvars['svc-media'].mon_verified | default(false) | bool
+          - hostvars[download_host].service_vm_verified | default(false) | bool
+          - hostvars[download_host].svc_download_verified | default(false) | bool
+          - hostvars[download_host].mon_verified | default(false) | bool
+          - hostvars[media_host].service_vm_verified | default(false) | bool
+          - hostvars[media_host].svc_media_verified | default(false) | bool
+          - hostvars[media_host].mon_verified | default(false) | bool
         fail_msg: "Refusing success: not every safe verification phase completed."
 
     - name: Send safe verification success notification

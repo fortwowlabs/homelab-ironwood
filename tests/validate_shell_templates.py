@@ -49,6 +49,10 @@ def main() -> int:
         "disk_alert_threshold": 85,
         "download_apps": apps,
         "lan_dns": "192.0.2.1",
+        # Only backup-dl-appdata.sh.j2 and backup-media.sh.j2 consume this;
+        # its value doesn't matter here (nothing in TEMPLATES branches on
+        # which service VM it is), it just needs to be defined.
+        "inventory_hostname": "fixture-host",
     }
 
     failures: list[str] = []

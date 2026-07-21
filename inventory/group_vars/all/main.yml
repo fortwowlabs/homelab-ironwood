@@ -20,6 +20,15 @@ timezone:        America/New_York
 # service VMs and `pve_api_host` for thurgadin).
 truenas_ip: 192.168.1.20
 
+# --- Service VM identity (v6) ---
+# `download_host`/`media_host` resolve to whichever inventory_hostname is a
+# member of the download_vms/media_vms child groups (inventory/hosts.yml) —
+# use these (or `hostvars[download_host]`/`hostvars[media_host]`) instead of
+# a literal "svc-download"/"svc-media" so renaming a host in inventory is a
+# single edit. See docs/operations.md.
+download_host: "{{ groups['download_vms'] | first }}"
+media_host:    "{{ groups['media_vms'] | first }}"
+
 # --- TrueNAS NFS (created by hand in Phase 1 — NOT automated) ---
 # These live INSIDE the exported `tank` dataset (exports are tank + rust;
 # verify with `showmount -e 192.168.1.20`).
@@ -70,7 +79,7 @@ mullvad_dns: "10.64.0.1"
 # swallowing it (v4 was silent). The svc-download leak canary alerts to
 # this same target; the host backstop opens egress to it automatically
 # when the ntfy host is the canonical svc-media inventory address.
-ntfy_url:   "http://{{ hostvars['svc-media'].ansible_host }}:8080"
+ntfy_url:   "http://{{ hostvars[media_host].ansible_host }}:8080"
 ntfy_topic: "homelab-deploy"
 
 # --- svc-media access layer -----------------------------------------------
@@ -97,12 +106,12 @@ service_domain: fort.wow
 # group/icon are used by the Homepage dashboard; Caddy/dnsmasq ignore them.
 caddy_services:
   # Jellyfin publishes only on svc-media's LAN address, not loopback.
-  jellyfin:   { backend: "{{ hostvars['svc-media'].ansible_host }}:8096", group: Media, icon: jellyfin }
+  jellyfin:   { backend: "{{ hostvars[media_host].ansible_host }}:8096", group: Media, icon: jellyfin }
   abs:        { backend: "127.0.0.1:13378",            group: Media,     icon: audiobookshelf }
   romm:       { backend: "127.0.0.1:8081",             group: Media,     icon: romm }
   seerr:      { backend: "127.0.0.1:5055",             group: Media,     icon: overseerr }
   # monitoring (feat/monitoring): Cockpit serves its own self-signed TLS
   home:          { backend: "127.0.0.1:3000",          group: Infra, icon: homepage }
-  ntfy:          { backend: "{{ hostvars['svc-media'].ansible_host }}:8080", group: Infra, icon: ntfy }
+  ntfy:          { backend: "{{ hostvars[media_host].ansible_host }}:8080", group: Infra, icon: ntfy }
   cockpit-media: { backend: "127.0.0.1:9090",          group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }
-  cockpit-dl:    { backend: "{{ hostvars['svc-download'].ansible_host }}:9090", group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }
+  cockpit-dl:    { backend: "{{ hostvars[download_host].ansible_host }}:9090", group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }

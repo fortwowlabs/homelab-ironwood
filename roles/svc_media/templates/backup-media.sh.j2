@@ -16,8 +16,8 @@
 set -euo pipefail
 
 STAMP=$(date +%F)
-DB_DEST=/srv/backups/svc-media/romm-db
-APP_DEST=/srv/backups/svc-media/appdata
+DB_DEST=/srv/backups/{{ inventory_hostname }}/romm-db
+APP_DEST=/srv/backups/{{ inventory_hostname }}/appdata
 NTFY="${NTFY_URL}/${NTFY_TOPIC}"
 AUTH=()
 if [[ -n "${NTFY_TOKEN:-}" ]]; then
@@ -26,7 +26,7 @@ fi
 
 on_err() {
     logger -p daemon.err -t backup-media "backup FAILED"
-    curl -fsS --max-time 5 -X POST -H "Title: svc-media backup FAILED" \
+    curl -fsS --max-time 5 -X POST -H "Title: {{ inventory_hostname }} backup FAILED" \
         -H "Priority: high" -H "Tags: floppy_disk" \
         "${AUTH[@]}" \
         -d "backup-media.sh failed — journalctl -u backup-media" \

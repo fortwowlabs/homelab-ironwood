@@ -2,18 +2,18 @@
 # A single manifest drives initial-backup gating and safe artifact validation.
 media_backup_artifacts:
   - name: jellyfin
-    directory: /srv/backups/svc-media/appdata
+    directory: "/srv/backups/{{ inventory_hostname }}/appdata"
     pattern: jellyfin-config-*.tar.gz
     format: tar
   - name: seerr
-    directory: /srv/backups/svc-media/appdata
+    directory: "/srv/backups/{{ inventory_hostname }}/appdata"
     pattern: seerr-*.tar.gz
     format: tar
   - name: romm-appdata
-    directory: /srv/backups/svc-media/appdata
+    directory: "/srv/backups/{{ inventory_hostname }}/appdata"
     pattern: romm-appdata-*.tar.gz
     format: tar
   - name: romm-database
-    directory: /srv/backups/svc-media/romm-db
+    directory: "/srv/backups/{{ inventory_hostname }}/romm-db"
     pattern: romm-*.sql.gz
     format: gzip

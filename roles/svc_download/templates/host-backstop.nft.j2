@@ -56,13 +56,13 @@ table inet host_backstop {
         ip daddr $TRUENAS tcp dport 2049 accept
 {% set _ntfy_host = ntfy_url | urlsplit('hostname') %}
 {% set _ntfy_port = (ntfy_url | urlsplit('port')) or (443 if (ntfy_url | urlsplit('scheme')) == 'https' else 80) %}
-{% if _ntfy_host == hostvars['svc-media'].ansible_host %}
+{% if _ntfy_host == hostvars[media_host].ansible_host %}
 
-        # Leak-canary + backup alerts to the LAN ntfy on svc-media. Without
+        # Leak-canary + backup alerts to the LAN ntfy on {{ media_host }}. Without
         # this the canary's fail() curl would be dropped by the very table
         # it defends (v4 gap). Only rendered when ntfy_url points at
-        # svc-media; a public ntfy over 443 is deliberately NOT opened here.
-        ip daddr {{ hostvars['svc-media'].ansible_host }} tcp dport {{ _ntfy_port }} accept
+        # {{ media_host }}; a public ntfy over 443 is deliberately NOT opened here.
+        ip daddr {{ hostvars[media_host].ansible_host }} tcp dport {{ _ntfy_port }} accept
 {% endif %}
 
         udp dport { 67, 68 } accept              # DHCP, if ever non-static

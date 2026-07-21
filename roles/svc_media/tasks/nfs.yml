@@ -3,8 +3,8 @@
   ansible.builtin.command: "test -d {{ item }}"
   loop:
     - /srv/backups/audiobookshelf
-    - /srv/backups/svc-media/romm-db
-    - /srv/backups/svc-media/appdata
+    - "/srv/backups/{{ inventory_hostname }}/romm-db"
+    - "/srv/backups/{{ inventory_hostname }}/appdata"
   register: media_backup_directories
   failed_when: false
   changed_when: false

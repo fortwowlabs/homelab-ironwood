@@ -231,3 +231,25 @@ to a new IP: update the value here, then perform the network-side change
 the new address, and only then re-run the playbooks so Caddy/dnsmasq/backstop
 configuration catches up to match reality. Coordinate with whatever DNS/HTTPS
 clients have cached the old address.
+
+## Renaming a service VM
+
+Each service VM's `inventory_hostname` (the key under
+`inventory/hosts.yml`'s `download_vms` / `media_vms` child groups) is the
+single source of truth for its name — play targeting (`hosts: download_vms` /
+`media_vms`), the Makefile's `dl`/`media`/`access` targets, `download_host` /
+`media_host` (`group_vars/all/main.yml`, used everywhere a template or task
+needs "the other VM's" address), backup directory paths
+(`/srv/backups/{{ inventory_hostname }}`), and the DNS host-record for the
+physical box itself all derive from it instead of a literal
+`svc-download`/`svc-media` string.
+
+Like the IP above, this is a **fresh-provision-time** knob. To rename an
+already-provisioned VM: rename the inventory key (and the matching
+`inventory/host_vars/<name>.yml` file — Ansible requires the filename to
+match), re-run a fresh provision/configure cycle so the guest's own hostname,
+Caddy vhost bindings, and dnsmasq host-record pick up the new name, and expect
+existing backup directories under the old name to need a manual move (the
+role only creates/reads `/srv/backups/<new-name>`, it won't migrate the old
+one). Any bookmarks or DNS caches pointed at `<old-name>.{{ service_domain }}`
+break until they're updated too.

@@ -16,12 +16,12 @@ domain-needed
 bogus-priv
 
 # Physical hosts by name.
-host-record=svc-media.{{ service_domain }},{{ ansible_host }}
-host-record=svc-download.{{ service_domain }},{{ hostvars['svc-download'].ansible_host }}
+host-record={{ media_host }}.{{ service_domain }},{{ ansible_host }}
+host-record={{ download_host }}.{{ service_domain }},{{ hostvars[download_host].ansible_host }}
 host-record=truenas.{{ service_domain }},{{ truenas_ip }}
 host-record=thurgadin.{{ service_domain }},{{ hostvars['thurgadin'].pve_api_host }}
 
-# Every service name -> Caddy on svc-media (which reverse-proxies by hostname).
+# Every service name -> Caddy on {{ media_host }} (which reverse-proxies by hostname).
 {% for name in caddy_services | dictsort | map('first') %}
 address=/{{ name }}.{{ service_domain }}/{{ ansible_host }}
 {% endfor %}

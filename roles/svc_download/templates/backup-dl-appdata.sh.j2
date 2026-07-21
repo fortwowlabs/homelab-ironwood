@@ -9,7 +9,7 @@
 # Retention: {{ backup_retention_days | default(14) }} days.
 set -euo pipefail
 
-DEST=/srv/backups/svc-download
+DEST=/srv/backups/{{ inventory_hostname }}
 STAMP=$(date +%F)
 NTFY="${NTFY_URL}/${NTFY_TOPIC}"
 AUTH=()
@@ -19,7 +19,7 @@ fi
 
 on_err() {
     logger -p daemon.err -t backup-dl "appdata backup FAILED"
-    curl -fsS --max-time 5 -X POST -H "Title: svc-download backup FAILED" \
+    curl -fsS --max-time 5 -X POST -H "Title: {{ inventory_hostname }} backup FAILED" \
         -H "Priority: high" -H "Tags: floppy_disk" \
         "${AUTH[@]}" \
         -d "backup-dl-appdata.sh failed — check journalctl -u backup-dl-appdata" \

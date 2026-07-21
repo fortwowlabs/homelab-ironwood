@@ -40,7 +40,7 @@ https://{{ name }}.{{ service_domain }} {
 # --- {{ name }} (download catalog) ---
 https://{{ name }}.{{ service_domain }} {
 	bind {{ ansible_host }}
-	reverse_proxy http://{{ hostvars['svc-download'].ansible_host }}:{{ app.ui_port }}
+	reverse_proxy http://{{ hostvars[download_host].ansible_host }}:{{ app.ui_port }}
 }
 
 {% endfor %}

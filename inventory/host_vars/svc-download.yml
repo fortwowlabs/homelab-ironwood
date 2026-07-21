@@ -1,5 +1,8 @@
 ---
 # svc-download — netns VPN jail + SAB/arr stack (flat LAN, no VLAN)
+# This filename must match the inventory_hostname in inventory/hosts.yml's
+# download_vms group — renaming that host means renaming this file too. See
+# "Renaming a service VM" in docs/operations.md.
 vm_id:      131
 vm_cores:   4
 vm_memory:  6144
