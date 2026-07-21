@@ -75,3 +75,28 @@ infra_apps:
     env:
       APP_URL: "https://beszel.{{ service_domain }}"
     backup_paths: [beszel-hub]
+
+  # Bambu Lab printer management. Host networking is required by its
+  # "virtual printer" SSDP/MQTT/RTSP emulation feature (a wide, non-HTTP
+  # port set); THIS deploy only opens the web UI (ui_port) — the virtual
+  # printer feature's extra ports (3000/3002/8883/990/6000/322/2024-2026/
+  # 50000-50029) are deliberately NOT wired up (a large firewalld surface
+  # for a feature most setups won't use for real printers on the LAN;
+  # revisit if you actually want SSDP-discoverable virtual printers).
+  bambuddy:
+    image: "ghcr.io/maziggy/bambuddy@sha256:d68ab4746f18c51a6e22f5cd536533a4ae3c1eb48f4eecccbb68c2be23d0ef52"
+    # 8000 is already Paperless-ngx's port on this host; with host networking
+    # every catalog app on svc-infra shares one port namespace, so Bambuddy's
+    # own PORT env var is moved to 8001 to avoid the collision.
+    ui_port: 8001
+    network_mode: host
+    volumes:
+      - /opt/homelab/appdata/bambuddy/data:/app/data:Z
+      - /opt/homelab/appdata/bambuddy/logs:/app/logs:Z
+    env:
+      # See the Syncthing entry above for why PUID/PGID must be 0, not
+      # svc_uid, under rootless podman.
+      PUID: "0"
+      PGID: "0"
+      PORT: "8001"
+    backup_paths: [bambuddy]
