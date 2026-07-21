@@ -12,7 +12,14 @@ Description={{ item.key }}
 [Container]
 Image={{ item.value.image }}
 ContainerName={{ item.key }}
+{% if item.value.network_mode | default('') == 'host' %}
+PodmanArgs=--network=host
+{% else %}
 PublishPort={{ ansible_host }}:{{ item.value.ui_port }}:{{ item.value.container_port | default(item.value.ui_port) }}
+{% for p in item.value.extra_ports | default([]) %}
+PublishPort={{ ansible_host }}:{{ p.port }}:{{ p.port }}/{{ p.protocol }}
+{% endfor %}
+{% endif %}
 {% for volume in item.value.volumes %}
 Volume={{ volume }}
 {% endfor %}

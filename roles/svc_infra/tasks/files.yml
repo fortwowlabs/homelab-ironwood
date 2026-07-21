@@ -57,8 +57,8 @@
   when: infra_apps | length > 0
 
 # Every catalog app publishes on svc-infra's LAN IP (see
-# infra-app.container.j2) so Caddy on {{ media_host }} can reach it —
-# open each ui_port to the LAN here, matching svc_media's equivalent task.
+# infra-app.container.j2) so Caddy on {{ media_host }} can reach it — open
+# ui_port (always tcp) to the LAN here, matching svc_media's equivalent task.
 - name: Open LAN-scoped infra catalog service ports
   ansible.posix.firewalld:
     rich_rule: >-
@@ -70,6 +70,23 @@
   loop: "{{ infra_apps | dict2items }}"
   loop_control:
     label: "{{ item.key }}"
+
+# extra_ports (e.g. Syncthing's sync/discovery ports) aren't reached through
+# Caddy, just opened directly — a separate task since each entry already
+# carries its own protocol, unlike ui_port above.
+- name: Open LAN-scoped infra catalog extra ports
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family=ipv4 source address={{ lan_cidr }} port
+      port={{ item.port }} protocol={{ item.protocol }} accept
+    permanent: true
+    immediate: true
+    state: enabled
+  loop: >-
+    {{ infra_apps.values() | map(attribute='extra_ports', default=[])
+       | list | flatten | unique | list }}
+  loop_control:
+    label: "{{ item.port }}/{{ item.protocol }}"
 
 - name: Calculate infra services whose rendered configuration changed
   ansible.builtin.set_fact:

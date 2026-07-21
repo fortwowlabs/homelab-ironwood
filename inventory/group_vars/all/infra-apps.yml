@@ -12,11 +12,22 @@
 # Per-entry fields consumed by roles/svc_infra:
 #   image         immutable pinned reference (tag or @sha256 digest — never
 #                 :latest, matching download_apps/media_images convention)
-#   ui_port       host-side port; the generic quadlet publishes it on
-#                 127.0.0.1 only (LAN/external reach is via Caddy on
-#                 {{ media_host }}, added to caddy_services per service)
+#   ui_port       host-side TCP port; the generic quadlet publishes it on
+#                 svc-infra's LAN IP, not loopback — Caddy runs on
+#                 {{ media_host }}, a different host (added to
+#                 caddy_services per service to reach it)
 #   container_port  optional; the image's internal port if it differs from
-#                 ui_port (defaults to ui_port)
+#                 ui_port (defaults to ui_port; ignored when network_mode: host)
+#   network_mode  optional; set to "host" for a service that needs the real
+#                 host network namespace (e.g. Syncthing's LAN peer
+#                 discovery breaks inside container-NAT'd networking) —
+#                 skips PublishPort entirely, every port just IS a host
+#                 port. Otherwise omit for normal per-port publishing.
+#   extra_ports   optional list of {port, protocol} opened via firewalld
+#                 (and, unless network_mode: host, also published)
+#                 alongside ui_port — for services with a non-HTTP protocol
+#                 port (e.g. Syncthing's sync/discovery ports). NOT reached
+#                 through Caddy, only opened to lan_cidr directly.
 #   volumes       list of Quadlet Volume= lines (bind mounts under
 #                 /opt/homelab/appdata/<name>, owned by svc_uid/svc_gid)
 #   env           optional dict of Environment= key/value pairs
@@ -29,3 +40,18 @@ infra_apps:
     volumes:
       - /opt/homelab/appdata/uptime-kuma/data:/app/data:Z
     backup_paths: [uptime-kuma]
+
+  syncthing:
+    image: "docker.io/syncthing/syncthing@sha256:4464f4161dd0251e20d46bb3aec83363db75d80cef1abdd5d5fd4054b04a004d"
+    ui_port: 8384
+    network_mode: host
+    volumes:
+      - /opt/homelab/appdata/syncthing:/var/syncthing:Z
+    env:
+      PUID: "{{ svc_uid }}"
+      PGID: "{{ svc_gid }}"
+    extra_ports:
+      - { port: 22000, protocol: tcp }
+      - { port: 22000, protocol: udp }
+      - { port: 21027, protocol: udp }
+    backup_paths: [syncthing]
