@@ -150,3 +150,4 @@ caddy_services:
   bambuddy:    { backend: "{{ hostvars[infra_host].ansible_host }}:8001", group: Infra, icon: bambu-lab }
   netbox:      { backend: "{{ hostvars[infra_host].ansible_host }}:8080", group: Infra, icon: netbox }
   home-assistant: { backend: "{{ hostvars[infra_host].ansible_host }}:8123", group: Infra, icon: home-assistant }
+  immich:      { backend: "{{ hostvars[infra_host].ansible_host }}:2283", group: Media, icon: immich }

@@ -98,3 +98,20 @@ netbox_images:
   webserver: "docker.io/netboxcommunity/netbox@sha256:691ec1a4f569f3dfb9fefd9f086cca1b39689ad59c3eae753712a741447e5e60"
   postgres: "docker.io/library/postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"
   redis: "docker.io/valkey/valkey@sha256:c9b77919daeba2c02ad954d0c844cc4e7142069d177b89c5fd771f405daf9e02"
+
+# Immich (svc-infra) — bespoke multi-container app. All four images are
+# pinned to the SAME Immich release (v3.0.3): server/DB schema migrations are
+# version-coupled, so they must move together. postgres + redis digests are
+# the exact pins from that release's official docker-compose (the DB is
+# Immich's own vectorchord-patched postgres 14, NOT stock postgres). The
+# machine-learning image is pinned for completeness but is NOT deployed here
+# — svc-infra has no swap and ~3.9G available with everything else running,
+# and the ML container's spiky ~2G appetite risks an OOM; the server runs
+# with IMMICH_MACHINE_LEARNING_ENABLED=false (smart search / face detection
+# disabled). To enable later: raise svc-infra RAM (or stop an idle VM),
+# render immich-machine-learning from this image, and flip that env to true.
+immich_images:
+  server: "ghcr.io/immich-app/immich-server@sha256:c716dc20f957aafd89fa9d284a2ec63e25c9e2d8d8e87c6197d540a3dce237db"
+  machine_learning: "ghcr.io/immich-app/immich-machine-learning@sha256:d76fe88b69282c09a97eac4f82dafa82cfd77bce274bc742591cde974f87dacb"
+  postgres: "ghcr.io/immich-app/postgres@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23"
+  redis: "docker.io/valkey/valkey@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9"

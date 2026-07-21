@@ -179,6 +179,82 @@
   no_log: true
   diff: false
 
+- name: Create the Immich database and redis appdata directories
+  ansible.builtin.file:
+    path: "/opt/homelab/appdata/{{ item }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop: [immich-db, immich-redis]
+
+- name: Check the Immich photo library directory on the NFS export
+  ansible.builtin.command: test -d /srv/media/photos
+  register: infra_immich_photos_dir
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+# NFS root-squash: create the library dir as the service UID, not root (same
+# idiom as svc_media/tasks/nfs.yml). Immich (container-root == host homelab)
+# then owns it and can write uploads/thumbs there.
+- name: Create the Immich photo library directory as the service UID
+  ansible.builtin.command: >-
+    setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups --
+    mkdir -p /srv/media/photos
+  when: infra_immich_photos_dir.rc != 0
+  changed_when: true
+
+- name: Install the Immich private network Quadlet
+  ansible.builtin.copy:
+    src: quadlets/immich.network
+    dest: /opt/homelab/.config/containers/systemd/immich.network
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_immich_network
+
+- name: Require the Immich database password
+  ansible.builtin.assert:
+    that:
+      - (vault_immich_db_password | default('')) | length > 0
+    fail_msg: >-
+      Configure vault_immich_db_password (openssl rand -hex 24) in the
+      encrypted inventory.
+  no_log: true
+  diff: false
+
+- name: Render the Immich database Quadlet
+  ansible.builtin.template:
+    src: immich-db.container.j2
+    dest: /opt/homelab/.config/containers/systemd/immich-db.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_immich_db_template
+  no_log: true
+  diff: false
+
+- name: Render the Immich redis Quadlet
+  ansible.builtin.template:
+    src: immich-redis.container.j2
+    dest: /opt/homelab/.config/containers/systemd/immich-redis.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_immich_redis_template
+
+- name: Render the Immich server Quadlet
+  ansible.builtin.template:
+    src: immich-server.container.j2
+    dest: /opt/homelab/.config/containers/systemd/immich-server.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_immich_server_template
+  no_log: true
+  diff: false
+
 - name: Ensure the Beszel agent appdata directory exists
   ansible.builtin.file:
     path: /opt/homelab/appdata/beszel-agent
@@ -267,6 +343,15 @@
     immediate: true
     state: enabled
 
+- name: Open Immich to the LAN
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family=ipv4 source address={{ lan_cidr }} port
+      port=2283 protocol=tcp accept
+    permanent: true
+    immediate: true
+    state: enabled
+
 - name: Calculate infra services whose rendered configuration changed
   ansible.builtin.set_fact:
     infra_services_to_restart: >-
@@ -285,6 +370,10 @@
         + (['netbox-db'] if (infra_netbox_db_template.changed | default(false)) else [])
         + (['netbox-redis'] if (infra_netbox_redis_template.changed | default(false)) else [])
         + (['netbox'] if (infra_netbox_template.changed | default(false)) else [])
+        + (['immich-db', 'immich-redis', 'immich-server'] if (infra_immich_network.changed | default(false)) else [])
+        + (['immich-db'] if (infra_immich_db_template.changed | default(false)) else [])
+        + (['immich-redis'] if (infra_immich_redis_template.changed | default(false)) else [])
+        + (['immich-server'] if (infra_immich_server_template.changed | default(false)) else [])
       }}
   changed_when: infra_services_to_restart | length > 0
   notify: infra configuration changed

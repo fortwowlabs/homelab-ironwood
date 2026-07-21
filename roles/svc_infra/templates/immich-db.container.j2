@@ -1,0 +1,31 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Immich PostgreSQL (vectorchord)
+
+[Container]
+Image={{ immich_images.postgres }}
+ContainerName=immich-db
+Network=immich.network
+# Immich explicitly does NOT support the database on a network share, so the
+# data dir stays on local disk (appdata), unlike the photo library which is
+# on the NFS media export. This is the vectorchord-patched postgres 14 image
+# (pre-18 data-dir convention: mount at /var/lib/postgresql/data).
+Volume=%h/appdata/immich-db:/var/lib/postgresql/data:Z
+Environment=TZ={{ timezone }}
+Environment=POSTGRES_DB=immich
+Environment=POSTGRES_USER=immich
+Environment=POSTGRES_PASSWORD={{ vault_immich_db_password }}
+Environment=POSTGRES_INITDB_ARGS=--data-checksums
+PodmanArgs=--shm-size=128m
+HealthCmd=pg_isready -q -d immich -U immich
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=30s
+Notify=healthy
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

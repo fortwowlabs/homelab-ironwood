@@ -1,0 +1,21 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Immich Redis (valkey)
+
+[Container]
+Image={{ immich_images.redis }}
+ContainerName=immich-redis
+Network=immich.network
+# Immich uses redis purely as a job queue / cache — no persistent state worth
+# backing up, and no auth (reachable only on the private immich.network).
+Environment=TZ={{ timezone }}
+HealthCmd=redis-cli ping || exit 1
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

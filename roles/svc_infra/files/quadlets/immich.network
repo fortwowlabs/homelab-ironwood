@@ -1,0 +1,6 @@
+# ~homelab/.config/containers/systemd/immich.network
+# Private bridge for the Immich server<->postgres<->redis trio (same pattern
+# as NetBox / Paperless-ngx). Machine-learning would join this network too
+# when enabled.
+[Network]
+NetworkName=immich

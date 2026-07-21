@@ -1,0 +1,38 @@
+{{ ansible_managed | comment }}
+# Published on svc-infra's LAN IP (not loopback) — Caddy runs on
+# {{ media_host }}, a different host (immich.{{ service_domain }}).
+[Unit]
+Description=Immich server
+Requires=immich-db.service immich-redis.service
+After=immich-db.service immich-redis.service
+
+[Container]
+Image={{ immich_images.server }}
+ContainerName=immich-server
+Network=immich.network
+PublishPort={{ ansible_host }}:2283:2283
+# Photo library on the NFS media export (large, capacity-friendly, backed up
+# at the NAS layer). Runs as container-root, which rootless podman maps to
+# the host homelab user that owns /srv/media/photos (created via setpriv in
+# files.yml) — so uploads/thumbs/encoded-video under /data stay writable.
+Volume=/srv/media/photos:/data
+Environment=TZ={{ timezone }}
+Environment=DB_HOSTNAME=immich-db
+Environment=DB_DATABASE_NAME=immich
+Environment=DB_USERNAME=immich
+Environment=DB_PASSWORD={{ vault_immich_db_password }}
+Environment=REDIS_HOSTNAME=immich-redis
+# Machine learning is intentionally NOT deployed on this 8G, swapless VM (see
+# immich_images in apps.yml). Disable it explicitly so the server doesn't try
+# to reach an absent immich-machine-learning service on every asset.
+Environment=IMMICH_MACHINE_LEARNING_ENABLED=false
+
+[Service]
+# Fail fast if the NFS media export isn't actually mounted — a bare local dir
+# would silently divert the library off the share (same guard as Jellyfin).
+ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
