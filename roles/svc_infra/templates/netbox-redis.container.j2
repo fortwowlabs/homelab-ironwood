@@ -1,0 +1,20 @@
+{{ ansible_managed | comment }}
+# One valkey instance serves BOTH NetBox's main and cache roles (via
+# REDIS_DATABASE=0 / REDIS_CACHE_DATABASE=1 on the webserver side) instead
+# of upstream's two separate containers — see netbox_images' comment.
+[Unit]
+Description=NetBox Redis (main + cache)
+
+[Container]
+Image={{ netbox_images.redis }}
+ContainerName=netbox-redis
+Network=netbox.network
+Volume=%h/appdata/netbox-redis:/data:Z
+Environment=TZ={{ timezone }}
+Exec=valkey-server --appendonly yes --requirepass {{ vault_netbox_redis_password }}
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

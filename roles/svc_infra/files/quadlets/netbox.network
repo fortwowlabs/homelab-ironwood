@@ -1,0 +1,5 @@
+# ~homelab/.config/containers/systemd/netbox.network
+# Private bridge for the NetBox webserver<->postgres<->redis trio (same
+# pattern as RomM on svc-media / Paperless-ngx above).
+[Network]
+NetworkName=netbox

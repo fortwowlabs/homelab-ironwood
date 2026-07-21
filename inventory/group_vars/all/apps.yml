@@ -73,3 +73,14 @@ media_images:
 paperless_images:
   webserver: "docker.io/paperlessngx/paperless-ngx@sha256:6c86cad803970ea782683a8e80e7403444c5bf3cf70de63b4d3c8e87500db92f"
   redis: "docker.io/library/redis@sha256:234c902a2db49461a129e2d4aeff85b28cf20187ed274a67f6e50995fa713c7b"
+
+# NetBox (svc-infra) — bespoke three-container app. Upstream's own compose
+# runs 5 containers (webserver + worker + postgres + 2 valkey instances);
+# simplified here to 3: the worker (background jobs: webhooks, scheduled
+# reports) is skipped as out of scope for core CRUD/IPAM use, and one
+# valkey instance serves both the main and cache roles via different
+# REDIS_DATABASE numbers instead of two separate containers.
+netbox_images:
+  webserver: "docker.io/netboxcommunity/netbox@sha256:691ec1a4f569f3dfb9fefd9f086cca1b39689ad59c3eae753712a741447e5e60"
+  postgres: "docker.io/library/postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"
+  redis: "docker.io/valkey/valkey@sha256:c9b77919daeba2c02ad954d0c844cc4e7142069d177b89c5fd771f405daf9e02"

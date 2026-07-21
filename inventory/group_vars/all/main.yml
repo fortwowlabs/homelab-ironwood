@@ -147,3 +147,4 @@ caddy_services:
   beszel:      { backend: "{{ hostvars[infra_host].ansible_host }}:8090", group: Infra, icon: beszel }
   paperless:   { backend: "{{ hostvars[infra_host].ansible_host }}:8000", group: Infra, icon: paperless-ngx }
   bambuddy:    { backend: "{{ hostvars[infra_host].ansible_host }}:8001", group: Infra, icon: bambu-lab }
+  netbox:      { backend: "{{ hostvars[infra_host].ansible_host }}:8080", group: Infra, icon: netbox }

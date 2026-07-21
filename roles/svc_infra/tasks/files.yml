@@ -105,6 +105,80 @@
   no_log: true
   diff: false
 
+- name: Create NetBox appdata directories
+  ansible.builtin.file:
+    path: "/opt/homelab/appdata/netbox/{{ item }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop: [media, reports, scripts]
+
+- name: Create the NetBox database and redis appdata directories
+  ansible.builtin.file:
+    path: "/opt/homelab/appdata/{{ item }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop: [netbox-db, netbox-redis]
+
+- name: Install the NetBox private network Quadlet
+  ansible.builtin.copy:
+    src: quadlets/netbox.network
+    dest: /opt/homelab/.config/containers/systemd/netbox.network
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_netbox_network
+
+- name: Require NetBox secrets
+  ansible.builtin.assert:
+    that:
+      - (vault_netbox_db_password | default('')) | length > 0
+      - (vault_netbox_secret_key | default('')) | length >= 50
+      - (vault_netbox_redis_password | default('')) | length > 0
+      - (vault_netbox_superuser_password | default('')) | length > 0
+    fail_msg: >-
+      Configure vault_netbox_db_password, vault_netbox_secret_key (NetBox
+      requires 50+ characters), vault_netbox_redis_password, and
+      vault_netbox_superuser_password in the encrypted inventory.
+  no_log: true
+  diff: false
+
+- name: Render the NetBox database Quadlet
+  ansible.builtin.template:
+    src: netbox-db.container.j2
+    dest: /opt/homelab/.config/containers/systemd/netbox-db.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_netbox_db_template
+  no_log: true
+  diff: false
+
+- name: Render the NetBox redis Quadlet
+  ansible.builtin.template:
+    src: netbox-redis.container.j2
+    dest: /opt/homelab/.config/containers/systemd/netbox-redis.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_netbox_redis_template
+  no_log: true
+  diff: false
+
+- name: Render the NetBox Quadlet
+  ansible.builtin.template:
+    src: netbox.container.j2
+    dest: /opt/homelab/.config/containers/systemd/netbox.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_netbox_template
+  no_log: true
+  diff: false
+
 - name: Ensure the Beszel agent appdata directory exists
   ansible.builtin.file:
     path: /opt/homelab/appdata/beszel-agent
@@ -184,6 +258,15 @@
     immediate: true
     state: enabled
 
+- name: Open NetBox to the LAN
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family=ipv4 source address={{ lan_cidr }} port
+      port=8080 protocol=tcp accept
+    permanent: true
+    immediate: true
+    state: enabled
+
 - name: Calculate infra services whose rendered configuration changed
   ansible.builtin.set_fact:
     infra_services_to_restart: >-
@@ -198,6 +281,10 @@
         + (['paperless-redis', 'paperless'] if (infra_paperless_network.changed | default(false)) else [])
         + (['paperless-redis'] if (infra_paperless_redis_template.changed | default(false)) else [])
         + (['paperless'] if (infra_paperless_template.changed | default(false)) else [])
+        + (['netbox-db', 'netbox-redis', 'netbox'] if (infra_netbox_network.changed | default(false)) else [])
+        + (['netbox-db'] if (infra_netbox_db_template.changed | default(false)) else [])
+        + (['netbox-redis'] if (infra_netbox_redis_template.changed | default(false)) else [])
+        + (['netbox'] if (infra_netbox_template.changed | default(false)) else [])
       }}
   changed_when: infra_services_to_restart | length > 0
   notify: infra configuration changed

@@ -8,12 +8,21 @@
 # pattern (media_quadlet_catalog there mixes catalog and bespoke entries).
 infra_extra_service_names: >-
   {{ (['beszel-agent'] if beszel_agent_enabled | bool else [])
-     + ['paperless-redis', 'paperless'] }}
+     + ['paperless-redis', 'paperless']
+     + ['netbox-db', 'netbox-redis', 'netbox'] }}
 
 # Backup coverage for bespoke (non-catalog) services with real data worth
 # keeping — appended the same way as infra_extra_service_names above.
-# beszel-agent/paperless-redis are deliberately excluded (no real state).
-infra_extra_backup_paths: [paperless]
+# Excluded on purpose: beszel-agent/paperless-redis/netbox-redis (no real
+# state), and netbox-db — postgres's data dir is owned by the image's
+# internal postgres user, which rootless podman maps to a subuid the
+# homelab-run tar can't read (same class as the paperless-redis issue), and
+# a raw datadir tar isn't a consistent DB backup anyway. NetBox's
+# authoritative data therefore is NOT in the nightly tar yet; a proper
+# pg_dump-based backup (mirroring backup-media.sh's romm-db mariadb-dump) is
+# a documented future enhancement. The netbox/ appdata that IS backed up is
+# just uploaded media/reports/scripts (homelab-owned via the User=0 quadlet).
+infra_extra_backup_paths: [paperless, netbox]
 
 # Every infra service, whether catalog-driven or bespoke, funnels through
 # this one name list so apps.yml/verify.yml don't need to know which category

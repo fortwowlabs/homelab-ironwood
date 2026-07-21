@@ -1,0 +1,49 @@
+{{ ansible_managed | comment }}
+# ~homelab/.config/containers/systemd/netbox.container   (rootless)
+# Published on svc-infra's LAN IP (not loopback) — Caddy runs on
+# {{ media_host }}, a different host. User=0: the image bakes in a
+# non-root USER, which under rootless podman maps through the subuid
+# range rather than to the host homelab user (the Seerr/Syncthing lesson)
+# — force container-root so its own media/reports/scripts volumes stay
+# owned by the real homelab user.
+[Unit]
+Description=NetBox
+Requires=netbox-db.service netbox-redis.service
+After=netbox-db.service netbox-redis.service
+
+[Container]
+Image={{ netbox_images.webserver }}
+ContainerName=netbox
+Network=netbox.network
+User=0
+PublishPort={{ ansible_host }}:8080:8080
+Volume=%h/appdata/netbox/media:/opt/netbox/netbox/media:Z
+Volume=%h/appdata/netbox/reports:/opt/netbox/netbox/reports:Z
+Volume=%h/appdata/netbox/scripts:/opt/netbox/netbox/scripts:Z
+Environment=TZ={{ timezone }}
+Environment=DB_HOST=netbox-db
+Environment=DB_NAME=netbox
+Environment=DB_USER=netbox
+Environment=DB_PASSWORD={{ vault_netbox_db_password }}
+Environment=REDIS_HOST=netbox-redis
+Environment=REDIS_PASSWORD={{ vault_netbox_redis_password }}
+Environment=REDIS_DATABASE=0
+Environment=REDIS_CACHE_HOST=netbox-redis
+Environment=REDIS_CACHE_PASSWORD={{ vault_netbox_redis_password }}
+Environment=REDIS_CACHE_DATABASE=1
+Environment=SECRET_KEY={{ vault_netbox_secret_key }}
+Environment=SKIP_SUPERUSER=false
+Environment=SUPERUSER_NAME=admin
+Environment=SUPERUSER_EMAIL=admin@{{ service_domain }}
+Environment=SUPERUSER_PASSWORD={{ vault_netbox_superuser_password }}
+HealthCmd=curl -f http://localhost:8080/login/ || exit 1
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=90s
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
