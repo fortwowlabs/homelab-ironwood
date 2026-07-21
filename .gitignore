@@ -28,3 +28,9 @@ collections/ansible_collections/
 *.swp
 .DS_Store
 .secrets/
+
+# Local copies of live appdata backups (API keys, indexer creds, DB dumps)
+# fetched from svc-download/svc-media for local restore convenience. These
+# are the same artifacts backup-dl-appdata.service / backup-media.service
+# produce on the VMs; never commit the actual archives.
+local-backups/
