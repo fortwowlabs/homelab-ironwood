@@ -6,8 +6,13 @@
 # thurgadin. There is intentionally no role fallback for this value.
 pve_ssh_host: "root@192.168.1.10"
 
-# TLS validation is fail-closed. Trust the PVE CA on the controller as
-# documented in docs/deployment.md; do not turn this off for routine use.
+# TLS validation is fail-closed. The controller trusts the committed PVE
+# cluster CA (inventory/pve-cluster-ca.crt) via PROXMOX_CA_PATH, which the
+# Makefile exports; the proxmox modules verify against it. That CA is PVE's
+# own self-signed cluster CA re-issued with the keyUsage extension it omits,
+# so strict OpenSSL 3.x on the controller accepts it (the running hypervisor
+# is untouched). Do not turn this off for routine use; `-e pve_validate_certs=false`
+# remains available only as a deliberate break-glass.
 pve_validate_certs: true
 
 # v5: resource pool the service VMs are created in. Create it once

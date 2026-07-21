@@ -1,0 +1,47 @@
+# PVE cluster CA (fortwowlabs/thurgadin) — PUBLIC cert, safe to commit (no private key).
+# This is Proxmox's own self-signed cluster CA re-issued with the SAME key/subject/SKI
+# but the standards-required keyUsage extension added, because PVE's gen_pveca_cert()
+# omits it and strict OpenSSL 3.x (control node) rejects a CA without keyUsage.
+# The running hypervisor is unchanged; this is purely the control node's trust anchor.
+# Regenerate if PVE ever rotates its cluster CA key:
+#   ssh root@<pve> 'faketime yesterday openssl x509 -in /etc/pve/pve-root-ca.pem \
+#     -signkey /etc/pve/priv/pve-root-ca.key -days 3650 -set_serial 0x$(openssl rand -hex 8) \
+#     -extfile <(printf "basicConstraints=critical,CA:TRUE
+keyUsage=critical,keyCertSign,cRLSign,digitalSignature
+subjectKeyIdentifier=hash
+")'
+#
+-----BEGIN CERTIFICATE-----
+MIIF0TCCA7mgAwIBAgIIHDKdmdKgzakwDQYJKoZIhvcNAQELBQAwdjEkMCIGA1UE
+AwwbUHJveG1veCBWaXJ0dWFsIEVudmlyb25tZW50MS0wKwYDVQQLDCQxZDgwMTlk
+Yy1jOWQyLTQ2Y2ItOGUxZC02NjFlNTY1ZDc2YWUxHzAdBgNVBAoMFlBWRSBDbHVz
+dGVyIE1hbmFnZXIgQ0EwHhcNMjYwNzIwMDIwNDExWhcNMzYwNzE3MDIwNDExWjB2
+MSQwIgYDVQQDDBtQcm94bW94IFZpcnR1YWwgRW52aXJvbm1lbnQxLTArBgNVBAsM
+JDFkODAxOWRjLWM5ZDItNDZjYi04ZTFkLTY2MWU1NjVkNzZhZTEfMB0GA1UECgwW
+UFZFIENsdXN0ZXIgTWFuYWdlciBDQTCCAiIwDQYJKoZIhvcNAQEBBQADggIPADCC
+AgoCggIBAK8PYOiu9juwFNZipSrUkrT9/8wNJUMtcwtJBn/tRuyTUkrGvhv6EQFu
+PNfb64nqP4bwn7tVh4uxgGKaBHyceaviBrXPtT3LpwBBOqh/zWi284U+zsGFApDU
+FV4wSoUStcDjCsoakSz1XcGGMFZI6PSQOPXlEORhZKskSYVCF7hIuWd7K5x1lPfL
+5zET1CViQJxwGpfukCmX6XtiPLBv+0KMTDqn12ELO+EGPEIgmWNcsxIb5IPnnqsy
+zn605kTYhpXWq2AmTEifaRJN4rAnqSbfc9Tb8kUYAZ35S7WOjyhEEzsW7ebtcdb1
+WuEH+ZE9LOy8Buh4Fpl29HQS8Sh4FgeM33bF5G4oCzR/RVFtvpYIWfmI/KlFlJUy
+WPSQUpP5ChbWOUtU6Bbw7tB1gCMx+PD2klV2GWU09dYTjJ8QUbGEwYYrqQecQrqb
+F5Yt9bPznKc7tExLwMJkCrbcPfw7CL7Nl3dxFWuNlG0c2PddN6E0IHqZM8PvpFCN
+UBfqZYiEVhgOSIuKRV2yZhioxbdNv1PyBxizN+OgM3nbtJLhNEIptTCs4Kj9PXfR
+IU2H/0JhH2d7/UlvDiMY5omRTg7CidH9PTHwrm3TEjmKhbjsr9wyoMI4vmz9Pvet
+9oeo8PBRSv/w+UMWpvCKkfjnTWaajk0eh0xn9L91H5bQQhpAVaETAgMBAAGjYzBh
+MB8GA1UdIwQYMBaAFEpTJG1j/W44CBbWACCczQdcZbijMA8GA1UdEwEB/wQFMAMB
+Af8wDgYDVR0PAQH/BAQDAgGGMB0GA1UdDgQWBBRKUyRtY/1uOAgW1gAgnM0HXGW4
+ozANBgkqhkiG9w0BAQsFAAOCAgEAl7g2HbXINsut95szSs4QvWtbbv9K91aOdUhR
+W70xDH3jd+KKXyn0+KM0L+j/RIlNUaASxUk11VxEVc/fBmySxgx8WjOP9jm4Xo6J
+vZbnu4wGrlEFh22BYl/99+rKDxee98JBkGDvNf6exrQK3AJKnwuFzrf3SdPJyhIr
+uJBurJmQ5xVwaA63UtIQNP1lUCU3+XHaJOdaq5O0sq+4LpJGEwLASZJpe40+HmVb
+8FLZIbRL63JIZ3l/UmRcShQj+xCq2YU/SDwIujs9rT/fswCfHsRboA4owfcv062e
+jS+ZjazRsq9cs+Kd4M0qsvj7MRgklDT+f9PF7W/HfoGVI7VEqHy4q8hKHnqfjtTa
+13fZA0FmHRQasG3249LJwAJ2CgusATJRvcn/TwqIzQZvmFr1QLQLKNZd/LzPqiuo
+HdoIfLjD2ncj5QPCH4GUI6jsoxzcNWS+bQFiLm2EOuaQrdXy58fKqlHJ0eAxqDk3
+p/XboVoGoLQLOLmOVAFu+gxuCgMQ/i/2qDb+2Xp7J29FT67w5hNkMDyW70RlyCg1
+sLsfjcW4W2/5uitjrRn+fsJNa0k4ewRfKVp8fvWTo2fquM/FNR/WHCJOHRPPKVHd
+0PLIYdQUq4Du6CwG+X5JM8Lhmg45iyj+xuMspOi3KEFMSxJH3c1D8vWvln9MbuwM
+YhvObEk=
+-----END CERTIFICATE-----

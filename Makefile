@@ -30,6 +30,12 @@ export ANSIBLE_LOCAL_TEMP := $(CURDIR)/.ansible/tmp
 export ANSIBLE_HOME := $(CURDIR)/.ansible
 export XDG_CACHE_HOME := $(CURDIR)/.ansible/cache
 
+# Trust the committed PVE cluster CA so the proxmox modules verify TLS with
+# validation ON (pve_validate_certs stays true). The community.proxmox modules
+# read this via their PROXMOX_CA_PATH env fallback; when set alongside
+# validate_certs=true they verify against this bundle. See group_vars/pve.yml.
+export PROXMOX_CA_PATH := $(CURDIR)/inventory/pve-cluster-ca.crt
+
 ifeq ($(USE_VAULT_FILE),1)
   VAULT := --vault-password-file .vault_pass
 else
