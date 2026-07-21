@@ -43,6 +43,40 @@
           - "true"
       changed_when: false
 
+- name: Require configurable service VM addressing to be well-formed
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    # inventory/hosts.yml's ansible_host is the single source of truth for
+    # each service VM's IP (see the comment there). Catch a missing or
+    # duplicated address here, before it produces a confusing failure deep
+    # inside pve_vm's cloud-init rendering or svc_media's Caddy/dnsmasq
+    # templating.
+    - name: Collect each service VM's configured address
+      ansible.builtin.set_fact:
+        service_vm_addresses: "{{ groups['service_vms'] | map('extract', hostvars, 'ansible_host') | list }}"
+
+    - name: Assert every service VM defines ansible_host
+      ansible.builtin.assert:
+        that:
+          - service_vm_addresses | select('none') | list | length == 0
+        fail_msg: >-
+          Every host under service_vms in inventory/hosts.yml must define
+          ansible_host — it's the single source of truth for that VM's IP.
+        quiet: true
+
+    - name: Assert service VM addresses are well-formed IPv4 and unique
+      ansible.builtin.assert:
+        that:
+          - service_vm_addresses | select('match', '^[0-9]{1,3}(\\.[0-9]{1,3}){3}$') | list | length == service_vm_addresses | length
+          - service_vm_addresses | unique | length == service_vm_addresses | length
+        fail_msg: >-
+          inventory/hosts.yml's service_vms ansible_host values must be
+          well-formed, distinct IPv4 addresses (got: {{ service_vm_addresses }}).
+        quiet: true
+
 - name: Require service VM connectivity
   hosts: service_vms
   gather_facts: false

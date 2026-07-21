@@ -211,3 +211,23 @@ that playback succeeds before accepting the drill.
 
 See [Deployment rollback](deployment.md#rollback) when a restore is part of a
 larger release rollback.
+
+## Changing a service VM's IP
+
+`inventory/hosts.yml`'s `ansible_host` under `service_vms` is the single
+source of truth for each VM's address — cloud-init's static-IP config, Caddy's
+reverse-proxy backends, dnsmasq's DNS records, the svc-download nftables
+backstop's allowed peers, and `ntfy_url` all derive from it via
+`hostvars[...].ansible_host`. `preflight.yml` asserts every service VM defines
+one and that they're distinct.
+
+This is a **fresh-provision-time** knob, not a live-migration tool: editing
+the value and re-running against an **already-provisioned** VM does not move
+it — Proxmox doesn't renumber a running guest's address because the inventory
+changed, and `pve_vm`'s existing-VM identity checks assume the VM at that
+node/VMID still answers at its original address. To actually move a live VM
+to a new IP: update the value here, then perform the network-side change
+(guest OS static IP + any DHCP reservation) out of band, confirm SSH reaches
+the new address, and only then re-run the playbooks so Caddy/dnsmasq/backstop
+configuration catches up to match reality. Coordinate with whatever DNS/HTTPS
+clients have cached the old address.

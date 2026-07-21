@@ -16,7 +16,7 @@ all:
       hosts:
         svc-download:
           ansible_connection: local
-          ansible_host: 127.0.0.1
+          ansible_host: 127.0.0.2
         svc-media:
           ansible_connection: local
           ansible_host: 127.0.0.1
