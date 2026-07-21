@@ -53,7 +53,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 
 .PHONY: help deps deps-dev validate validate-tools validate-syntax \
 	validate-ansible validate-yaml validate-shell validate-links \
-	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media \
+	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra \
 	check check-diff verify verify-disruptive drift reconcile access ping lint \
 	vault-edit clean
 
@@ -130,6 +130,9 @@ dl: ## Configure and verify the download VM
 media: ## Configure and verify the media VM
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit media_vms $(ARGS)
 
+infra: ## Configure and verify the infra VM
+	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit infra_vms $(ARGS)
+
 check: ## Safe check mode without displaying file diffs
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --check $(ARGS)
 
@@ -150,7 +153,7 @@ verify: ## Run the non-disruptive verification playbook
 verify-disruptive: ## Explicitly run the fail-closed recovery drill
 	$(ANSIBLE) $(DISRUPTIVE_PLAYBOOK) $(VAULT) $(ARGS)
 
-ping: ## Require Ansible connectivity to both service VMs
+ping: ## Require Ansible connectivity to every service VM
 	$(ANSIBLE_ADHOC) service_vms --module-name ansible.builtin.ping $(VAULT) $(ARGS)
 
 lint: validate-ansible validate-yaml validate-shell ## Run the strict lint subset

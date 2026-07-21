@@ -1,0 +1,51 @@
+---
+- name: Verify all rootless infra services are active
+  ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item }}.service"
+  loop: "{{ infra_service_names }}"
+  changed_when: false
+
+- name: Find fresh nonempty infra backup artifacts
+  ansible.builtin.command:
+    argv:
+      - find
+      - "/srv/backups/{{ inventory_hostname }}"
+      - -maxdepth
+      - "1"
+      - -type
+      - f
+      - -size
+      - +0c
+      - -mtime
+      - "-2"
+      - -name
+      - "{{ item }}-*.tar.gz"
+      - -print
+      - -quit
+  loop: >-
+    {{ infra_apps | dict2items | map(attribute='value.backup_paths')
+       | list | flatten | unique | list }}
+  register: infra_backup_artifact_gates
+  changed_when: false
+
+- name: Assert every catalog infra backup artifact is fresh and nonempty
+  ansible.builtin.assert:
+    that:
+      - >-
+        infra_backup_artifact_gates.results
+        | selectattr('stdout', 'equalto', '') | list | length == 0
+    fail_msg: >-
+      A fresh nonempty infra appdata backup is missing. Inspect
+      backup-infra-appdata.service and the NFS backup mount.
+
+- name: Validate infra tar archive structure
+  ansible.builtin.command:
+    argv: [tar, -tzf, "{{ item.stdout }}"]
+  loop: "{{ infra_backup_artifact_gates.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  changed_when: false
+  when: item.stdout | length > 0
+
+- name: Mark svc-infra verification complete
+  ansible.builtin.set_fact:
+    svc_infra_verified: true

@@ -1,0 +1,62 @@
+---
+- name: Enable lingering for the rootless service account
+  ansible.builtin.command: loginctl enable-linger homelab
+  changed_when: false
+
+- name: Ensure the rootless Quadlet directory exists
+  ansible.builtin.file:
+    path: /opt/homelab/.config/containers/systemd
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+
+# Single-container catalog apps declare their own appdata paths as Quadlet
+# Volume= sources (e.g. "/opt/homelab/appdata/uptime-kuma/data:/app/data:Z");
+# derive the directories to create from the catalog instead of hand-listing
+# them here, so a new catalog entry doesn't also require a new task. Bespoke
+# multi-container services (a database/cache sidecar) declare their own
+# appdata directories in their own tasks, appended below this file over time
+# — see roles/svc_media/tasks/files.yml for that pattern.
+- name: Determine appdata directories required by the infra catalog
+  vars:
+    infra_volume_sources: >-
+      {{ infra_apps.values() | map(attribute='volumes') | list | flatten
+         | map('regex_replace', '^([^:]+):.*$', '\1') | list }}
+  ansible.builtin.set_fact:
+    infra_appdata_dirs: >-
+      {{ infra_volume_sources | select('match', '^/opt/homelab/appdata/') | unique | list }}
+  changed_when: false
+
+- name: Create catalog application data directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop: "{{ infra_appdata_dirs }}"
+
+- name: Render single-container infra Quadlets from the catalog
+  ansible.builtin.template:
+    src: infra-app.container.j2
+    dest: "/opt/homelab/.config/containers/systemd/{{ item.key }}.container"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  loop: "{{ infra_apps | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: infra_quadlet_templates
+
+- name: Calculate infra services whose rendered configuration changed
+  ansible.builtin.set_fact:
+    infra_services_to_restart: >-
+      {{
+        infra_quadlet_templates.results
+        | selectattr('changed')
+        | map(attribute='item.key')
+        | list
+      }}
+  changed_when: infra_services_to_restart | length > 0
+  notify: infra configuration changed

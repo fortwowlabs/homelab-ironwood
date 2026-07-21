@@ -1,0 +1,27 @@
+{{ ansible_managed | comment }}
+# ~homelab/.config/containers/systemd/{{ item.key }}.container   (rootless)
+# RENDERED from roles/svc_infra/templates/infra-app.container.j2, driven by
+# the infra_apps catalog entry "{{ item.key }}". Published on 127.0.0.1
+# only — LAN/external reach is via Caddy on {{ media_host }}
+# (https://{{ item.key }}.{{ service_domain }}, added to caddy_services).
+[Unit]
+Description={{ item.key }}
+
+[Container]
+Image={{ item.value.image }}
+ContainerName={{ item.key }}
+PublishPort=127.0.0.1:{{ item.value.ui_port }}:{{ item.value.container_port | default(item.value.ui_port) }}
+{% for volume in item.value.volumes %}
+Volume={{ volume }}
+{% endfor %}
+Environment=TZ={{ timezone }}
+{% for env_key, env_value in (item.value.env | default({})).items() %}
+Environment={{ env_key }}={{ env_value }}
+{% endfor %}
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

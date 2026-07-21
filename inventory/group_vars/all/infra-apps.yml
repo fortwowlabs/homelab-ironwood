@@ -1,0 +1,27 @@
+---
+# Infra-stack source of truth (v6, svc-infra). Mirrors download_apps
+# (inventory/group_vars/all/apps.yml): every generic-quadlet consumer
+# (Quadlet render, service start/verify, nightly backup) derives from this
+# catalog — a new single-container service is a catalog entry, not new role
+# code. Multi-container services (a database or cache sidecar) get a bespoke
+# per-service quadlet template instead (see roles/svc_media/templates/
+# romm.container.j2 + romm-db.container.j2 for that pattern) and are NOT
+# listed here — only genuinely single-container apps use the generic
+# infra-app.container.j2 template driven by this dict.
+#
+# Empty until the first service branch lands (feat/uptime-kuma etc.).
+#
+# Per-entry fields consumed by roles/svc_infra:
+#   image         immutable pinned reference (tag or @sha256 digest — never
+#                 :latest, matching download_apps/media_images convention)
+#   ui_port       host-side port; the generic quadlet publishes it on
+#                 127.0.0.1 only (LAN/external reach is via Caddy on
+#                 {{ media_host }}, added to caddy_services per service)
+#   container_port  optional; the image's internal port if it differs from
+#                 ui_port (defaults to ui_port)
+#   volumes       list of Quadlet Volume= lines (bind mounts under
+#                 /opt/homelab/appdata/<name>, owned by svc_uid/svc_gid)
+#   env           optional dict of Environment= key/value pairs
+#   backup_paths  appdata subdirectory names (relative to
+#                 /opt/homelab/appdata) included in the nightly backup tar
+infra_apps: {}

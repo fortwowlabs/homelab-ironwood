@@ -1,0 +1,18 @@
+---
+- name: Apply changed rootless service configuration
+  ansible.builtin.meta: flush_handlers
+
+- name: Read rootless infra service state
+  ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item }}.service"
+  loop: "{{ infra_service_names }}"
+  register: infra_service_states
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Start inactive rootless infra services
+  ansible.builtin.command: "systemctl --user -M homelab@ start {{ item.item }}.service"
+  loop: "{{ infra_service_states.results | selectattr('rc', 'ne', 0) | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  changed_when: true

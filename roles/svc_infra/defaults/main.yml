@@ -1,0 +1,15 @@
+---
+# Bespoke multi-container services (a database/cache sidecar) aren't in the
+# single-container infra_apps catalog (inventory/group_vars/all/infra-apps.yml)
+# — each such service's branch appends its container name(s) here so
+# apps.yml/verify.yml/backup.yml still cover it uniformly. See
+# roles/svc_media/tasks/files.yml + apps.yml for the equivalent hand-maintained
+# pattern (media_quadlet_catalog there mixes catalog and bespoke entries).
+infra_extra_service_names: []
+
+# Every infra service, whether catalog-driven or bespoke, funnels through
+# this one name list so apps.yml/verify.yml don't need to know which category
+# a service belongs to. A plain default (not set_fact) so it's available
+# however the role is entered — including standalone `verify.yml`, which only
+# runs tasks_from: verify and never executes files.yml.
+infra_service_names: "{{ (infra_apps.keys() | list) + infra_extra_service_names }}"

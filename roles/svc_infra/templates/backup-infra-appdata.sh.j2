@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# backup-infra-appdata.sh — nightly appdata tars for the infra stack.
+# RENDERED BY ANSIBLE. Run by backup-infra-appdata.timer as root; the tar
+# itself runs as the homelab uid (runuser) since appdata is homelab-owned.
+# Retention: {{ backup_retention_days | default(14) }} days.
+set -euo pipefail
+
+DEST=/srv/backups/{{ inventory_hostname }}
+STAMP=$(date +%F)
+NTFY="${NTFY_URL}/${NTFY_TOPIC}"
+AUTH=()
+if [[ -n "${NTFY_TOKEN:-}" ]]; then
+    AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+fi
+
+on_err() {
+    logger -p daemon.err -t backup-infra "appdata backup FAILED"
+    curl -fsS --max-time 5 -X POST -H "Title: {{ inventory_hostname }} backup FAILED" \
+        -H "Priority: high" -H "Tags: floppy_disk" \
+        "${AUTH[@]}" \
+        -d "backup-infra-appdata.sh failed — check journalctl -u backup-infra-appdata" \
+        "$NTFY" >/dev/null 2>&1 || true
+}
+trap on_err ERR
+
+runuser -u homelab -- mkdir -p "$DEST"
+{% set infra_backup_paths = [] %}
+{% for app_name, app in infra_apps.items() %}
+{%   for backup_path in app.backup_paths %}
+{%     set _ = infra_backup_paths.append(backup_path) %}
+{%   endfor %}
+{% endfor %}
+for app in{% for backup_path in infra_backup_paths | unique %} {{ backup_path | quote }}{% endfor %}; do
+    runuser -u homelab -- tar -C /opt/homelab/appdata -czf "$DEST/${app}-${STAMP}.tar.gz" "$app"
+done
+runuser -u homelab -- find "$DEST" -name '*.tar.gz' -mtime +{{ backup_retention_days | default(14) }} -delete
+logger -t backup-infra "appdata backup OK ($STAMP)"

@@ -1,0 +1,17 @@
+---
+- name: Configure infra files
+  ansible.builtin.import_tasks: files.yml
+  tags: [files]
+
+- name: Converge infra applications
+  ansible.builtin.import_tasks: apps.yml
+  tags: [apps]
+
+- name: Configure infra backups
+  ansible.builtin.import_tasks: backup.yml
+  tags: [backup]
+
+- name: Verify infra services
+  ansible.builtin.import_tasks: verify.yml
+  when: not ansible_check_mode
+  tags: [verify]

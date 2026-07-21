@@ -1,0 +1,11 @@
+# /etc/systemd/system/backup-infra-appdata.timer
+[Unit]
+Description=Nightly infra-stack appdata backup
+
+[Timer]
+OnCalendar=*-*-* 03:40:00
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target

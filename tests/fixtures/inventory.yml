@@ -24,6 +24,11 @@ all:
             svc-media:
               ansible_connection: local
               ansible_host: 127.0.0.1
+        infra_vms:
+          hosts:
+            svc-infra:
+              ansible_connection: local
+              ansible_host: 127.0.0.3
       vars:
         ansible_user: fixture
         ansible_become: false

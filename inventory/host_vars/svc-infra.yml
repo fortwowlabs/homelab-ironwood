@@ -1,0 +1,36 @@
+---
+# svc-infra — rootless infra/self-hosted stack (v6). Catalog-driven like
+# svc-download's download_apps (see inventory/group_vars/all/infra-apps.yml).
+# This filename must match the inventory_hostname in inventory/hosts.yml's
+# infra_vms group — renaming that host means renaming this file too. See
+# "Renaming a service VM" in docs/operations.md.
+#
+# RAM note: sized modestly (8G) because thurgadin had only ~10G free when
+# this VM was provisioned (2026-07-21). Bump vm_memory (and reconcile) if a
+# later infra service needs more headroom — see docs/operations.md.
+vm_id:      132
+vm_cores:   4
+vm_memory:  8192
+vm_disk_gb: 80
+vm_startup: "order=4,up=60"
+service_guarded_egress: false
+service_requires_subids: true
+service_repo_packages: [epel-release]
+service_packages:
+  - podman
+  - nfs-utils
+  - policycoreutils-python-utils
+  - firewalld
+  - python3-firewall
+  - curl
+  - bind-utils
+  - cockpit
+  - cockpit-podman
+  - cockpit-storaged
+# No caddy/dnsmasq here — the access layer (reverse proxy + private DNS)
+# stays on svc-media; infra services are reached the same way svc-download's
+# proxied apps are: Caddy on svc-media proxies to hostvars[infra_host].ansible_host.
+
+# --- monitoring (mon role) ---
+cockpit_origin:     cockpit-infra   # https://cockpit-infra.<domain>
+mon_open_firewalld: true            # svc-infra uses firewalld, like svc-media

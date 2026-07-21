@@ -1,0 +1,16 @@
+---
+- name: Reload root systemd
+  ansible.builtin.systemd:
+    daemon_reload: true
+  listen: reload systemd
+
+- name: Reload homelab user systemd
+  ansible.builtin.command: systemctl --user -M homelab@ daemon-reload
+  changed_when: true
+  listen: infra configuration changed
+
+- name: Restart only changed infra services
+  ansible.builtin.command: "systemctl --user -M homelab@ restart {{ item }}.service"
+  loop: "{{ infra_services_to_restart | default([]) }}"
+  changed_when: true
+  listen: infra configuration changed

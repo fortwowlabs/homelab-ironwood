@@ -5,15 +5,19 @@
 # Use the Make targets documented in README.md for deployment, scoped
 # convergence, safe verification, disruptive verification, and drift checks.
 #
-# Ordering is: provision both VMs (API) -> shared guest gates/packages/NFS ->
-# configure download (jail first, the critical path) -> configure media.
+# Ordering is: provision all VMs (API) -> shared guest gates/packages/NFS ->
+# configure download + infra (jail is the critical path; infra's Caddy
+# backends must be up before media verifies them) -> monitoring -> configure
+# media (verifies every service's Caddy backend last).
 # A failure anywhere posts to ntfy and stops (rescue tasks are tagged
 # `always` so alerting fires even on tag-sliced runs). Success posts a green
 # ntfy at the end of FULL runs only.
 #
 # PREREQUISITES (one-time, NOT automated — see docs/deployment.md):
 #   - TrueNAS Phase 1 done (homelab uid 10001, media+backups datasets, NFS
-#     exports restricted to .30/.31, IP pinned, encryption auto-unlock tested)
+#     exports restricted to .30/.31/.32, IP pinned, encryption auto-unlock
+#     tested — .32 (svc-infra) is a v6 addition, add it to the existing
+#     allowlist if it predates this VM)
 #   - PVE pool `homelab-svc` + scoped API token created; vault filled
 #   - Mullvad configs generated; vault filled
 #   - admin_ssh_pubkey set in inventory/group_vars/all/main.yml
@@ -118,8 +122,37 @@
             msg: "{{ inventory_hostname }} failed — see above."
           tags: [always]
 
+# ---------- Phase 7: infra (v6) ----------
+# Runs before Monitoring/media, same reason as download: svc-media's verify
+# smoke-tests every configured Caddy backend, including infra services, so
+# they must already be up when that runs.
+- name: Configure the infra VM (rootless infra stack)
+  hosts: infra_vms
+  gather_facts: true
+  any_errors_fatal: true
+  tasks:
+    - block:
+        - ansible.builtin.include_role:
+            name: svc_infra
+          tags: [always]
+      rescue:
+        - name: Notify infra failure
+          ansible.builtin.include_role:
+            name: notify
+            apply:
+              tags: [always]
+          tags: [always]
+          vars:
+            ntfy_title: "homelab deploy: {{ inventory_hostname }} FAILED"
+            ntfy_result: "{{ inventory_hostname }} configuration failed."
+            ntfy_priority: "high"
+            ntfy_tags: "warning"
+        - ansible.builtin.fail:
+            msg: "{{ inventory_hostname }} failed — see above."
+          tags: [always]
+
 # Cockpit must answer before svc-media verifies every configured Caddy backend.
-- name: Monitoring (Cockpit + disk alarm on both VMs)
+- name: Monitoring (Cockpit + disk alarm on all VMs)
   hosts: service_vms
   gather_facts: true
   any_errors_fatal: true
@@ -186,10 +219,13 @@
         that:
           - hostvars[download_host].svc_download_verified | default(false) | bool
           - hostvars[media_host].svc_media_verified | default(false) | bool
+          - hostvars[infra_host].svc_infra_verified | default(false) | bool
           - hostvars[download_host].service_vm_verified | default(false) | bool
           - hostvars[media_host].service_vm_verified | default(false) | bool
+          - hostvars[infra_host].service_vm_verified | default(false) | bool
           - hostvars[download_host].mon_verified | default(false) | bool
           - hostvars[media_host].mon_verified | default(false) | bool
+          - hostvars[infra_host].mon_verified | default(false) | bool
         fail_msg: "Refusing to send success: one or more deployment phases did not verify."
       when: not ansible_check_mode
 
@@ -199,10 +235,11 @@
       vars:
         ntfy_title: "homelab deploy OK"
         ntfy_result: >-
-          Both VMs converged and passed non-disruptive verification: catalog
-          containers are in the VPN namespace, Mullvad and the canary are
-          green, NFS probes cleaned up, and media/Caddy services answer.
-          Run make verify-disruptive explicitly during a maintenance window.
+          All service VMs converged and passed non-disruptive verification:
+          catalog containers are in the VPN namespace, Mullvad and the canary
+          are green, NFS probes cleaned up, and media/infra/Caddy services
+          answer. Run make verify-disruptive explicitly during a maintenance
+          window.
         ntfy_priority: "default"
         ntfy_tags: "white_check_mark"
       when: not ansible_check_mode

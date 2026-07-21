@@ -20,13 +20,15 @@ timezone:        America/New_York
 truenas_ip: 192.168.1.20
 
 # --- Service VM identity (v6) ---
-# `download_host`/`media_host` resolve to whichever inventory_hostname is a
-# member of the download_vms/media_vms child groups (inventory/hosts.yml) —
-# use these (or `hostvars[download_host]`/`hostvars[media_host]`) instead of
-# a literal "svc-download"/"svc-media" so renaming a host in inventory is a
-# single edit. See docs/operations.md.
+# `download_host`/`media_host`/`infra_host` resolve to whichever
+# inventory_hostname is a member of the download_vms/media_vms/infra_vms
+# child groups (inventory/hosts.yml) — use these (or
+# `hostvars[download_host]`/`hostvars[media_host]`/`hostvars[infra_host]`)
+# instead of a literal "svc-download"/"svc-media"/"svc-infra" so renaming a
+# host in inventory is a single edit. See docs/operations.md.
 download_host: "{{ groups['download_vms'] | first }}"
 media_host:    "{{ groups['media_vms'] | first }}"
+infra_host:    "{{ groups['infra_vms'] | first }}"
 
 # --- TrueNAS NFS (created by hand in Phase 1 — NOT automated) ---
 # These live INSIDE the exported `tank` dataset (exports are tank + rust;
@@ -120,3 +122,4 @@ caddy_services:
   ntfy:          { backend: "{{ hostvars[media_host].ansible_host }}:8080", group: Infra, icon: ntfy }
   cockpit-media: { backend: "127.0.0.1:9090",          group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }
   cockpit-dl:    { backend: "{{ hostvars[download_host].ansible_host }}:9090", group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }
+  cockpit-infra: { backend: "{{ hostvars[infra_host].ansible_host }}:9090", group: Infra, icon: cockpit, scheme: https, tls_skip_verify: true }

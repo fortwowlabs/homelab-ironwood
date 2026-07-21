@@ -1,0 +1,10 @@
+# /etc/systemd/system/backup-infra-appdata.service
+[Unit]
+Description=Nightly infra-stack appdata backup to NFS
+# Backups need the NFS backup dataset behind the automount:
+RequiresMountsFor=/srv/backups
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/homelab-notify.env
+ExecStart=/usr/local/sbin/backup-infra-appdata.sh
