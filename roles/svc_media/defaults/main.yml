@@ -9,6 +9,10 @@ media_backup_artifacts:
     directory: "/srv/backups/{{ inventory_hostname }}/appdata"
     pattern: seerr-*.tar.gz
     format: tar
+  - name: calibre-web-automated
+    directory: "/srv/backups/{{ inventory_hostname }}/appdata"
+    pattern: calibre-web-automated-*.tar.gz
+    format: tar
   - name: romm-appdata
     directory: "/srv/backups/{{ inventory_hostname }}/appdata"
     pattern: romm-appdata-*.tar.gz

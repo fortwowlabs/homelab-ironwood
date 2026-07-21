@@ -11,6 +11,7 @@
       - { name: romm-db, src: romm-db.container.j2 }
       - { name: romm, src: romm.container.j2 }
       - { name: seerr, src: seerr.container.j2 }
+      - { name: calibre-web-automated, src: calibre-web-automated.container.j2 }
       - { name: ntfy, src: ntfy.container.j2 }
       - { name: homepage, src: homepage.container.j2 }
   changed_when: false
@@ -29,6 +30,7 @@
     - /opt/homelab/appdata/audiobookshelf/config
     - /opt/homelab/appdata/audiobookshelf/metadata
     - /opt/homelab/appdata/seerr
+    - /opt/homelab/appdata/calibre-web-automated
     - /opt/homelab/appdata/romm/resources
     - /opt/homelab/appdata/romm/assets
     - /opt/homelab/appdata/romm/config

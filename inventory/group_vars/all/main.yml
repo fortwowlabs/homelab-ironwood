@@ -131,6 +131,7 @@ caddy_services:
   abs:        { backend: "127.0.0.1:13378",            group: Media,     icon: audiobookshelf }
   romm:       { backend: "127.0.0.1:8081",             group: Media,     icon: romm }
   seerr:      { backend: "127.0.0.1:5055",             group: Media,     icon: overseerr }
+  calibre-web: { backend: "127.0.0.1:8083",            group: Media,     icon: calibre-web }
   # monitoring (feat/monitoring): Cockpit serves its own self-signed TLS
   home:          { backend: "127.0.0.1:3000",          group: Infra, icon: homepage }
   ntfy:          { backend: "{{ hostvars[media_host].ansible_host }}:8080", group: Infra, icon: ntfy }

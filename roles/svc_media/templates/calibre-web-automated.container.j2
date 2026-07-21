@@ -1,0 +1,30 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Calibre-Web Automated
+
+[Container]
+Image={{ media_images.calibre_web_automated }}
+ContainerName=calibre-web-automated
+PublishPort=127.0.0.1:8083:8083
+Volume=%h/appdata/calibre-web-automated:/config:Z
+Volume=/srv/media/books:/calibre-library
+Volume=/srv/media/book-ingest:/cwa-book-ingest
+Environment=TZ={{ timezone }}
+# LSIO/s6 image: PUID/PGID 0 maps container-root to the host homelab user
+# under rootless podman, so /config (homelab-owned appdata) stays writable
+# and backup-readable — any non-zero PUID lands on an unreadable subuid, the
+# Syncthing/Bambuddy lesson.
+Environment=PUID=0
+Environment=PGID=0
+# The library + ingest dirs live on the NFS media export; NETWORK_SHARE_MODE
+# swaps inotify (unreliable over NFS) for polling so auto-ingest still fires.
+Environment=NETWORK_SHARE_MODE=true
+
+[Service]
+# Fail fast if the NFS media export is not actually mounted — a bare local
+# dir would silently divert the library off the share (same guard as Jellyfin).
+ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

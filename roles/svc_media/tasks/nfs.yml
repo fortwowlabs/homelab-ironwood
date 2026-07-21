@@ -18,3 +18,22 @@
   loop_control:
     label: "{{ item.item }}"
   changed_when: true
+
+- name: Check Calibre-Web Automated library subdirectories
+  ansible.builtin.command: "test -d {{ item }}"
+  loop:
+    - /srv/media/books
+    - /srv/media/book-ingest
+  register: media_calibre_directories
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Create missing Calibre-Web Automated library dirs as the service UID
+  ansible.builtin.command: >-
+    setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups --
+    mkdir -p {{ item.item }}
+  loop: "{{ media_calibre_directories.results | selectattr('rc', 'ne', 0) | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  changed_when: true

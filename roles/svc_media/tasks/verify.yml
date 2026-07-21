@@ -3,7 +3,8 @@
   ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item }}.service"
   loop: >-
     {{
-      ['jellyfin', 'audiobookshelf', 'romm-db', 'romm', 'seerr', 'ntfy', 'homepage']
+      ['jellyfin', 'audiobookshelf', 'romm-db', 'romm', 'seerr',
+       'calibre-web-automated', 'ntfy', 'homepage']
       + (['beszel-agent'] if beszel_agent_enabled | bool else [])
     }}
   changed_when: false
@@ -31,6 +32,8 @@
       probe: "p=/audiobooks/.homelab-verify; trap 'rm -f $p' EXIT; touch $p"
     - container: romm
       probe: "p=/romm/library/.homelab-verify; trap 'rm -f $p' EXIT; touch $p"
+    - container: calibre-web-automated
+      probe: "p=/calibre-library/.homelab-verify; trap 'rm -f $p' EXIT; touch $p"
   loop_control:
     label: "{{ item.container }}"
   register: media_nfs_probe
