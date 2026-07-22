@@ -51,8 +51,10 @@
     executable: /bin/bash
   loop: >-
     {{
-      (infra_apps | dict2items | map(attribute='value.backup_paths') | list | flatten)
-      + infra_extra_backup_paths | unique | list
+      (
+        (infra_apps | dict2items | map(attribute='value.backup_paths') | list | flatten)
+        + infra_extra_backup_paths
+      ) | unique | list
     }}
   loop_control:
     label: "{{ item }}"

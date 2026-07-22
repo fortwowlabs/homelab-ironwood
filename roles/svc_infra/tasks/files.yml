@@ -11,6 +11,69 @@
     group: "{{ svc_gid }}"
     mode: "0755"
 
+# Remove Quadlets orphaned by a service that was deleted from the catalog
+# (infra_apps) or from the bespoke set since the last converge — otherwise its
+# .container unit keeps running and silently drops out of infra_service_names
+# and verify.yml. Mirrors svc_download's stale-unit reconciliation. Every
+# expected list below is a single bare `{{ }}` expression (never
+# {% set %}/{% for %}), so difference() operates on a real list rather than a
+# string repr of one — the exact gotcha documented in svc_download/tasks/files.yml.
+- name: Calculate the rootless infra unit files that should exist
+  ansible.builtin.set_fact:
+    # beszel-agent is force-included even when disabled so a previously
+    # rendered agent is never treated as stale by a token/key being cleared —
+    # its own `when: beszel_agent_enabled` render + WARN already handle that.
+    infra_expected_container_paths: >-
+      {{ (infra_service_names | union(['beszel-agent']))
+         | map('regex_replace', '^(.*)$',
+                '/opt/homelab/.config/containers/systemd/\1.container') | list }}
+    infra_expected_network_paths: >-
+      {{ ['paperless', 'netbox', 'immich']
+         | map('regex_replace', '^(.*)$',
+                '/opt/homelab/.config/containers/systemd/\1.network') | list }}
+  changed_when: false
+
+- name: Discover Ansible-managed rootless infra container Quadlets
+  ansible.builtin.find:
+    paths: /opt/homelab/.config/containers/systemd
+    patterns: "*.container"
+    file_type: file
+    contains: 'Ansible managed'
+  register: infra_managed_containers
+  check_mode: false
+
+- name: Discover rootless infra network Quadlets
+  ansible.builtin.find:
+    paths: /opt/homelab/.config/containers/systemd
+    patterns: "*.network"
+    file_type: file
+  register: infra_managed_networks
+  check_mode: false
+
+- name: Calculate stale rootless infra unit paths
+  ansible.builtin.set_fact:
+    infra_stale_container_paths: >-
+      {{ infra_managed_containers.files | map(attribute='path') | list
+         | difference(infra_expected_container_paths) }}
+    infra_stale_network_paths: >-
+      {{ infra_managed_networks.files | map(attribute='path') | list
+         | difference(infra_expected_network_paths) }}
+  changed_when: false
+
+- name: Stop stale rootless infra services
+  ansible.builtin.command: >-
+    systemctl --user -M homelab@ stop
+    {{ item | basename | regex_replace('\.container$', '.service') }}
+  loop: "{{ infra_stale_container_paths }}"
+  changed_when: true
+
+- name: Remove stale rootless infra unit files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ infra_stale_container_paths + infra_stale_network_paths }}"
+  notify: infra configuration changed
+
 # Single-container catalog apps declare their own appdata paths as Quadlet
 # Volume= sources (e.g. "/opt/homelab/appdata/uptime-kuma/data:/app/data:Z");
 # derive the directories to create from the catalog instead of hand-listing

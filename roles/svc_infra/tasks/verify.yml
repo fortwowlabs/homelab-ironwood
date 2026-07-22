@@ -23,8 +23,10 @@
       - -quit
   loop: >-
     {{
-      (infra_apps | dict2items | map(attribute='value.backup_paths') | list | flatten)
-      + infra_extra_backup_paths | unique | list
+      (
+        (infra_apps | dict2items | map(attribute='value.backup_paths') | list | flatten)
+        + infra_extra_backup_paths
+      ) | unique | list
     }}
   register: infra_backup_artifact_gates
   changed_when: false
