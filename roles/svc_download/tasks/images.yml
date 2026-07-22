@@ -1,12 +1,22 @@
 ---
-# Pull immutable catalog images before any queued VPN restart can propagate to
+# Pull immutable images before any queued VPN restart can propagate to
 # the PartOf/BindsTo application units. The maintenance helper opens egress
 # only when the strict host backstop is already active and closes it fatally.
+#
+# The set is the catalog images PLUS the Beszel agent image when the agent is
+# configured — the agent is not a download_app but still needs its image
+# pre-pulled here, because the strict backstop blocks the on-demand registry
+# pull (DNS egress denied) that podman would otherwise attempt at start.
+- name: Assemble the immutable images this host requires
+  ansible.builtin.set_fact:
+    download_required_images: >-
+      {{ (download_apps | dict2items | map(attribute='value.image') | list)
+         + ([beszel_agent_image] if beszel_agent_enabled | bool else []) }}
+  changed_when: false
+
 - name: Check catalog image availability
-  ansible.builtin.command: "podman image exists {{ item.value.image }}"
-  loop: "{{ download_apps | dict2items }}"
-  loop_control:
-    label: "{{ item.key }}"
+  ansible.builtin.command: "podman image exists {{ item }}"
+  loop: "{{ download_required_images }}"
   register: download_image_checks
   failed_when: false
   changed_when: false
@@ -22,11 +32,11 @@
       register: download_image_egress_open
       changed_when: "'opened' in download_image_egress_open.stdout"
 
-    - name: Pull missing immutable catalog images
-      ansible.builtin.command: "podman pull {{ item.item.value.image }}"
+    - name: Pull missing immutable images
+      ansible.builtin.command: "podman pull {{ item.item }}"
       loop: "{{ download_image_checks.results | selectattr('rc', 'ne', 0) | list }}"
       loop_control:
-        label: "{{ item.item.key }}"
+        label: "{{ item.item }}"
       changed_when: true
   always:
     - name: Restore strict backstop after image pulls

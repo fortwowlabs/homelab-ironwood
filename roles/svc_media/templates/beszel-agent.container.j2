@@ -9,9 +9,15 @@ Description=Beszel monitoring agent
 [Container]
 Image={{ beszel_agent_image }}
 ContainerName=beszel-agent
+# Host networking: the agent monitors the HOST, so it must see the host's real
+# NICs (a bridge/pasta netns would report the container's eth0 instead).
+Network=host
 Environment=HUB_URL=http://{{ hostvars[infra_host].ansible_host }}:8090
 Environment=TOKEN={{ vault_beszel_token }}
-Environment=KEY={{ vault_beszel_key }}
+# Quoted: the hub public key is "ssh-ed25519 AAAA..." (contains a space), and
+# an unquoted Environment= splits on whitespace — which would truncate KEY to
+# "ssh-ed25519" and turn the base64 into a second, bogus bare env var.
+Environment="KEY={{ vault_beszel_key }}"
 Volume=%h/appdata/beszel-agent:/var/lib/beszel-agent:Z
 
 [Service]
