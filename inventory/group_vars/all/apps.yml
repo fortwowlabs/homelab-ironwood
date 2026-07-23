@@ -84,9 +84,17 @@ media_images:
 
 # Paperless-ngx (svc-infra) — bespoke two-container app (webserver + its
 # own redis broker), same reasoning as media_images above.
+# The broker is valkey (redis-compatible), NOT the stock redis image: under
+# rootless podman the stock redis entrypoint drops the server to its own
+# non-root user (mapped into the subuid range, not the host homelab user), so
+# it cannot write the homelab-owned /data bind mount — its RDB save fails with
+# EACCES and `stop-writes-on-bgsave-error` then wedges the broker (MISCONF),
+# blocking paperless init. valkey runs as container-root (mapped to homelab),
+# so it owns /data and persists cleanly — the same image the netbox/immich
+# brokers already use. Pinned to the same digest as netbox_images.redis.
 paperless_images:
   webserver: "docker.io/paperlessngx/paperless-ngx@sha256:6c86cad803970ea782683a8e80e7403444c5bf3cf70de63b4d3c8e87500db92f"
-  redis: "docker.io/library/redis@sha256:234c902a2db49461a129e2d4aeff85b28cf20187ed274a67f6e50995fa713c7b"
+  redis: "docker.io/valkey/valkey@sha256:c9b77919daeba2c02ad954d0c844cc4e7142069d177b89c5fd771f405daf9e02"
 
 # NetBox (svc-infra) — bespoke three-container app. Upstream's own compose
 # runs 5 containers (webserver + worker + postgres + 2 valkey instances);
