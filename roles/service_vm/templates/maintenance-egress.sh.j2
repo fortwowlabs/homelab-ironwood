@@ -28,10 +28,22 @@ case "${1:-}" in
       echo "inactive"
       exit 0
     fi
-    nft -f "$backstop"
-    nft list chain inet host_backstop output | grep -q 'policy drop'
-    rm -f "$state"
-    echo "closed"
+    # Primary path: atomically reload the strict backstop (delete+recreate the
+    # table), which drops the temporary 80/443/DNS accepts along with any drift.
+    if nft -f "$backstop"; then
+      nft list chain inet host_backstop output | grep -q 'policy drop'
+      rm -f "$state"
+      echo "closed"
+    else
+      # The reload failed (e.g. a corrupt mullvad-endpoints.nft include). Never
+      # leave the temporary egress accepts in place: flush the output chain so
+      # its own `policy drop` alone governs — fail-closed — and exit non-zero so
+      # the failure is visible. The state file is left in place so a re-run or
+      # `open` won't stack more rules; repair the backstop and re-converge.
+      nft flush chain inet host_backstop output || true
+      echo "close: backstop reload FAILED — output chain flushed to fail-closed" >&2
+      exit 1
+    fi
     ;;
   *)
     echo "usage: $0 open|close" >&2

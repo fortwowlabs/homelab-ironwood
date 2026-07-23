@@ -50,6 +50,50 @@
   changed_when: false
   when: item.stdout | length > 0
 
+- name: Find fresh nonempty infra database dumps
+  ansible.builtin.command:
+    argv:
+      - find
+      - "/srv/backups/{{ inventory_hostname }}/db"
+      - -maxdepth
+      - "1"
+      - -type
+      - f
+      - -size
+      - +0c
+      - -mtime
+      - "-2"
+      - -name
+      - "{{ item }}-*.sql.gz"
+      - -print
+      - -quit
+  loop: "{{ infra_db_backups }}"
+  register: infra_db_backup_gates
+  changed_when: false
+  # The db/ directory may not exist before the first backup runs; a missing
+  # dir makes find exit non-zero with empty stdout, which the assert below
+  # then reports as a missing dump.
+  failed_when: false
+
+- name: Assert every infra database dump is fresh and nonempty
+  ansible.builtin.assert:
+    that:
+      - >-
+        infra_db_backup_gates.results
+        | selectattr('stdout', 'equalto', '') | list | length == 0
+    fail_msg: >-
+      A fresh nonempty infra database dump (pg_dumpall) is missing. Inspect
+      backup-infra-appdata.service and the NFS backup mount.
+
+- name: Validate infra database dump integrity
+  ansible.builtin.command:
+    argv: [gzip, -t, "{{ item.stdout }}"]
+  loop: "{{ infra_db_backup_gates.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  changed_when: false
+  when: item.stdout | length > 0
+
 - name: Mark svc-infra verification complete
   ansible.builtin.set_fact:
     svc_infra_verified: true

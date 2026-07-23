@@ -20,6 +20,7 @@ TEMPLATES = (
     "roles/svc_download/templates/backup-dl-appdata.sh.j2",
     "roles/svc_download/templates/leak-canary.sh.j2",
     "roles/svc_media/templates/backup-media.sh.j2",
+    "roles/svc_infra/templates/backup-infra-appdata.sh.j2",
     "roles/mon/templates/disk-alert.sh.j2",
     "roles/service_vm/templates/maintenance-egress.sh.j2",
 )
@@ -31,6 +32,14 @@ def main() -> int:
         (ROOT / "inventory/group_vars/all/apps.yml").read_text(encoding="utf-8")
     )
     apps = as_attr(apps_document["download_apps"])
+    infra_apps_document = yaml.safe_load(
+        (ROOT / "inventory/group_vars/all/infra-apps.yml").read_text(encoding="utf-8")
+    )
+    # infra_extra_backup_paths / infra_db_backups are plain YAML lists in the
+    # role defaults (no Jinja), so load them straight from there — no drift.
+    infra_defaults = yaml.safe_load(
+        (ROOT / "roles/svc_infra/defaults/main.yml").read_text(encoding="utf-8")
+    )
     environment = Environment(
         loader=FileSystemLoader(str(ROOT)),
         undefined=StrictUndefined,
@@ -49,9 +58,14 @@ def main() -> int:
         "disk_alert_threshold": 85,
         "download_apps": apps,
         "lan_dns": "192.0.2.1",
-        # Only backup-dl-appdata.sh.j2 and backup-media.sh.j2 consume this;
-        # its value doesn't matter here (nothing in TEMPLATES branches on
-        # which service VM it is), it just needs to be defined.
+        # backup-infra-appdata.sh.j2 iterates these; loaded from the real
+        # catalog/defaults above so the fixture can't drift from production.
+        "infra_apps": as_attr(infra_apps_document["infra_apps"]),
+        "infra_extra_backup_paths": infra_defaults["infra_extra_backup_paths"],
+        "infra_db_backups": infra_defaults["infra_db_backups"],
+        # Only the backup templates consume this; its value doesn't matter here
+        # (nothing in TEMPLATES branches on which service VM it is), it just
+        # needs to be defined.
         "inventory_hostname": "fixture-host",
     }
 

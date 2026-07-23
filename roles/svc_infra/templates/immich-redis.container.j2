@@ -9,10 +9,14 @@ Network=immich.network
 # Immich uses redis purely as a job queue / cache — no persistent state worth
 # backing up, and no auth (reachable only on the private immich.network).
 Environment=TZ={{ timezone }}
-HealthCmd=redis-cli ping || exit 1
+HealthCmd=redis-cli ping | grep -q PONG
 HealthInterval=15s
 HealthTimeout=5s
 HealthRetries=5
+HealthStartPeriod=10s
+# Gate readiness on a real PING so immich-server (Requires=+After=) waits for
+# the cache to answer, not merely for the container to start.
+Notify=healthy
 
 [Service]
 Restart=on-failure

@@ -62,6 +62,21 @@
   changed_when: false
   check_mode: false
 
+- name: Check for fresh nonempty database dumps
+  ansible.builtin.shell: |
+    set -euo pipefail
+    [[ -d /srv/backups/{{ inventory_hostname }}/db ]] || exit 0
+    find /srv/backups/{{ inventory_hostname }}/db -maxdepth 1 -type f -size +0c -mtime -2 \
+      -name {{ (item ~ '-*.sql.gz') | quote }} -print -quit
+  args:
+    executable: /bin/bash
+  loop: "{{ infra_db_backups }}"
+  loop_control:
+    label: "{{ item }}"
+  register: infra_db_artifacts_before
+  changed_when: false
+  check_mode: false
+
 - name: Produce an initial infra backup when any catalog artifact is absent
   ansible.builtin.systemd:
     name: backup-infra-appdata.service
@@ -69,6 +84,8 @@
   when:
     - not ansible_check_mode
     - >-
-      infra_backup_artifacts_before.results
-      | selectattr('stdout', 'equalto', '') | list | length > 0
+      (infra_backup_artifacts_before.results
+       | selectattr('stdout', 'equalto', '') | list | length > 0)
+      or (infra_db_artifacts_before.results
+          | selectattr('stdout', 'equalto', '') | list | length > 0)
   changed_when: true

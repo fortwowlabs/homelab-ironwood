@@ -12,22 +12,26 @@ infra_extra_service_names: >-
      + ['netbox-db', 'netbox-redis', 'netbox']
      + ['immich-db', 'immich-redis', 'immich-server'] }}
 
-# Backup coverage for bespoke (non-catalog) services with real data worth
-# keeping — appended the same way as infra_extra_service_names above.
-# Excluded on purpose: beszel-agent/paperless-redis/netbox-redis (no real
-# state), and netbox-db — postgres's data dir is owned by the image's
-# internal postgres user, which rootless podman maps to a subuid the
-# homelab-run tar can't read (same class as the paperless-redis issue), and
-# a raw datadir tar isn't a consistent DB backup anyway. NetBox's
-# authoritative data therefore is NOT in the nightly tar yet; a proper
-# pg_dump-based backup (mirroring backup-media.sh's romm-db mariadb-dump) is
-# a documented future enhancement. The netbox/ appdata that IS backed up is
-# just uploaded media/reports/scripts (homelab-owned via the User=0 quadlet).
-# Immich is likewise absent here: the photo library lives on the NFS media
-# export (/srv/media/photos, backed up at the NAS layer, not in this tar) and
-# its postgres data dir is subuid-owned (same pg_dump-future-enhancement caveat
-# as netbox-db); immich-redis is a disposable queue/cache.
+# Appdata-tar backup coverage for bespoke (non-catalog) services — appended
+# the same way as infra_extra_service_names above. Excluded on purpose:
+# beszel-agent/paperless-redis/netbox-redis (no real state), and the Postgres
+# data dirs (netbox-db/immich-db) — those are subuid-owned so the homelab tar
+# can't read them, and a raw datadir tar isn't a consistent DB backup anyway.
+# The databases are instead captured by application-consistent pg_dumpall (see
+# infra_db_backups below). The netbox/ appdata that IS tarred here is just
+# uploaded media/reports/scripts (homelab-owned via the User=0 quadlet); the
+# Immich photo library lives on the NFS media export (/srv/media/photos, backed
+# up at the NAS layer, not in this tar); immich-redis is a disposable cache.
 infra_extra_backup_paths: [paperless, netbox]
+
+# Bespoke Postgres databases captured by an application-consistent pg_dumpall
+# via `podman exec` in the nightly backup (mirrors backup-media.sh's romm-db
+# mariadb-dump). Each name is the container name AND the .sql.gz artifact base
+# name; the dump reads POSTGRES_USER/POSTGRES_DB from the container's own env,
+# so nothing here needs the db/user spelled out. pg_dumpall --clean --if-exists
+# captures roles+globals and restores over an existing cluster; it is also the
+# form Immich's backup docs specify for its vectorchord-patched cluster.
+infra_db_backups: [netbox-db, immich-db]
 
 # Every infra service, whether catalog-driven or bespoke, funnels through
 # this one name list so apps.yml/verify.yml don't need to know which category

@@ -1,11 +1,20 @@
 #!/usr/bin/env bash
-# backup-infra-appdata.sh — nightly appdata tars for the infra stack.
-# RENDERED BY ANSIBLE. Run by backup-infra-appdata.timer as root; the tar
-# itself runs as the homelab uid (runuser) since appdata is homelab-owned.
-# Retention: {{ backup_retention_days | default(14) }} days.
+# backup-infra-appdata.sh — nightly infra-stack backups to the NFS backup
+# dataset. RENDERED BY ANSIBLE. Runs as the homelab user (User=homelab in
+# backup-infra-appdata.service; rootless podman needs XDG_RUNTIME_DIR, set
+# there) — the appdata it tars and the DB containers it dumps are all
+# homelab-owned. Retention: {{ backup_retention_days | default(14) }} days.
+#
+# What it covers:
+#   - Appdata tars: one per backup_path (catalog + bespoke) under
+#     /opt/homelab/appdata.
+#   - Database dumps: application-consistent `pg_dumpall` of each bespoke
+#     Postgres cluster (netbox-db, immich-db) whose subuid-owned data dir
+#     cannot be file-tarred — mirrors backup-media.sh's romm-db mariadb-dump.
 set -euo pipefail
 
 DEST=/srv/backups/{{ inventory_hostname }}
+DB_DEST="$DEST/db"
 STAMP=$(date +%F)
 NTFY="${NTFY_URL}/${NTFY_TOPIC}"
 AUTH=()
@@ -14,7 +23,7 @@ if [[ -n "${NTFY_TOKEN:-}" ]]; then
 fi
 
 on_err() {
-    logger -p daemon.err -t backup-infra "appdata backup FAILED"
+    logger -p daemon.err -t backup-infra "backup FAILED"
     curl -fsS --max-time 5 -X POST -H "Title: {{ inventory_hostname }} backup FAILED" \
         -H "Priority: high" -H "Tags: floppy_disk" \
         "${AUTH[@]}" \
@@ -23,7 +32,9 @@ on_err() {
 }
 trap on_err ERR
 
-runuser -u homelab -- mkdir -p "$DEST"
+mkdir -p "$DEST" "$DB_DEST"
+
+# 1. Appdata tars (homelab-owned; this script runs as homelab so no runuser).
 {% set infra_backup_paths = [] %}
 {% for app_name, app in infra_apps.items() %}
 {%   for backup_path in app.backup_paths %}
@@ -34,7 +45,20 @@ runuser -u homelab -- mkdir -p "$DEST"
 {%   set _ = infra_backup_paths.append(backup_path) %}
 {% endfor %}
 for app in{% for backup_path in infra_backup_paths | unique %} {{ backup_path | quote }}{% endfor %}; do
-    runuser -u homelab -- tar -C /opt/homelab/appdata -czf "$DEST/${app}-${STAMP}.tar.gz" "$app"
+    tar -C /opt/homelab/appdata -czf "$DEST/${app}-${STAMP}.tar.gz" "$app"
 done
-runuser -u homelab -- find "$DEST" -name '*.tar.gz' -mtime +{{ backup_retention_days | default(14) }} -delete
-logger -t backup-infra "appdata backup OK ($STAMP)"
+
+# 2. Database dumps — application-consistent pg_dumpall. POSTGRES_USER is
+#    expanded INSIDE the container (single-quoted), reading its own env, so the
+#    superuser/db names never need spelling out here. pipefail makes a failed
+#    dump abort loudly rather than write a truncated .sql.gz.
+{% for db in infra_db_backups %}
+podman exec {{ db | quote }} sh -c \
+    'exec pg_dumpall -U "$POSTGRES_USER" --clean --if-exists' \
+    | gzip > "$DB_DEST/{{ db }}-${STAMP}.sql.gz"
+{% endfor %}
+
+# 3. Retention (tars and dumps; find recurses into db/).
+find "$DEST" \( -name '*.tar.gz' -o -name '*.sql.gz' \) \
+    -mtime +{{ backup_retention_days | default(14) }} -delete
+logger -t backup-infra "backup OK ($STAMP)"

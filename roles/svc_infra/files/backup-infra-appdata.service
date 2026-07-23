@@ -1,10 +1,17 @@
 # /etc/systemd/system/backup-infra-appdata.service
 [Unit]
-Description=Nightly infra-stack appdata backup to NFS
+Description=Nightly infra-stack appdata tars + database dumps to NFS
 # Backups need the NFS backup dataset behind the automount:
 RequiresMountsFor=/srv/backups
 
 [Service]
 Type=oneshot
+# Run as the homelab user (uid = svc_uid = 10001), like backup-media.service:
+# the appdata it tars is homelab-owned, and `podman exec` for the pg_dumpall of
+# the rootless netbox-db/immich-db containers needs the homelab rootless
+# runtime (XDG_RUNTIME_DIR), which lingering keeps alive at /run/user/10001.
+User=homelab
+Group=homelab
+Environment=XDG_RUNTIME_DIR=/run/user/10001
 EnvironmentFile=/etc/homelab-notify.env
 ExecStart=/usr/local/sbin/backup-infra-appdata.sh

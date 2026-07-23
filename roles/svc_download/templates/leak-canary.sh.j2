@@ -76,8 +76,16 @@ for c in "${expected[@]}"; do
         || down "expected container $c does not exist"
     systemctl is-active --quiet "dl-$c.service" \
         || down "dl-$c.service is not active"
-    pid=$(podman inspect -f '{% raw %}{{.State.Pid}}{% endraw %}' "$c")
-    [[ "$pid" -gt 0 ]] || fail_leak "container $c has no running pid"
+    pid=$(podman inspect -f '{% raw %}{{.State.Pid}}{% endraw %}' "$c" 2>/dev/null || true)
+    # A transient podman API hiccup can yield an empty/zero pid on a container
+    # that IS healthy; retry once before treating it as a leak (stopping the
+    # whole stack). An empty or non-numeric value must never satisfy -gt.
+    if ! [[ "$pid" =~ ^[0-9]+$ ]] || [[ "$pid" -le 0 ]]; then
+        sleep 2
+        pid=$(podman inspect -f '{% raw %}{{.State.Pid}}{% endraw %}' "$c" 2>/dev/null || true)
+    fi
+    [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 0 ]] \
+        || fail_leak "container $c has no running pid (after retry)"
     [[ "$(stat -Lc %i /proc/"$pid"/ns/net 2>/dev/null)" == "$want_inode" ]] \
         || fail_leak "container $c is NOT in the vpn netns (pid: $pid)"
 done

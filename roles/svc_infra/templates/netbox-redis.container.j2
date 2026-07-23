@@ -12,6 +12,16 @@ Network=netbox.network
 Volume=%h/appdata/netbox-redis:/data:Z
 Environment=TZ={{ timezone }}
 Exec=valkey-server --appendonly yes --requirepass {{ vault_netbox_redis_password }}
+# Gate readiness on an authenticated PING so netbox.service (Requires=+After=)
+# waits for the cache to actually answer, not merely for the container to
+# start — removes the cold-start race where NetBox raced redis on first boot.
+# The password is already on the Exec line above, so this exposes nothing new.
+HealthCmd=redis-cli -a {{ vault_netbox_redis_password }} ping | grep -q PONG
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=10s
+Notify=healthy
 
 [Service]
 Restart=on-failure
