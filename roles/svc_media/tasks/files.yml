@@ -114,7 +114,8 @@
     dest: /opt/homelab/.config/containers/systemd/beszel-agent.container
     owner: "{{ svc_uid }}"
     group: "{{ svc_gid }}"
-    mode: "0644"
+    # 0600: this quadlet embeds the Beszel TOKEN/KEY on Environment= lines.
+    mode: "0600"
   register: media_beszel_agent_template
   when: beszel_agent_enabled | bool
   no_log: true

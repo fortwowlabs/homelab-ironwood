@@ -163,7 +163,8 @@
     dest: /opt/homelab/.config/containers/systemd/paperless.container
     owner: "{{ svc_uid }}"
     group: "{{ svc_gid }}"
-    mode: "0644"
+    # 0600: this quadlet embeds PAPERLESS_SECRET_KEY on an Environment= line.
+    mode: "0600"
   register: infra_paperless_template
   no_log: true
   diff: false
@@ -215,7 +216,8 @@
     dest: /opt/homelab/.config/containers/systemd/netbox-db.container
     owner: "{{ svc_uid }}"
     group: "{{ svc_gid }}"
-    mode: "0644"
+    # 0600: this quadlet embeds POSTGRES_PASSWORD on an Environment= line.
+    mode: "0600"
   register: infra_netbox_db_template
   no_log: true
   diff: false
@@ -226,7 +228,8 @@
     dest: /opt/homelab/.config/containers/systemd/netbox-redis.container
     owner: "{{ svc_uid }}"
     group: "{{ svc_gid }}"
-    mode: "0644"
+    # 0600: this quadlet embeds the redis requirepass on the Exec= line.
+    mode: "0600"
   register: infra_netbox_redis_template
   no_log: true
   diff: false
@@ -237,7 +240,9 @@
     dest: /opt/homelab/.config/containers/systemd/netbox.container
     owner: "{{ svc_uid }}"
     group: "{{ svc_gid }}"
-    mode: "0644"
+    # 0600: this quadlet embeds DB/REDIS/SECRET_KEY/SUPERUSER secrets on
+    # Environment= lines.
+    mode: "0600"
   register: infra_netbox_template
   no_log: true
   diff: false
@@ -293,7 +298,8 @@
     dest: /opt/homelab/.config/containers/systemd/immich-db.container
     owner: "{{ svc_uid }}"
     group: "{{ svc_gid }}"
-    mode: "0644"
+    # 0600: this quadlet embeds POSTGRES_PASSWORD on an Environment= line.
+    mode: "0600"
   register: infra_immich_db_template
   no_log: true
   diff: false
@@ -313,7 +319,8 @@
     dest: /opt/homelab/.config/containers/systemd/immich-server.container
     owner: "{{ svc_uid }}"
     group: "{{ svc_gid }}"
-    mode: "0644"
+    # 0600: this quadlet embeds DB_PASSWORD on an Environment= line.
+    mode: "0600"
   register: infra_immich_server_template
   no_log: true
   diff: false
@@ -333,7 +340,8 @@
     dest: /opt/homelab/.config/containers/systemd/beszel-agent.container
     owner: "{{ svc_uid }}"
     group: "{{ svc_gid }}"
-    mode: "0644"
+    # 0600: this quadlet embeds the Beszel TOKEN/KEY on Environment= lines.
+    mode: "0600"
   register: infra_beszel_agent_template
   when: beszel_agent_enabled | bool
   no_log: true

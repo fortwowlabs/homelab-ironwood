@@ -248,7 +248,8 @@
   ansible.builtin.template:
     src: beszel-agent.container.j2
     dest: /etc/containers/systemd/beszel-agent.container
-    mode: "0644"
+    # 0600: this quadlet embeds the Beszel TOKEN/KEY on Environment= lines.
+    mode: "0600"
   register: download_beszel_agent_template
   when: beszel_agent_enabled | bool
   no_log: true
