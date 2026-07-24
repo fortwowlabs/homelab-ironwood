@@ -16,6 +16,9 @@ ContainerName={{ item.key }}
 Environment=PUID={{ svc_uid }}
 Environment=PGID={{ svc_gid }}
 Environment=TZ={{ timezone }}
+{% for env_name, env_value in (item.value.env | default({})).items() %}
+Environment={{ env_name }}={{ env_value }}
+{% endfor %}
 PodmanArgs=--network=ns:/run/netns/vpn
 DNS={{ mullvad_dns }}
 {% for volume in item.value.volumes %}

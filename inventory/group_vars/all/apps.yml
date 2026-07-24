@@ -68,6 +68,24 @@ download_apps:
     dashboard: { group: Downloads, icon: bazarr }
     proxy: true
 
+  # jlesage's baseimage-gui images use USER_ID/GROUP_ID, not the LSIO
+  # PUID/PGID convention every other entry here relies on — set both via
+  # env so the container actually runs as svc_uid/svc_gid and can
+  # write the host-owned /config and /output binds.
+  jdownloader:
+    image: "docker.io/jlesage/jdownloader-2@sha256:47ee6c64917ca5326516ebe868714709c6bdd2e08ca0e33f6e80a943ef2019d2"
+    ui_port: 5800
+    volumes:
+      - /srv/appdata/jdownloader:/config:Z
+      - /srv/media:/output
+    media_mount: true
+    backup_paths: [jdownloader]
+    dashboard: { group: Downloads, icon: jdownloader }
+    proxy: true
+    env:
+      USER_ID: "{{ svc_uid }}"
+      GROUP_ID: "{{ svc_gid }}"
+
 # Media/infra images remain separate because their Quadlets are intentionally
 # heterogeneous, but their references are immutable and centrally reviewed.
 media_images:

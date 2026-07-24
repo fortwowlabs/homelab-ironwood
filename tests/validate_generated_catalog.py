@@ -17,9 +17,18 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AttrDict(dict):
-    """Dictionary with attribute access matching Ansible's templating data."""
+    """Dictionary with attribute access matching Ansible's templating data.
 
-    __getattr__ = dict.__getitem__
+    Missing attributes raise AttributeError (not KeyError) so Jinja's normal
+    getattr-then-getitem fallback produces Undefined, matching how Ansible
+    renders `item.value.optional_field | default(...)` against a plain dict.
+    """
+
+    def __getattr__(self, name: str) -> object:
+        try:
+            return self[name]
+        except KeyError as exc:
+            raise AttributeError(name) from exc
 
 
 def as_attr(value: object) -> object:

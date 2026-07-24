@@ -35,7 +35,15 @@ runuser -u homelab -- mkdir -p "$DEST"
 {%   endfor %}
 {% endfor %}
 for app in{% for backup_path in download_backup_paths | unique %} {{ backup_path | quote }}{% endfor %}; do
-    runuser -u homelab -- tar -C /srv/appdata -czf "$DEST/${app}-${STAMP}.tar.gz" "$app"
+    runuser -u homelab -- tar -C /srv/appdata -czf "$DEST/${app}-${STAMP}.tar.gz" "$app" || {
+        rc=$?
+        # tar exit 1 = "some files differ" (e.g. modified mid-read by a
+        # live app); the snapshot is still usable. Only exit 2+ is fatal.
+        if (( rc >= 2 )); then
+            on_err
+            exit "$rc"
+        fi
+    }
 done
 runuser -u homelab -- find "$DEST" -name '*.tar.gz' -mtime +{{ backup_retention_days | default(14) }} -delete
 logger -t backup-dl "appdata backup OK ($STAMP)"
