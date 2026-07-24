@@ -83,8 +83,12 @@
 # — see roles/svc_media/tasks/files.yml for that pattern.
 - name: Determine appdata directories required by the infra catalog
   vars:
+    # Both the plain and the secret catalog declare appdata as Volume=
+    # sources; they create identical directories, only their Quadlet render
+    # differs (the secret one is no_log/0600, below).
     infra_volume_sources: >-
-      {{ infra_apps.values() | map(attribute='volumes') | list | flatten
+      {{ (infra_apps | combine(infra_secret_apps | default({}))).values()
+         | map(attribute='volumes') | list | flatten
          | map('regex_replace', '^([^:]+):.*$', '\1') | list }}
   ansible.builtin.set_fact:
     infra_appdata_dirs: >-
@@ -111,6 +115,39 @@
   loop_control:
     label: "{{ item.key }}"
   register: infra_quadlet_templates
+
+# Secret-bearing single-container apps: same template as above, but the
+# render is no_log/diff:false and the file is 0600, because an `env` value
+# here is a real secret. Kept a separate loop (not folded into the task
+# above) precisely so the ordinary catalog keeps its readable diff.
+- name: Require every infra secret app's vault secrets
+  ansible.builtin.assert:
+    that:
+      - "lookup('vars', item.1, default='') | string | length > 0"
+    fail_msg: >-
+      {{ item.1 }} is empty — configure it in the encrypted inventory
+      (needed by infra_secret_apps.{{ item.0.key }}).
+  loop: >-
+    {{ infra_secret_apps | default({}) | dict2items
+       | subelements('value.require_vault', skip_missing=True) }}
+  loop_control:
+    label: "{{ item.0.key }}:{{ item.1 }}"
+  no_log: true
+
+- name: Render secret-bearing single-container infra Quadlets
+  ansible.builtin.template:
+    src: infra-app.container.j2
+    dest: "/opt/homelab/.config/containers/systemd/{{ item.key }}.container"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    # 0600: an Environment= line here embeds a vault secret.
+    mode: "0600"
+  loop: "{{ infra_secret_apps | default({}) | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: infra_secret_quadlet_templates
+  no_log: true
+  diff: false
 
 - name: Create Paperless-ngx appdata directories
   ansible.builtin.file:
@@ -362,26 +399,32 @@
     name: firewalld
     enabled: true
     state: started
-  when: infra_apps | length > 0
+  when: (infra_apps | combine(infra_secret_apps | default({}))) | length > 0
 
-# Every catalog app publishes on svc-infra's LAN IP (see
+# Every catalog app (plain and secret) publishes on svc-infra's LAN IP (see
 # infra-app.container.j2) so Caddy on {{ media_host }} can reach it — open
 # ui_port (always tcp) to the LAN here, matching svc_media's equivalent task.
+# Loop over just the port numbers, NOT the catalog entries: a secret app's
+# entry carries its resolved PASSWORD in item.value.env, which Ansible would
+# surface on a task failure or under -vvv; a bare port list can't leak it.
 - name: Open LAN-scoped infra catalog service ports
   ansible.posix.firewalld:
     rich_rule: >-
       rule family=ipv4 source address={{ lan_cidr }} port
-      port={{ item.value.ui_port }} protocol=tcp accept
+      port={{ item }} protocol=tcp accept
     permanent: true
     immediate: true
     state: enabled
-  loop: "{{ infra_apps | dict2items }}"
+  loop: >-
+    {{ (infra_apps | combine(infra_secret_apps | default({}))).values()
+       | map(attribute='ui_port') | list }}
   loop_control:
-    label: "{{ item.key }}"
+    label: "{{ item }}"
 
 # extra_ports (e.g. Syncthing's sync/discovery ports) aren't reached through
 # Caddy, just opened directly — a separate task since each entry already
-# carries its own protocol, unlike ui_port above.
+# carries its own protocol, unlike ui_port above. These sub-entries are plain
+# {port, protocol} dicts (no secret), so folding both catalogs in is safe.
 - name: Open LAN-scoped infra catalog extra ports
   ansible.posix.firewalld:
     rich_rule: >-
@@ -391,7 +434,8 @@
     immediate: true
     state: enabled
   loop: >-
-    {{ infra_apps.values() | map(attribute='extra_ports', default=[])
+    {{ (infra_apps | combine(infra_secret_apps | default({}))).values()
+       | map(attribute='extra_ports', default=[])
        | list | flatten | unique | list }}
   loop_control:
     label: "{{ item.port }}/{{ item.protocol }}"
@@ -429,6 +473,12 @@
       {{
         (
           infra_quadlet_templates.results
+          | selectattr('changed')
+          | map(attribute='item.key')
+          | list
+        )
+        + (
+          infra_secret_quadlet_templates.results | default([])
           | selectattr('changed')
           | map(attribute='item.key')
           | list

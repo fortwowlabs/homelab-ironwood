@@ -158,3 +158,35 @@ infra_apps:
     env:
       GLANCES_OPT: "-w --enable-mcp"
     backup_paths: []
+
+# Secret-bearing single-container services. Structurally identical to
+# infra_apps (same fields, same infra-app.container.j2 template, same
+# firewalld/service-name/backup wiring) with two differences handled in
+# roles/svc_infra: (1) their Quadlet is rendered by a no_log/diff:false
+# task and written mode 0600, because an `env` value here is a real secret
+# (a vault var) and the shared infra_apps render loop is deliberately NOT
+# no_log-wrapped (it would blank the diff for every ordinary service too);
+# (2) each entry lists the vault var(s) it needs in `require_vault`, which a
+# single generic assert checks are non-empty before rendering — the generic
+# form of paperless/netbox's per-service "Require the secret key" assert.
+# Use this (not a new bespoke template) for any single-container service
+# whose only reason for not being a plain infra_apps entry is an embedded
+# secret. Multi-container secret services (db/cache sidecar) still get a
+# bespoke template — see paperless/netbox/immich.
+infra_secret_apps:
+  # code-server — VS Code in the browser (Open VSX extension marketplace
+  # works out of the box, satisfying the "must support plugins/extensions"
+  # requirement). PASSWORD gates the web UI. PUID/PGID=0 so /config lands
+  # homelab-owned under rootless podman (same reason as Syncthing/Bambuddy).
+  code-server:
+    image: "lscr.io/linuxserver/code-server@sha256:691c8e0560a807a4affefbcf7e729716b372d1df7c57e18ed3a263044cf45908"
+    ui_port: 8443
+    volumes:
+      - /opt/homelab/appdata/code-server:/config:Z
+    env:
+      PUID: "0"
+      PGID: "0"
+      PASSWORD: "{{ vault_codeserver_password }}"
+      DEFAULT_WORKSPACE: /config/workspace
+    require_vault: [vault_codeserver_password]
+    backup_paths: [code-server]

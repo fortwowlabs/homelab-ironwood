@@ -168,3 +168,4 @@ caddy_services:
   # its plain REST API has no such check. Caddy rewrites the outbound Host
   # header so https://glances.{{ service_domain }}/mcp/sse works externally too.
   glances:     { backend: "{{ hostvars[infra_host].ansible_host }}:61208", group: Infra, icon: glances, host_header: "localhost:61208" }
+  code-server: { backend: "{{ hostvars[infra_host].ansible_host }}:8443", group: Infra, icon: code-server }

@@ -51,6 +51,9 @@ def main() -> int:
         dict2items=dict2items,
         quote=shlex.quote,
         urlsplit=split_url,
+        # Ansible's `combine` (non-recursive default): shallow top-level merge,
+        # right operand wins on key collisions.
+        combine=lambda left, right: as_attr({**(left or {}), **(right or {})}),
     )
     context = {
         "ansible_managed": "fixture managed",
@@ -61,6 +64,7 @@ def main() -> int:
         # backup-infra-appdata.sh.j2 iterates these; loaded from the real
         # catalog/defaults above so the fixture can't drift from production.
         "infra_apps": as_attr(infra_apps_document["infra_apps"]),
+        "infra_secret_apps": as_attr(infra_apps_document.get("infra_secret_apps", {})),
         "infra_extra_backup_paths": infra_defaults["infra_extra_backup_paths"],
         "infra_db_backups": infra_defaults["infra_db_backups"],
         # Only the backup templates consume this; its value doesn't matter here

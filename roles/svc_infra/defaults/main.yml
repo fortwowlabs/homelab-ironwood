@@ -38,4 +38,7 @@ infra_db_backups: [netbox-db, immich-db]
 # a service belongs to. A plain default (not set_fact) so it's available
 # however the role is entered — including standalone `verify.yml`, which only
 # runs tasks_from: verify and never executes files.yml.
-infra_service_names: "{{ (infra_apps.keys() | list) + infra_extra_service_names }}"
+infra_service_names: >-
+  {{ (infra_apps.keys() | list)
+     + ((infra_secret_apps | default({})).keys() | list)
+     + infra_extra_service_names }}

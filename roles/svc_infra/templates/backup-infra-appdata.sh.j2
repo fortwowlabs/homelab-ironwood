@@ -36,7 +36,7 @@ mkdir -p "$DEST" "$DB_DEST"
 
 # 1. Appdata tars (homelab-owned; this script runs as homelab so no runuser).
 {% set infra_backup_paths = [] %}
-{% for app_name, app in infra_apps.items() %}
+{% for app_name, app in (infra_apps | combine(infra_secret_apps | default({}))).items() %}
 {%   for backup_path in app.backup_paths %}
 {%     set _ = infra_backup_paths.append(backup_path) %}
 {%   endfor %}

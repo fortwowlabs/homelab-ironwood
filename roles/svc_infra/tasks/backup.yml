@@ -53,6 +53,7 @@
     {{
       (
         (infra_apps | dict2items | map(attribute='value.backup_paths') | list | flatten)
+        + (infra_secret_apps | default({}) | dict2items | map(attribute='value.backup_paths') | list | flatten)
         + infra_extra_backup_paths
       ) | unique | list
     }}
