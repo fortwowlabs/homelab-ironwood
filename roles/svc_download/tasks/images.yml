@@ -11,7 +11,8 @@
   ansible.builtin.set_fact:
     download_required_images: >-
       {{ (download_apps | dict2items | map(attribute='value.image') | list)
-         + ([beszel_agent_image] if beszel_agent_enabled | bool else []) }}
+         + ([beszel_agent_image] if beszel_agent_enabled | bool else [])
+         + ([recyclarr_image] if download_recyclarr_enabled | default(false) | bool else []) }}
   changed_when: false
 
 - name: Check catalog image availability

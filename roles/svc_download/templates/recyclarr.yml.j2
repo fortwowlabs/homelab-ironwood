@@ -1,0 +1,20 @@
+{{ ansible_managed | comment }}
+# Conservative starting sync: quality_definition only (TRaSH-recommended
+# quality-size limits for each format). Does NOT touch custom formats or
+# quality profiles — see https://recyclarr.dev/wiki/yaml/config-examples/
+# to layer those on deliberately once you've reviewed what they'd change.
+# API keys never touch this file: recyclarr reads them from the container's
+# own environment (set by Ansible from Sonarr/Radarr's live config.xml).
+sonarr:
+  tv:
+    base_url: http://localhost:8989
+    api_key: !env_var SONARR_API_KEY
+    quality_definition:
+      type: series
+
+radarr:
+  movies:
+    base_url: http://localhost:7878
+    api_key: !env_var RADARR_API_KEY
+    quality_definition:
+      type: movie

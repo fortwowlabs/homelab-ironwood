@@ -24,6 +24,12 @@
     state: "{{ 'restarted' if (download_beszel_agent_template.changed | default(false)) else 'started' }}"
   when: beszel_agent_enabled | bool
 
+- name: Ensure Recyclarr is started
+  ansible.builtin.systemd:
+    name: recyclarr.service
+    state: "{{ 'restarted' if (download_recyclarr_template.changed | default(false)) else 'started' }}"
+  when: download_recyclarr_enabled | default(false) | bool
+
 - name: Allow socket proxy bind and connect operations under SELinux
   ansible.posix.seboolean:
     name: "{{ item }}"

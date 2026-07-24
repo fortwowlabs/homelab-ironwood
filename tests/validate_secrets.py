@@ -46,7 +46,7 @@ ASSIGNMENT_RE = re.compile(
     r"auth_secret|secret_key|client_secret|private_key)[A-Za-z0-9_.-]*\s*[:=]\s*[\"']?([^\s#\"']+)"
 )
 PLACEHOLDER_RE = re.compile(
-    r"(?i)^(?:\{\{|\$|<|x{4,}|replace|change[_-]?me|example|dummy|fixture|"
+    r"(?i)^(?:\{\{|\$|<|!(?:env_var|secret)$|[|>][+-]?$|x{4,}|replace|change[_-]?me|example|dummy|fixture|"
     r"redacted|not[_-]?a[_-]?secret|vault_|/|false$|true$)"
 )
 

@@ -86,6 +86,17 @@ beszel_agent_enabled: >-
   {{ (vault_beszel_token | default('')) | length > 0
      and (vault_beszel_key | default('')) | length > 0 }}
 
+# --- Recyclarr (v6, download jail) -----------------------------------------
+# TRaSH-Guides sync for Sonarr/Radarr. Bespoke, not a download_apps entry:
+# the official image doesn't support PUID/PGID (needs Podman User= instead)
+# and its config embeds API keys read live off Sonarr/Radarr's own
+# config.xml, so its Quadlet render must be no_log-wrapped (see
+# roles/svc_download/tasks/files.yml). Self-disables (WARNs instead of
+# failing) until Sonarr and Radarr have both started at least once and
+# generated a config.xml — same "skip cleanly until the prerequisite
+# exists" shape as beszel_agent_enabled above.
+recyclarr_image: "ghcr.io/recyclarr/recyclarr@sha256:2d6107f758d882a59fe9d646aa54fa8a5a4fb7a40995125fade575652a3f7871"
+
 # --- ntfy: where deploy results are pushed. ------------------------------
 # Default is the LAN-internal ntfy you'll stand up on svc-media (Phase 9).
 # FIRST RUN: that ntfy does not exist yet. Either point this at

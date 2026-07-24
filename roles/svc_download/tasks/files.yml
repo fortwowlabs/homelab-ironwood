@@ -266,6 +266,91 @@
       docs/services.md "Beszel monitoring setup". ***
   when: not (beszel_agent_enabled | bool)
 
+- name: Ensure the Recyclarr appdata directory exists
+  ansible.builtin.file:
+    path: /srv/appdata/recyclarr
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+
+- name: Check for Sonarr/Radarr config.xml (source of Recyclarr's API keys)
+  ansible.builtin.stat:
+    path: "/srv/appdata/{{ item }}/config.xml"
+  loop: [sonarr, radarr]
+  register: download_recyclarr_config_stats
+
+- name: Read Sonarr/Radarr config.xml for Recyclarr's API keys
+  ansible.builtin.slurp:
+    src: "/srv/appdata/{{ item.item }}/config.xml"
+  loop: "{{ download_recyclarr_config_stats.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists
+  register: download_recyclarr_config_raw
+  no_log: true
+
+- name: Determine whether Recyclarr's prerequisites are met
+  ansible.builtin.set_fact:
+    download_recyclarr_enabled: >-
+      {{ (download_recyclarr_config_stats.results | map(attribute='stat.exists') | select | list | length)
+         == (download_recyclarr_config_stats.results | length) }}
+
+- name: Extract Sonarr/Radarr API keys for Recyclarr
+  ansible.builtin.set_fact:
+    download_recyclarr_sonarr_api_key: >-
+      {{ (download_recyclarr_config_raw.results
+          | selectattr('item.item', 'equalto', 'sonarr') | first).content
+         | b64decode | regex_search('(?<=<ApiKey>)[a-f0-9]+(?=</ApiKey>)') }}
+    download_recyclarr_radarr_api_key: >-
+      {{ (download_recyclarr_config_raw.results
+          | selectattr('item.item', 'equalto', 'radarr') | first).content
+         | b64decode | regex_search('(?<=<ApiKey>)[a-f0-9]+(?=</ApiKey>)') }}
+  when: download_recyclarr_enabled | bool
+  no_log: true
+
+- name: Assert both Recyclarr API keys were actually extracted
+  ansible.builtin.assert:
+    that:
+      - download_recyclarr_sonarr_api_key is regex('^[a-f0-9]+$')
+      - download_recyclarr_radarr_api_key is regex('^[a-f0-9]+$')
+    fail_msg: >-
+      Sonarr or Radarr's config.xml did not contain a readable <ApiKey> (empty
+      or mid-write) — refusing to render Recyclarr with a blank/None key.
+      Re-run the deploy.
+  when: download_recyclarr_enabled | bool
+  no_log: true
+
+- name: Render Recyclarr's sync configuration
+  ansible.builtin.template:
+    src: recyclarr.yml.j2
+    dest: /srv/appdata/recyclarr/recyclarr.yml
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  when: download_recyclarr_enabled | bool
+
+- name: Render the Recyclarr Quadlet
+  ansible.builtin.template:
+    src: recyclarr.container.j2
+    dest: /etc/containers/systemd/recyclarr.container
+    # 0600: this quadlet embeds the Sonarr/Radarr API keys on Environment= lines.
+    mode: "0600"
+  register: download_recyclarr_template
+  when: download_recyclarr_enabled | bool
+  no_log: true
+  diff: false
+  notify: reload systemd
+
+- name: WARN that Recyclarr is not yet configured
+  ansible.builtin.debug:
+    msg: >-
+      *** WARNING: Sonarr and/or Radarr have not generated a config.xml yet
+      (they must have started at least once) — Recyclarr on
+      {{ inventory_hostname }} is NOT deployed. Re-run the deploy after
+      Sonarr/Radarr are up. ***
+  when: not (download_recyclarr_enabled | bool)
+
 - name: Render WireGuard peer configuration
   ansible.builtin.template:
     src: peer.conf.j2

@@ -1,0 +1,31 @@
+{{ ansible_managed | comment }}
+# /etc/containers/systemd/recyclarr.container   (inside vpn netns)
+# NOT catalog-managed (no download_apps entry): the official image doesn't
+# support PUID/PGID (needs a direct Podman User= instead) and its config file
+# embeds Sonarr/Radarr API keys read live off their own config.xml, so this
+# render must be no_log-wrapped like beszel-agent's, not looped through the
+# shared (non-no_log) download_apps catalog task.
+[Unit]
+Description=Recyclarr TRaSH-Guides sync (inside vpn netns)
+Requires=vpn-netns.service
+After=vpn-netns.service
+BindsTo=vpn-netns.service
+PartOf=vpn-netns.service
+
+[Container]
+Image={{ recyclarr_image }}
+ContainerName=recyclarr
+User={{ svc_uid }}:{{ svc_gid }}
+Environment=TZ={{ timezone }}
+Environment=SONARR_API_KEY={{ download_recyclarr_sonarr_api_key }}
+Environment=RADARR_API_KEY={{ download_recyclarr_radarr_api_key }}
+PodmanArgs=--network=ns:/run/netns/vpn
+DNS={{ mullvad_dns }}
+Volume=/srv/appdata/recyclarr:/config:Z
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

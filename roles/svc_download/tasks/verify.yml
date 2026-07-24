@@ -128,6 +128,20 @@
   changed_when: false
   when: beszel_agent_enabled | bool
 
+- name: Check whether Recyclarr is deployed
+  # Independent of download_recyclarr_enabled (a files.yml runtime fact): the
+  # standalone verify.yml playbook never runs files.yml, only this tasks_from
+  # (same reason download_expected_quadlet_paths isn't reused here either).
+  ansible.builtin.stat:
+    path: /etc/containers/systemd/recyclarr.container
+  register: download_recyclarr_quadlet_stat
+  check_mode: false
+
+- name: Verify Recyclarr is active
+  ansible.builtin.command: systemctl is-active recyclarr.service
+  changed_when: false
+  when: download_recyclarr_quadlet_stat.stat.exists
+
 - name: Mark download verification complete
   ansible.builtin.set_fact:
     svc_download_verified: true
