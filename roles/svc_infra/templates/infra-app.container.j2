@@ -12,6 +12,14 @@ Description={{ item.key }}
 [Container]
 Image={{ item.value.image }}
 ContainerName={{ item.key }}
+{% if item.value.user is defined %}
+# Override the image's own USER (e.g. an image baked to run as uid 1001):
+# under rootless podman only container-uid-0 maps to the host homelab user,
+# so a non-root image UID lands in the subuid range and can't write the
+# homelab-owned bind mounts. User=0 is the same fix as seerr/calibre-web's
+# bespoke quadlets, for images that don't expose a PUID/PGID knob.
+User={{ item.value.user }}
+{% endif %}
 {% if item.value.network_mode | default('') == 'host' %}
 PodmanArgs=--network=host
 {% else %}
