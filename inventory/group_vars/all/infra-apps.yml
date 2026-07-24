@@ -220,3 +220,32 @@ infra_secret_apps:
       - vault_semaphore_admin_password
       - vault_semaphore_access_key_encryption
     backup_paths: [semaphore]
+
+  # Webtop — a full XFCE Linux desktop in the browser (LinuxServer/KasmVNC).
+  # CUSTOM_USER + PASSWORD gate the web UI with HTTP basic auth. Published on
+  # its HTTP port 3000 (container) → host 3003 (3000 is Semaphore, 3001 is
+  # Uptime Kuma); Caddy terminates TLS in front, so the browser still gets
+  # HTTPS (KasmVNC needs a secure context for clipboard etc). PUID/PGID=0 →
+  # /config lands homelab-owned (Syncthing/Bambuddy pattern). shm_size: 1g
+  # per LSIO's desktop guidance (the 64M default crashes GUI apps).
+  #
+  # LSIO's "privileged access to the host / passwordless sudo in the terminal"
+  # warning is written for ROOTFUL docker, where container-root == host-root.
+  # Here it's rootless podman: container-root maps to the unprivileged homelab
+  # uid, no --privileged, no seccomp=unconfined — the desktop's "root" is
+  # contained to homelab exactly like code-server's terminal already is, and
+  # it's LAN-only + password-gated. Same accepted trust model, no host escape.
+  webtop:
+    image: "lscr.io/linuxserver/webtop@sha256:2caa5d4e469994bcc1fe969587a7016d837bc4c0c5ebf559699c9cabb4cbc5ee"
+    ui_port: 3003
+    container_port: 3000
+    shm_size: 1g
+    volumes:
+      - /opt/homelab/appdata/webtop:/config:Z
+    env:
+      PUID: "0"
+      PGID: "0"
+      CUSTOM_USER: admin
+      PASSWORD: "{{ vault_webtop_password }}"
+    require_vault: [vault_webtop_password]
+    backup_paths: [webtop]

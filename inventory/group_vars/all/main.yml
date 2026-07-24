@@ -170,3 +170,4 @@ caddy_services:
   glances:     { backend: "{{ hostvars[infra_host].ansible_host }}:61208", group: Infra, icon: glances, host_header: "localhost:61208" }
   code-server: { backend: "{{ hostvars[infra_host].ansible_host }}:8443", group: Infra, icon: code-server }
   semaphore:   { backend: "{{ hostvars[infra_host].ansible_host }}:3000", group: Infra, icon: semaphore }
+  webtop:      { backend: "{{ hostvars[infra_host].ansible_host }}:3003", group: Infra, icon: webtop }

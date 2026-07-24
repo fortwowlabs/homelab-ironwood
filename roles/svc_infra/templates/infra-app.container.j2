@@ -31,6 +31,12 @@ PublishPort={{ ansible_host }}:{{ p.port }}:{{ p.port }}/{{ p.protocol }}
 {% for volume in item.value.volumes %}
 Volume={{ volume }}
 {% endfor %}
+{% if item.value.shm_size is defined %}
+# /dev/shm sizing — desktop/browser images (e.g. Webtop) crash with the 64M
+# default. Passed through as a raw podman flag; Quadlet's own ShmSize= key
+# isn't available in this podman version (same reason --pid=host was raw).
+PodmanArgs=--shm-size={{ item.value.shm_size }}
+{% endif %}
 Environment=TZ={{ timezone }}
 {% for env_key, env_value in (item.value.env | default({})).items() %}
 Environment="{{ env_key }}={{ env_value }}"
