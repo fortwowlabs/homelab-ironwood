@@ -41,7 +41,7 @@ SIGNATURES = {
     "jwt": re.compile(r"\beyJ[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\.[A-Za-z0-9_-]{20,}\b"),
 }
 PLACEHOLDER_RE = re.compile(
-    r"(?i)^(?:\{\{|\$|<|x{4,}|replace|change[_-]?me|example|dummy|fixture|"
+    r"(?i)^(?:\{\{|\$|<|!(?:env_var|secret)$|[|>][+-]?$|x{4,}|replace|change[_-]?me|example|dummy|fixture|"
     r"redacted|not[_-]?a[_-]?secret|vault_|false$|true$|none$)"
 )
 REDACTION_MARKER_RE = re.compile(r"(?i)(?:redact|replace|x{4,}|dummy|example)")

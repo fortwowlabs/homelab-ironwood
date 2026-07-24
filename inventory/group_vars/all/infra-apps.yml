@@ -113,3 +113,13 @@ infra_apps:
     volumes:
       - /opt/homelab/appdata/home-assistant:/config:Z
     backup_paths: [home-assistant]
+
+  # IT Tools (https://it-tools.tech/) — a static/stateless collection of
+  # developer utilities (JSON/base64/regex/hash tools etc). No volumes, no
+  # env, no backup: nothing it renders is ever persisted server-side.
+  it-tools:
+    image: "ghcr.io/corentinth/it-tools@sha256:8b8128748339583ca951af03dfe02a9a4d7363f61a216226fc28030731a5a61f"
+    ui_port: 8082
+    container_port: 80
+    volumes: []
+    backup_paths: []
