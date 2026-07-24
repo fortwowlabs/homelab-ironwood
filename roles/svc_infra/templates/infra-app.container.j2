@@ -25,7 +25,7 @@ Volume={{ volume }}
 {% endfor %}
 Environment=TZ={{ timezone }}
 {% for env_key, env_value in (item.value.env | default({})).items() %}
-Environment={{ env_key }}={{ env_value }}
+Environment="{{ env_key }}={{ env_value }}"
 {% endfor %}
 
 [Service]

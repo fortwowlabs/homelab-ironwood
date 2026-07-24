@@ -163,3 +163,8 @@ caddy_services:
   home-assistant: { backend: "{{ hostvars[infra_host].ansible_host }}:8123", group: Infra, icon: home-assistant }
   immich:      { backend: "{{ hostvars[infra_host].ansible_host }}:2283", group: Media, icon: immich }
   it-tools:    { backend: "{{ hostvars[infra_host].ansible_host }}:8082", group: Infra, icon: it-tools }
+  # host_header: glances' MCP transport (/mcp/sse) enforces a localhost-only
+  # Host header as DNS-rebinding protection (no config flag to widen it) —
+  # its plain REST API has no such check. Caddy rewrites the outbound Host
+  # header so https://glances.{{ service_domain }}/mcp/sse works externally too.
+  glances:     { backend: "{{ hostvars[infra_host].ansible_host }}:61208", group: Infra, icon: glances, host_header: "localhost:61208" }

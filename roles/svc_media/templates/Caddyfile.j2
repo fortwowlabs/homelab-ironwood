@@ -32,6 +32,9 @@ https://{{ name }}.{{ service_domain }} {
 			tls_insecure_skip_verify
 		}
 {% endif %}
+{% if svc.host_header is defined %}
+		header_up Host {{ svc.host_header }}
+{% endif %}
 	}
 }
 

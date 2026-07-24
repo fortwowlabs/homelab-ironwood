@@ -123,3 +123,38 @@ infra_apps:
     container_port: 80
     volumes: []
     backup_paths: []
+
+  # Glances — host monitoring, web UI/REST API, and (per the LLM-TODO-LIST
+  # ask "configured such that tools like yourself can connect to it") its
+  # built-in MCP server: http://<svc-infra-ip>:61208/mcp/sse (see
+  # caddy_services.glances in main.yml for why that needs a Caddy
+  # host_header rewrite).
+  #
+  # Deliberately NOT pid_mode: host: CPU/memory/disk come from /proc/stat and
+  # /proc/meminfo, which are already host-wide inside any container (they
+  # aren't PID-namespace-scoped) — confirmed live. What pid_mode: host would
+  # ADD is the full host process list, at a real cost: every rootless
+  # container on this VM runs as the same UID (homelab/svc_uid), so sharing
+  # the host PID namespace lets ANY process in this container read
+  # /proc/<pid>/environ for every sibling container — confirmed live (read
+  # NetBox's live DB_PASSWORD from inside glances this way during review).
+  # Not worth trading real, standing secret exposure for a process list.
+  #
+  # Deliberately NOT wired to the Podman API socket either (no container-
+  # level stats): tried bind-mounting /run/user/<uid>/podman(.sock) with
+  # DOCKER_HOST pointed at it, but the container's mapped UID (confirmed via
+  # /proc/<pid>/uid_map: container 0 -> host svc_uid, matching the socket's
+  # real owner) still gets a plain EACCES connecting to it — no SELinux
+  # denial either (checked with dontaudit disabled) — root cause not
+  # resolved. Not worth chasing further: the security review had already
+  # flagged that a `:ro` bind mount doesn't limit what RPCs a live socket
+  # connection can issue (blast radius on a Glances compromise = control of
+  # every container on this host), so dropping it entirely is the right
+  # outcome anyway, not just a workaround for the permission issue.
+  glances:
+    image: "docker.io/nicolargo/glances@sha256:58651aabedf62db8bfc1d252f8d3889675dfcdb5d0ad1c177ae5879c21626f3a"
+    ui_port: 61208
+    volumes: []
+    env:
+      GLANCES_OPT: "-w --enable-mcp"
+    backup_paths: []
