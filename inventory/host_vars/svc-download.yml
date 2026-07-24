@@ -4,9 +4,12 @@
 # download_vms group — renaming that host means renaming this file too. See
 # "Renaming a service VM" in docs/operations.md.
 vm_id:      131
-vm_cores:   4
-vm_memory:  6144
+vm_cores:   6
+vm_memory:  8192
 vm_disk_gb: 160
+# RAM bumped 6G->8G (2026-07-23) ahead of adding jdownloader to the jail —
+# archive extraction is memory-spiky. Cores bumped 4->6 to match
+# svc-infra/svc-media. thurgadin had ~20G free at resize time.
 vm_startup: "order=3,up=30"
 service_guarded_egress: true
 service_repo_packages: [epel-release]
