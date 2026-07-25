@@ -1,0 +1,288 @@
+# First-login walkthrough
+
+Every service, in the order to do them. The order is not arbitrary — several
+services depend on another being set up first, and doing them out of order means
+redoing work.
+
+**Prerequisites verified 2026-07-25** — both are already done, so you can start
+at Phase 1:
+
+- DNS: all 37 service names resolve to `192.168.1.30` via dnsmasq, the pfSense
+  override, and the normal client path. The router override is working.
+- TLS: the workstation already trusts Caddy's internal CA (verified handshake,
+  no `-k` needed). Other devices still need Step 0.1.
+
+Setup guide for the router side, if you ever rebuild it:
+[dns-pfsense-caddy.md](dns-pfsense-caddy.md).
+
+**Legend**
+
+- 🔑 **Vault** — the password already exists. Retrieve it, log in, done.
+- 🆕 **Create** — you choose the credentials on first visit.
+- ⚙️ **Configure** — needs more than a login.
+- ✅ **Nothing to do** — no auth, or already configured (verified).
+
+---
+
+## Phase 0 — Prerequisites
+
+Do both before touching any service.
+
+### 0.1 Trust the Caddy internal CA
+
+Otherwise every single page throws a certificate warning and some apps
+(Immich/Nextcloud mobile clients especially) refuse to connect at all.
+
+The cert is at the repo root as `fort.wow-root-ca.crt` (gitignored). On macOS:
+
+```bash
+sudo security add-trusted-cert -d -r trustRoot \
+    -k /Library/Keychains/System.keychain fort.wow-root-ca.crt
+```
+
+Per-platform instructions, including the extra iOS "full trust" toggle, are in
+[dns-pfsense-caddy.md](dns-pfsense-caddy.md#step-2--trust-the-caddy-internal-ca).
+
+### 0.2 Open the vault
+
+```bash
+make vault-edit
+```
+
+Keep it open in another window — Phases 2 and 4 read from it. Values are never
+printed anywhere else, and the file is gitignored.
+
+---
+
+## Phase 1 — Vaultwarden first 🆕
+
+**Do this before anything else.** It is your password manager, so setting it up
+first means every credential from here on gets saved as you go, instead of being
+collected and entered later.
+
+1. Go to **https://vaultwarden.fort.wow/admin**
+2. Log in with the plaintext admin token — vault key
+   `vault_vaultwarden_admin_token_plaintext`.
+   (The vault also holds `vault_vaultwarden_admin_token`, which is the Argon2
+   *hash* of it. That one is what the container reads; you cannot log in with it.)
+3. In the admin panel, **invite your own email address**.
+4. No SMTP is configured, so no mail is sent and no link appears. Instead go to
+   **https://vaultwarden.fort.wow/#/signup** and register using that exact
+   invited address.
+
+Self-registration is switched off permanently and does not need toggling —
+admin invites bypass it by design. If `/admin` gives 404 instead of a login
+page, the admin token did not reach the container.
+
+> From here on: **save each credential into Vaultwarden as you create it.**
+
+---
+
+## Phase 2 — Log in with existing vault passwords 🔑
+
+These already have accounts. Retrieve, log in, save to Vaultwarden. Any order.
+
+| Service | URL | Username | Vault key |
+|---|---|---|---|
+| Nextcloud | nextcloud.fort.wow | `admin` | `vault_nextcloud_admin_password` |
+| Grafana | grafana.fort.wow | `admin` | `vault_grafana_admin_password` |
+| Semaphore | semaphore.fort.wow | `admin` | `vault_semaphore_admin_password` |
+| NetBox | netbox.fort.wow | `admin` | `vault_netbox_superuser_password` |
+| Webtop | webtop.fort.wow | `admin` | `vault_webtop_password` (HTTP basic auth) |
+| code-server | code-server.fort.wow | — | `vault_codeserver_password` (password only) |
+| Beszel | beszel.fort.wow | `admin@fort.wow` | already created — see `LLM-TODO-LIST.md`; change the password on first login |
+
+Change the Beszel password once you are in; it was set during an earlier session
+and is recorded in plaintext in `LLM-TODO-LIST.md`.
+
+---
+
+## Phase 3 — Media stack 🆕 (order matters here)
+
+**Jellyfin must come first.** Seerr authenticates *against* Jellyfin, so setting
+up Seerr first means redoing it.
+
+Verified 2026-07-25: Jellyfin's startup wizard has **not** been completed yet.
+
+### 3.1 Jellyfin — https://jellyfin.fort.wow
+Runs the first-run wizard: create your admin user, then add libraries. The NFS
+media paths inside the container are:
+
+- Movies → `/srv/media/movies`
+- TV → `/srv/media/tv`
+- Music → `/srv/media/music`
+
+(Confirm against what actually exists under `/srv/media` — the wizard will show
+you.) Set the metadata language, then finish. Save the credentials.
+
+### 3.2 Seerr — https://seerr.fort.wow
+Choose **Sign in with Jellyfin**, point it at `http://192.168.1.30:8096`, and
+use the Jellyfin admin account you just made. Then connect Sonarr and Radarr
+when prompted — see Phase 4 for their addresses.
+
+### 3.3 Audiobookshelf — https://abs.fort.wow
+Creates the root user on first visit. Library path `/srv/media/audiobooks`.
+
+### 3.4 RomM — https://romm.fort.wow
+First-run admin account. Its database credentials are already in the vault
+(`vault_romm_*`) and are not the same as the web login.
+
+### 3.5 Calibre-Web — https://calibre-web.fort.wow ⚙️
+Ships with a **default account `admin` / `admin123`**. Log in and change it
+immediately — this is the only service with a publicly-known default.
+
+---
+
+## Phase 4 — Download stack ✅ / ⚙️
+
+**Verified 2026-07-25:** Sonarr, Radarr and Prowlarr are configured with
+`AuthenticationMethod=Forms` and `AuthenticationRequired=DisabledForLocalAddresses`.
+Because Caddy proxies from a LAN address, **you will not be prompted to log in**
+from inside the network. Nothing to do for those three.
+
+| Service | URL | State |
+|---|---|---|
+| Sonarr | sonarr.fort.wow | ✅ no login needed on LAN |
+| Radarr | radarr.fort.wow | ✅ no login needed on LAN |
+| Prowlarr | prowlarr.fort.wow | ✅ no login needed on LAN |
+| SABnzbd | sabnzbd.fort.wow | ⚠️ **returns 403 through Caddy** — see below. Usenet provider already configured (`news.eweka.nl`) |
+| Bazarr | bazarr.fort.wow | 🆕 no config yet — first-run wizard |
+| LazyLibrarian | lazylibrarian.fort.wow | 🆕 no config yet — first-run wizard |
+| jDownloader | jdownloader.fort.wow | ⚙️ noVNC desktop; sign in to MyJDownloader if you use it |
+
+Internal addresses for wiring these together — they all share the VPN jail's
+network namespace, so they reach each other on **localhost**:
+
+- Sonarr `localhost:8989`, Radarr `localhost:7878`, Prowlarr `localhost:9696`,
+  SABnzbd `localhost:8080`
+
+### SABnzbd's 403 ⚠️
+
+Verified 2026-07-25: `https://sabnzbd.fort.wow` returns
+**403 "Access denied - Hostname verification failed"**. This is SABnzbd's own
+anti-DNS-rebinding host allowlist, not DNS and not Caddy — its `host_whitelist`
+in `/srv/appdata/sabnzbd/sabnzbd.ini` contains only the container's hostname, so
+it rejects the `sabnzbd.fort.wow` Host header.
+
+Fix it in the UI (reachable directly at **http://192.168.1.31:8080**) under
+*Config > General > Host whitelist*, adding `sabnzbd.fort.wow`. This is a good
+candidate for automation — see
+[automation-opportunities.md](automation-opportunities.md).
+
+**Order within this phase:**
+
+1. **SABnzbd** — fix the 403 above first; the arrs need a reachable download
+   client. Its Usenet provider is already configured.
+2. **Prowlarr** — add indexers, then use *Settings > Apps* to push them to
+   Sonarr/Radarr automatically.
+3. **Bazarr** — connect to Sonarr and Radarr (localhost addresses above).
+   Its API keys are read automatically by Recyclarr, but Bazarr's own setup is
+   manual.
+
+Recyclarr already syncs TRaSH-Guides quality profiles into Sonarr/Radarr
+automatically — no UI, nothing to configure.
+
+---
+
+## Phase 5 — Infra apps 🆕
+
+Any order; none depend on each other.
+
+| Service | URL | What to do |
+|---|---|---|
+| Immich | immich.fort.wow | Create admin on first visit. Library is on NFS at `/srv/media/photos` |
+| Paperless-ngx | paperless.fort.wow | Create a superuser (see the automation note below — this could be removed) |
+| Uptime Kuma | uptime-kuma.fort.wow | Create admin, then add monitors for the services you care about |
+| Mealie | mealie.fort.wow | Create admin on first visit |
+| Bambuddy | bambuddy.fort.wow | Create admin; add your Bambu printer |
+| Syncthing | syncthing.fort.wow | **Set a GUI password immediately** (Actions > Settings > GUI) — it is unauthenticated until you do |
+
+### Home Assistant ⚙️ — the one with a real gotcha
+
+**Do not start at `https://home-assistant.fort.wow`** — it returns HTTP 400
+until it is told to trust the proxy, which is a confusing first experience.
+
+1. Onboard **directly**, bypassing Caddy: **http://192.168.1.32:8123**
+2. Create your account and finish onboarding.
+3. Then add to `/config/configuration.yaml` (via HA's own File Editor add-on, or
+   `podman exec`):
+
+   ```yaml
+   http:
+     use_x_forwarded_for: true
+     trusted_proxies:
+       - 192.168.1.30      # svc-media, where Caddy runs
+   ```
+
+4. Restart Home Assistant. `https://home-assistant.fort.wow` now works.
+
+---
+
+## Phase 6 — No login required ✅
+
+Nothing to do; listed so you know they exist.
+
+| Service | URL | Notes |
+|---|---|---|
+| Homepage | home.fort.wow | Dashboard tiles for everything |
+| IT Tools | it-tools.fort.wow | Offline dev utilities |
+| Glances | glances.fort.wow | Host metrics; REST API at `/api/4/...`, MCP at `/mcp/sse` |
+| Prometheus | prometheus.fort.wow | Scrape targets and raw queries |
+| ntfy | ntfy.fort.wow | Push notifications; deploy alerts already publish here |
+| Cockpit ×3 | cockpit-media / cockpit-dl / cockpit-infra | Log in with your **system** account (`straderb`), not a vault password |
+
+---
+
+## Phase 7 — Minecraft 🎮
+
+Not web services — connect from the Minecraft client:
+
+- `minecraft.fort.wow:25565`
+- `minecraft2.fort.wow:25566`
+
+Both are Paper, latest, 2 GB heap each, LAN-only. Admin commands run on the host
+rather than in a UI:
+
+```bash
+ssh straderb@192.168.1.30
+sudo -u homelab XDG_RUNTIME_DIR=/run/user/10001 \
+    podman exec minecraft rcon-cli whitelist add <player>
+```
+
+Worlds are flushed with `save-off`/`save-all` before each nightly backup tar, so
+backups are consistent.
+
+---
+
+## Phase 8 — Worth doing once everything is up
+
+- **Grafana dashboards** — Prometheus is already wired as the default datasource
+  (health verified). Import dashboard **1860** (Node Exporter Full) from
+  grafana.com for instant host metrics on all three VMs.
+- **Uptime Kuma monitors** — add HTTP checks for the services you care about.
+- **Semaphore** — deployed empty. To run *this* repo's playbooks from its UI, add
+  a project, this git repo, an SSH key, and an inventory.
+- **Immich machine learning** — currently off. svc-infra now has 16 GB, so there
+  is headroom to enable smart search / face detection.
+
+---
+
+## Quick reference: what needs what
+
+```
+Trust CA  ──▶  everything HTTPS
+Vault     ──▶  Phase 2 logins
+Vaultwarden ─▶  (store everything you create from here on)
+Jellyfin  ──▶  Seerr
+SABnzbd   ──▶  Sonarr/Radarr downloads
+Prowlarr  ──▶  Sonarr/Radarr indexers
+Sonarr/Radarr ▶ Bazarr subtitles
+HA direct :8123 ▶ trusted_proxies ▶ HA via Caddy
+```
+
+---
+
+## Could any of this be automated?
+
+Yes — several of these manual steps are avoidable. See
+[automation-opportunities.md](automation-opportunities.md).
