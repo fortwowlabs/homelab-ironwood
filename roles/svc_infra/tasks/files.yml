@@ -435,9 +435,16 @@
     that:
       - (vault_nextcloud_db_password | default('')) | length > 0
       - (vault_nextcloud_admin_password | default('')) | length > 0
+      # Non-empty is not enough: a var still holding its
+      # all_vault.yml.example REPLACE_* placeholder would otherwise sail
+      # through and become the live DB/admin password. Same guard the
+      # infra_secret_apps require_vault assert applies.
+      - not ((vault_nextcloud_db_password | default('')) is match('REPLACE_'))
+      - not ((vault_nextcloud_admin_password | default('')) is match('REPLACE_'))
     fail_msg: >-
       Configure vault_nextcloud_db_password and vault_nextcloud_admin_password
-      (openssl rand -hex 24) in the encrypted inventory.
+      (openssl rand -hex 24) in the encrypted inventory — they must be set and
+      must not still be the REPLACE_* example placeholders.
   no_log: true
   diff: false
 
