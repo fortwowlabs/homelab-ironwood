@@ -185,3 +185,4 @@ caddy_services:
   webtop:      { backend: "{{ hostvars[infra_host].ansible_host }}:3003", group: Infra, icon: webtop }
   prometheus:  { backend: "{{ hostvars[infra_host].ansible_host }}:9091", group: Infra, icon: prometheus }
   grafana:     { backend: "{{ hostvars[infra_host].ansible_host }}:3005", group: Infra, icon: grafana }
+  mealie:      { backend: "{{ hostvars[infra_host].ansible_host }}:9925", group: Infra, icon: mealie }

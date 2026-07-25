@@ -178,6 +178,35 @@ infra_apps:
       GLANCES_OPT: "-w --enable-mcp"
     backup_paths: []
 
+  # Mealie — recipe manager and meal planner, SQLite backend (no postgres
+  # sidecar needed). No mandatory secret: the first visit to the web UI
+  # creates the admin account, so this is a plain infra_apps entry, not
+  # infra_secret_apps.
+  #
+  # PUID/PGID: unlike an image with no privilege-drop story, Mealie's own
+  # docker/entry.sh starts as container-root and ALWAYS gosu-execs down to a
+  # PUID/PGID-owned user before starting the app — defaulting to 911:911, not
+  # 0, when PUID/PGID are unset (confirmed by reading entry.sh in the
+  # v3.21.0 image source). Left at its default, /app/data would land owned by
+  # a subuid-mapped host uid that the homelab backup/read tasks can't touch.
+  # Force PUID/PGID=0, same fix as Syncthing/Bambuddy/Webtop/code-server, so
+  # /app/data lands homelab-owned under rootless podman.
+  #
+  # BASE_URL builds absolute links (password-reset emails, OIDC callback
+  # URL) — set it to the real external hostname instead of the image's
+  # http://localhost:8080 default.
+  mealie:
+    image: "ghcr.io/mealie-recipes/mealie@sha256:4e1e8d98b883009cb849851857e277109c21db1c2d857ae61e14de894f2169ff"
+    ui_port: 9925
+    container_port: 9000
+    volumes:
+      - /opt/homelab/appdata/mealie/data:/app/data:Z
+    env:
+      PUID: "0"
+      PGID: "0"
+      BASE_URL: "https://mealie.{{ service_domain }}"
+    backup_paths: [mealie]
+
 # Secret-bearing single-container services. Structurally identical to
 # infra_apps (same fields, same infra-app.container.j2 template, same
 # firewalld/service-name/backup wiring) with two differences handled in
