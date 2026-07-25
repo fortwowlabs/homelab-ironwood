@@ -81,6 +81,25 @@
 # multi-container services (a database/cache sidecar) declare their own
 # appdata directories in their own tasks, appended below this file over time
 # — see roles/svc_media/tasks/files.yml for that pattern.
+# The two catalogs are merged with combine() at several call sites below (and
+# in backup.yml/verify.yml/defaults). combine() is last-wins, so a key present
+# in both would silently shadow the infra_apps entry EVERYWHERE — its volumes,
+# backup_paths and firewall ports would just vanish, with no error and no
+# symptom until something is missing at runtime. Fail loudly instead.
+- name: Assert the plain and secret infra catalogs share no service names
+  ansible.builtin.assert:
+    that:
+      - infra_duplicate_app_names | length == 0
+    fail_msg: >-
+      infra_apps and infra_secret_apps both declare
+      {{ infra_duplicate_app_names | join(', ') }} — a duplicate name silently
+      shadows the infra_apps entry in every combine() consumer. Rename or
+      remove one of them.
+  vars:
+    infra_duplicate_app_names: >-
+      {{ infra_apps.keys() | list
+         | intersect((infra_secret_apps | default({})).keys() | list) }}
+
 - name: Determine appdata directories required by the infra catalog
   vars:
     # Both the plain and the secret catalog declare appdata as Volume=
@@ -124,8 +143,14 @@
   ansible.builtin.assert:
     that:
       - "lookup('vars', item.1, default='') | string | length > 0"
+      # A var still holding its all_vault.yml.example value
+      # ("REPLACE_openssl_rand_hex_24") is non-empty, so the length check
+      # alone would let it through and deploy the placeholder as the
+      # service's actual, publicly-known password.
+      - "not (lookup('vars', item.1, default='') | string is match('REPLACE_'))"
     fail_msg: >-
-      {{ item.1 }} is empty — configure it in the encrypted inventory
+      {{ item.1 }} is empty or still set to its all_vault.yml.example
+      REPLACE_* placeholder — set a real value in the encrypted inventory
       (needed by infra_secret_apps.{{ item.0.key }}).
   loop: >-
     {{ infra_secret_apps | default({}) | dict2items

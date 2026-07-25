@@ -32,6 +32,26 @@ on_err() {
 }
 trap on_err ERR
 
+# Run a tar command, tolerating exit 1 ("some files differ" — a live app
+# rewrote a file mid-read, e.g. Grafana's or Semaphore's SQLite); the
+# snapshot is still usable, but it is logged as a WARN rather than silently
+# accepted. Only exit 2+ is a real failure. Mirrors backup-dl-appdata.sh.
+# $1 is a label for the log line; the rest is the command to run.
+tar_tolerant() {
+    local label="$1"
+    shift
+    local rc=0
+    "$@" || rc=$?
+    if (( rc >= 2 )); then
+        on_err
+        exit "$rc"
+    fi
+    if (( rc == 1 )); then
+        logger -p daemon.warning -t backup-infra \
+            "WARN: tar reported changed files while archiving ${label} — snapshot kept, may be inconsistent"
+    fi
+}
+
 mkdir -p "$DEST" "$DB_DEST"
 
 # 1. Appdata tars (homelab-owned; this script runs as homelab so no runuser).
@@ -45,7 +65,8 @@ mkdir -p "$DEST" "$DB_DEST"
 {%   set _ = infra_backup_paths.append(backup_path) %}
 {% endfor %}
 for app in{% for backup_path in infra_backup_paths | unique %} {{ backup_path | quote }}{% endfor %}; do
-    tar -C /opt/homelab/appdata -czf "$DEST/${app}-${STAMP}.tar.gz" "$app"
+    tar_tolerant "$app" \
+        tar -C /opt/homelab/appdata -czf "$DEST/${app}-${STAMP}.tar.gz" "$app"
 done
 
 # 2. Database dumps — application-consistent pg_dumpall. POSTGRES_USER is

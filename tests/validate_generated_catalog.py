@@ -146,6 +146,17 @@ def main() -> int:
         if sorted(rendered_ports) != sorted(expected_ports):
             failures.append("firewall: rendered ports do not match proxy-eligible apps")
 
+    # Prometheus (on svc-infra) scrapes this host's node_exporter, so the
+    # backstop has to admit exactly that one source on 9100 — the rule is
+    # single-source by design, not lan_cidr, and nothing else asserted it.
+    infra_host_ip = common["hostvars"]["svc-infra"]["ansible_host"]
+    if not re.search(
+        rf"^define INFRA_HOST = {re.escape(infra_host_ip)}\s*(#.*)?$", backstop, re.MULTILINE
+    ):
+        failures.append("firewall: INFRA_HOST was not defined from the svc-infra inventory address")
+    if not re.search(r"^\s*ip saddr \$INFRA_HOST tcp dport 9100 accept$", backstop, re.MULTILINE):
+        failures.append("firewall: node_exporter scrape rule was not rendered for INFRA_HOST")
+
     backup = environment.get_template(
         "roles/svc_download/templates/backup-dl-appdata.sh.j2"
     ).render(**common)

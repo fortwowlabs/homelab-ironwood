@@ -35,6 +35,26 @@ on_err() {
 }
 trap on_err ERR
 
+# Run a tar command, tolerating exit 1 ("some files differ" — a live app
+# rewrote a file mid-read, e.g. jellyfin's or seerr's SQLite); the snapshot
+# is still usable, but it is logged as a WARN rather than silently accepted.
+# Only exit 2+ is a real failure. Mirrors backup-dl-appdata.sh.
+# $1 is a label for the log line; the rest is the command to run.
+tar_tolerant() {
+    local label="$1"
+    shift
+    local rc=0
+    "$@" || rc=$?
+    if (( rc >= 2 )); then
+        on_err
+        exit "$rc"
+    fi
+    if (( rc == 1 )); then
+        logger -p daemon.warning -t backup-media \
+            "WARN: tar reported changed files while archiving ${label} — snapshot kept, may be inconsistent"
+    fi
+}
+
 mkdir -p "$DB_DEST" "$APP_DEST"
 
 # 1. RomM DB dump (root creds live only inside the db container's env)
@@ -43,10 +63,14 @@ podman exec romm-db sh -c \
     | gzip > "$DB_DEST/romm-$STAMP.sql.gz"
 
 # 2. Appdata tars
-tar -C "$HOME/appdata" -czf "$APP_DEST/jellyfin-config-$STAMP.tar.gz" jellyfin/config
-tar -C "$HOME/appdata" -czf "$APP_DEST/seerr-$STAMP.tar.gz" seerr
-tar -C "$HOME/appdata" -czf "$APP_DEST/calibre-web-automated-$STAMP.tar.gz" calibre-web-automated
-tar -C "$HOME/appdata" -czf "$APP_DEST/romm-appdata-$STAMP.tar.gz" romm/config romm/assets romm/resources
+tar_tolerant jellyfin/config \
+    tar -C "$HOME/appdata" -czf "$APP_DEST/jellyfin-config-$STAMP.tar.gz" jellyfin/config
+tar_tolerant seerr \
+    tar -C "$HOME/appdata" -czf "$APP_DEST/seerr-$STAMP.tar.gz" seerr
+tar_tolerant calibre-web-automated \
+    tar -C "$HOME/appdata" -czf "$APP_DEST/calibre-web-automated-$STAMP.tar.gz" calibre-web-automated
+tar_tolerant romm \
+    tar -C "$HOME/appdata" -czf "$APP_DEST/romm-appdata-$STAMP.tar.gz" romm/config romm/assets romm/resources
 
 # 3. Retention
 find "$DB_DEST" "$APP_DEST" -type f -mtime +{{ backup_retention_days | default(14) }} -delete

@@ -99,6 +99,7 @@ validate-links:
 
 validate-catalog:
 	$(PYTHON) tests/validate_catalog.py
+	$(PYTHON) tests/validate_infra_catalog.py
 	$(PYTHON) tests/validate_generated_catalog.py
 
 validate-provisioning:
