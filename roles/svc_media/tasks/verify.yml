@@ -6,6 +6,7 @@
       ['jellyfin', 'audiobookshelf', 'romm-db', 'romm', 'seerr',
        'calibre-web-automated', 'ntfy', 'homepage', 'node-exporter']
       + (['beszel-agent'] if beszel_agent_enabled | bool else [])
+      + (minecraft_servers.keys() | list)
     }}
   changed_when: false
 
@@ -18,6 +19,18 @@
   retries: 6
   delay: 10
   until: media_jellyfin_gate.status == 200
+
+# Minecraft speaks a raw TCP protocol, not HTTP, so a URI probe like
+# Jellyfin's doesn't apply — confirm each server's LAN-published port
+# actually accepts connections instead.
+- name: Verify Minecraft servers accept TCP connections
+  ansible.builtin.wait_for:
+    host: "{{ ansible_host }}"
+    port: "{{ item.value.port }}"
+    timeout: 30
+  loop: "{{ minecraft_servers | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
 
 - name: Verify containers see NFS data and remove every write probe
   ansible.builtin.command:

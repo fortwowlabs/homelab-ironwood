@@ -1,7 +1,9 @@
 {{ ansible_managed | comment }}
 # {{ service_domain }} resolver — RENDERED from roles/svc_media/templates/
 # dnsmasq-fortwow.conf.j2, iterating the media/infra catalog and the same
-# proxy-enabled download catalog as Caddy. This box is authoritative for
+# proxy-enabled download catalog as Caddy, plus extra_dns_records for
+# non-HTTP services that have no Caddy vhost to hang a name off of (see
+# below). This box is authoritative for
 # {{ service_domain }} only; pfSense
 # forwards the domain here (Domain Override) and Tailscale split-DNS points the
 # tailnet here too — see docs/services.md.
@@ -27,4 +29,14 @@ address=/{{ name }}.{{ service_domain }}/{{ ansible_host }}
 {% endfor %}
 {% for name, app in download_apps | dictsort if app.proxy %}
 address=/{{ name }}.{{ service_domain }}/{{ ansible_host }}
+{% endfor %}
+
+# Non-HTTP services with no Caddy vhost (raw TCP/UDP protocols — Caddy only
+# proxies HTTP(S)) get a plain A record here instead, via extra_dns_records
+# (inventory/group_vars/all/minecraft.yml today; any future non-HTTP
+# service appends to that same list rather than editing this template).
+# `host` is an inventory_hostname, resolved through hostvars — never a
+# literal IP — exactly like the physical-host records above.
+{% for rec in extra_dns_records | default([]) %}
+address=/{{ rec.name }}.{{ service_domain }}/{{ hostvars[rec.host].ansible_host }}
 {% endfor %}
