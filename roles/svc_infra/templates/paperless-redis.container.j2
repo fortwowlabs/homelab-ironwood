@@ -6,14 +6,25 @@ Description=Paperless-ngx Redis broker
 Image={{ paperless_images.redis }}
 ContainerName=paperless-redis
 Network=paperless.network
-# valkey (redis-wire-compatible) broker — see paperless_images in apps.yml
-# for why NOT the stock redis image (its non-root user can't write this
-# homelab-owned bind mount under rootless podman → MISCONF wedges the broker).
-# Its own dir, deliberately OUTSIDE appdata/paperless/, so the nightly
-# `tar paperless` backup doesn't sweep it — just a cache/task-queue broker,
-# not worth backing up.
-Volume=%h/appdata/paperless-redis:/data:Z
+# valkey (redis-wire-compatible), and NO persistent volume — persistence is
+# disabled outright. This is Celery's task broker and a cache; nothing here is
+# worth surviving a restart. Follows immich-redis and nextcloud-redis, which
+# are volume-less for the same reason.
+#
+# History worth keeping, because the first fix was wrong: commit 06ee437
+# switched this from stock redis to valkey after the broker wedged with
+# MISCONF, and recorded the lesson as "use valkey, never stock redis". That
+# was the wrong root cause. Valkey's entrypoint ALSO drops from container-root
+# to its own unprivileged user, which under rootless podman is a subuid
+# (observed: host uid 590822), never the homelab user owning the bind mount —
+# so the RDB child still could not create its temp file, every save failed,
+# and stop-writes-on-bgsave-error wedged the broker again. It re-broke on
+# 2026-07-24 and silently blocked Paperless's migrations (and therefore its
+# superuser creation) until 2026-07-25. Removing the volume removes the whole
+# failure mode; the image choice was never what mattered.
 Environment=TZ={{ timezone }}
+# --save "" disables RDB snapshots; --appendonly no disables AOF.
+Exec=valkey-server --save "" --appendonly no
 
 [Service]
 Restart=on-failure

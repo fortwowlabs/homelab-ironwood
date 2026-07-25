@@ -183,13 +183,10 @@
     mode: "0755"
   loop: [data, media, export, consume]
 
-- name: Create the Paperless-ngx redis appdata directory
-  ansible.builtin.file:
-    path: /opt/homelab/appdata/paperless-redis
-    state: directory
-    owner: "{{ svc_uid }}"
-    group: "{{ svc_gid }}"
-    mode: "0755"
+# No paperless-redis appdata directory: that broker is volume-less on purpose
+# (see paperless-redis.container.j2 — a bind mount is what wedged it twice).
+# The old directory is left on disk rather than deleted; it holds nothing but a
+# stale dump.rdb owned by an unreachable subuid.
 
 - name: Install the Paperless-ngx private network Quadlet
   ansible.builtin.copy:
@@ -209,13 +206,20 @@
     mode: "0644"
   register: infra_paperless_redis_template
 
-- name: Require the Paperless-ngx secret key
+- name: Require the Paperless-ngx secrets
   ansible.builtin.assert:
     that:
       - (vault_paperless_secret_key | default('')) | length > 0
+      - (vault_paperless_admin_password | default('')) | length > 0
+      # Non-empty alone would let an all_vault.yml.example placeholder through
+      # and make it the live superuser password.
+      - not ((vault_paperless_secret_key | default('')) is match('REPLACE_'))
+      - not ((vault_paperless_admin_password | default('')) is match('REPLACE_'))
     fail_msg: >-
-      Configure vault_paperless_secret_key (openssl rand -hex 32) in the
-      encrypted inventory.
+      Configure vault_paperless_secret_key (openssl rand -hex 32) and
+      vault_paperless_admin_password (openssl rand -hex 24) in the encrypted
+      inventory — both must be set and neither may still be a REPLACE_*
+      placeholder.
   no_log: true
   diff: false
 

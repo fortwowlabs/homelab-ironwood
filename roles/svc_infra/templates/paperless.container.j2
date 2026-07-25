@@ -27,6 +27,14 @@ Environment=PAPERLESS_URL=https://paperless.{{ service_domain }}
 Environment=PAPERLESS_TIME_ZONE={{ timezone }}
 Environment=PAPERLESS_OCR_LANGUAGE=eng
 Environment=PAPERLESS_SECRET_KEY={{ vault_paperless_secret_key }}
+# Superuser seeding. Paperless creates this account on start ONLY when no
+# superuser exists, so it is inert on an already-configured instance and
+# changing the password here does NOT rotate an existing one — do that in the
+# UI. Removes the "create a superuser by hand" first-run step, matching how
+# NetBox and Nextcloud already arrive with an admin account from the vault.
+Environment=PAPERLESS_ADMIN_USER=admin
+Environment=PAPERLESS_ADMIN_MAIL=admin@{{ service_domain }}
+Environment=PAPERLESS_ADMIN_PASSWORD={{ vault_paperless_admin_password }}
 
 [Service]
 Restart=on-failure
