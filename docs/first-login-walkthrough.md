@@ -90,6 +90,8 @@ These already have accounts. Retrieve, log in, save to Vaultwarden. Any order.
 | NetBox | netbox.fort.wow | `admin` | `vault_netbox_superuser_password` |
 | Webtop | webtop.fort.wow | `admin` | `vault_webtop_password` (HTTP basic auth) |
 | code-server | code-server.fort.wow | — | `vault_codeserver_password` (password only) |
+| **Paperless-ngx** | paperless.fort.wow | `admin` | `vault_paperless_admin_password` |
+| **Mealie** | mealie.fort.wow | `admin@fort.wow` | `vault_mealie_admin_password` |
 | Beszel | beszel.fort.wow | `admin@fort.wow` | already created — see `LLM-TODO-LIST.md`; change the password on first login |
 
 Change the Beszel password once you are in; it was set during an earlier session
@@ -145,7 +147,7 @@ from inside the network. Nothing to do for those three.
 | Sonarr | sonarr.fort.wow | ✅ no login needed on LAN |
 | Radarr | radarr.fort.wow | ✅ no login needed on LAN |
 | Prowlarr | prowlarr.fort.wow | ✅ no login needed on LAN |
-| SABnzbd | sabnzbd.fort.wow | ⚠️ **returns 403 through Caddy** — see below. Usenet provider already configured (`news.eweka.nl`) |
+| SABnzbd | sabnzbd.fort.wow | ✅ reachable; Usenet provider already configured (`news.eweka.nl`) |
 | Bazarr | bazarr.fort.wow | 🆕 no config yet — first-run wizard |
 | LazyLibrarian | lazylibrarian.fort.wow | 🆕 no config yet — first-run wizard |
 | jDownloader | jdownloader.fort.wow | ⚙️ noVNC desktop; sign in to MyJDownloader if you use it |
@@ -156,23 +158,12 @@ network namespace, so they reach each other on **localhost**:
 - Sonarr `localhost:8989`, Radarr `localhost:7878`, Prowlarr `localhost:9696`,
   SABnzbd `localhost:8080`
 
-### SABnzbd's 403 ⚠️
-
-Verified 2026-07-25: `https://sabnzbd.fort.wow` returns
-**403 "Access denied - Hostname verification failed"**. This is SABnzbd's own
-anti-DNS-rebinding host allowlist, not DNS and not Caddy — its `host_whitelist`
-in `/srv/appdata/sabnzbd/sabnzbd.ini` contains only the container's hostname, so
-it rejects the `sabnzbd.fort.wow` Host header.
-
-Fix it in the UI (reachable directly at **http://192.168.1.31:8080**) under
-*Config > General > Host whitelist*, adding `sabnzbd.fort.wow`. This is a good
-candidate for automation — see
-[automation-opportunities.md](automation-opportunities.md).
-
 **Order within this phase:**
 
-1. **SABnzbd** — fix the 403 above first; the arrs need a reachable download
-   client. Its Usenet provider is already configured.
+1. **SABnzbd** — nothing to do. It used to return 403 "Hostname verification
+   failed" through Caddy; the deploy now keeps its host allowlist correct, and
+   self-heals if the container is recreated (which changes the hostname it
+   would otherwise trust).
 2. **Prowlarr** — add indexers, then use *Settings > Apps* to push them to
    Sonarr/Radarr automatically.
 3. **Bazarr** — connect to Sonarr and Radarr (localhost addresses above).
@@ -191,30 +182,20 @@ Any order; none depend on each other.
 | Service | URL | What to do |
 |---|---|---|
 | Immich | immich.fort.wow | Create admin on first visit. Library is on NFS at `/srv/media/photos` |
-| Paperless-ngx | paperless.fort.wow | Create a superuser (see the automation note below — this could be removed) |
 | Uptime Kuma | uptime-kuma.fort.wow | Create admin, then add monitors for the services you care about |
-| Mealie | mealie.fort.wow | Create admin on first visit |
 | Bambuddy | bambuddy.fort.wow | Create admin; add your Bambu printer |
 | Syncthing | syncthing.fort.wow | **Set a GUI password immediately** (Actions > Settings > GUI) — it is unauthenticated until you do |
 
-### Home Assistant ⚙️ — the one with a real gotcha
+### Home Assistant 🆕
 
-**Do not start at `https://home-assistant.fort.wow`** — it returns HTTP 400
-until it is told to trust the proxy, which is a confusing first experience.
+Previously this returned a bare HTTP 400 through Caddy until `trusted_proxies`
+was hand-edited in. The deploy now writes that block itself (as a marked,
+idempotent section it will not clobber your automations), so
+**https://home-assistant.fort.wow works directly** — just create your account.
 
-1. Onboard **directly**, bypassing Caddy: **http://192.168.1.32:8123**
-2. Create your account and finish onboarding.
-3. Then add to `/config/configuration.yaml` (via HA's own File Editor add-on, or
-   `podman exec`):
-
-   ```yaml
-   http:
-     use_x_forwarded_for: true
-     trusted_proxies:
-       - 192.168.1.30      # svc-media, where Caddy runs
-   ```
-
-4. Restart Home Assistant. `https://home-assistant.fort.wow` now works.
+If you ever add your own top-level `http:` key to `configuration.yaml` by hand,
+the role stands down rather than creating a duplicate key that would stop HA
+booting, and prints a note telling you to add `trusted_proxies` yourself.
 
 ---
 
@@ -256,9 +237,10 @@ backups are consistent.
 
 ## Phase 8 — Worth doing once everything is up
 
-- **Grafana dashboards** — Prometheus is already wired as the default datasource
-  (health verified). Import dashboard **1860** (Node Exporter Full) from
-  grafana.com for instant host metrics on all three VMs.
+- **Grafana dashboards** — a *Homelab nodes* dashboard is now provisioned
+  automatically (CPU, memory, filesystem, network, load and uptime for all three
+  VMs, with a Host selector). Nothing to import. Add more by dropping JSON into
+  `roles/svc_infra/files/grafana-dashboards/`.
 - **Uptime Kuma monitors** — add HTTP checks for the services you care about.
 - **Semaphore** — deployed empty. To run *this* repo's playbooks from its UI, add
   a project, this git repo, an SSH key, and an inventory.

@@ -1,11 +1,20 @@
 # What else could be automated
 
+> **Status 2026-07-25 — the recommended batch has been implemented and
+> deployed.** Tier 1 (SABnzbd, Home Assistant), Tier 2.1/2.2 (Paperless and
+> Mealie admin seeding) and Tier 3.1 (Grafana dashboards) are all done; the
+> walkthrough no longer lists them as manual steps. Implementing them also
+> uncovered two live faults not visible from reading the config — see
+> "What implementing this found" at the end. The rest of this page is kept as
+> the reasoning record, and the deliberately-not-automated items still stand.
+
 Answering "is there anything you can set up more?" — yes. Below is everything in
 [first-login-walkthrough.md](first-login-walkthrough.md) that does **not** have
 to be a manual UI step, ranked by value, with the honest risk of each.
 
-Nothing here has been implemented. Several touch services that already hold live
-state, so they need your go-ahead rather than being done silently.
+Written before implementation; the status note above records what was actually
+done. Several of these touch services holding live state, which is why they were
+proposed rather than done silently.
 
 **Summary:** of ~20 manual steps in the walkthrough, roughly **8 could be
 eliminated** and 2 more partly so. The rest genuinely require a human (choosing
@@ -174,3 +183,47 @@ remaining would be a genuine human decision rather than a chore.
 Deferred deliberately: Calibre-Web and Syncthing passwords (change by hand —
 automating them is more fragile than the problem), and Uptime Kuma monitors
 (no supported provisioning path).
+
+---
+
+## What implementing this found (2026-07-25)
+
+Two faults that neither the config nor `make verify` revealed, both surfaced
+only by deploying the change and checking the result:
+
+**Paperless had been broken for a day.** Seeding its superuser did nothing at
+first, because `paperless-redis` had been wedged since 2026-07-24 06:40 with
+`MISCONF ... unable to persist to disk`, which blocked Django's migrations
+entirely. Every health check was green — the container was "up", the service
+was "active", and the Caddy smoke test passed — while the application could not
+complete startup.
+
+That is the same incident commit `06ee437` was supposed to have fixed. Its
+recorded lesson, *"use valkey, never stock redis"*, blamed the wrong thing:
+valkey's entrypoint also drops from container-root to its own unprivileged
+user, which under rootless podman is a subuid that can never own a
+homelab-owned bind mount. The image was never the problem — the **volume** was.
+Fixed by removing it and disabling persistence, matching `immich-redis` and
+`nextcloud-redis`. The same latent bug was fixed in `nextcloud-redis` earlier
+the same day, found the same way.
+
+**Mealie's public default credentials were live.** `changeme@example.com` /
+`MyPassword` accepted logins on the LAN. Worth stating plainly: this was found
+by *trying it*, not by reading the catalog, which looked entirely reasonable.
+
+The lesson for both: a service being deployed, active and returning 200 is not
+evidence that it works. Several of the checks in this repo confirm the
+container is running, not that the application is functional.
+
+## Still deliberately not automated
+
+Unchanged from the analysis above:
+
+- **Calibre-Web** `admin` / `admin123` — no env-var override; automating means
+  writing to its SQLite `app.db`, which is more fragile than the 30-second
+  manual change. **Still live — change it early.**
+- **Syncthing** GUI password — unauthenticated until set; needs a bcrypt hash
+  written into a file Syncthing rewrites itself. **Still live — set it early.**
+- **Uptime Kuma monitors** — no supported provisioning path.
+- Everything in Tier 4: account creation where only you should know the
+  password, indexer credentials, printer pairing, Semaphore's project wiring.
