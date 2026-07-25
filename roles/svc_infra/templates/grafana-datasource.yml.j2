@@ -9,8 +9,23 @@
 # (LAN + firewalld only), same trust model as every other backend here.
 apiVersion: 1
 
+# Grafana stores a provisioned datasource's uid in its own database. This one
+# was first provisioned WITHOUT an explicit uid, so Grafana generated a random
+# one; adding `uid: prometheus` below then made provisioning fail outright at
+# boot with "Datasource provisioning error: data source not found", taking the
+# whole container down. deleteDatasources runs before the inserts and clears
+# the old record so it is recreated with the stable uid. Harmless to leave in
+# place afterwards — it only removes the entry this file immediately recreates.
+deleteDatasources:
+  - name: Prometheus
+    orgId: 1
+
 datasources:
   - name: Prometheus
+    # Explicit uid so provisioned dashboards can bind to this datasource by a
+    # stable identifier. Without one Grafana generates a random uid per
+    # install, and every dashboard JSON would break on a rebuild.
+    uid: prometheus
     type: prometheus
     access: proxy
     url: http://host.containers.internal:9091

@@ -1,0 +1,23 @@
+{{ ansible_managed | comment }}
+# Grafana dashboard provisioning — loads every dashboard JSON dropped into
+# .../provisioning/dashboards/ at boot, so a rebuilt Grafana comes back with
+# its dashboards already there instead of needing a manual UI import. Same
+# mechanism as grafana-datasource.yml.j2 next to it.
+#
+# allowUiUpdates: false and a foldersFromFilesStructure-free flat layout keep
+# the dashboards owned by this repo — edits made in the UI are reverted on
+# restart, which is the intent: the file is the source of truth. Copy a
+# dashboard to a new name in the UI if you want to experiment.
+apiVersion: 1
+
+providers:
+  - name: homelab
+    orgId: 1
+    folder: Homelab
+    type: file
+    disableDeletion: false
+    allowUiUpdates: false
+    updateIntervalSeconds: 60
+    options:
+      path: /etc/grafana/provisioning/dashboards
+      foldersFromFilesStructure: false

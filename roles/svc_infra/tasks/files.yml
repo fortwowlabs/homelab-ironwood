@@ -612,6 +612,36 @@
     mode: "0644"
   register: infra_grafana_datasource
 
+- name: Create the Grafana dashboard provisioning directory
+  ansible.builtin.file:
+    path: /opt/homelab/appdata/grafana/provisioning/dashboards
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+
+- name: Render the Grafana dashboard provider
+  ansible.builtin.template:
+    src: grafana-dashboard-provider.yml.j2
+    dest: /opt/homelab/appdata/grafana/provisioning/dashboards/provider.yml
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_grafana_dashboard_provider
+
+# Dashboards are plain JSON, copied not templated: Grafana's dashboard JSON has
+# no room for comments and the datasource is bound by the stable uid set in
+# grafana-datasource.yml.j2, so there is nothing host-specific to interpolate.
+- name: Install the Grafana dashboards
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/opt/homelab/appdata/grafana/provisioning/dashboards/{{ item | basename }}"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  with_fileglob: "grafana-dashboards/*.json"
+  register: infra_grafana_dashboards
+
 # Home Assistant refuses proxied requests with a bare "400: Bad Request" until
 # it is told which proxy to trust — so https://home-assistant.<domain> is dead
 # on arrival even though DNS, TLS and Caddy are all correct. This was a manual
@@ -781,7 +811,9 @@
         + (['beszel-agent'] if (infra_beszel_agent_template.changed | default(false)) else [])
         + (['node-exporter'] if (infra_node_exporter_template.changed | default(false)) else [])
         + (['prometheus'] if (infra_prometheus_config.changed | default(false)) else [])
-        + (['grafana'] if (infra_grafana_datasource.changed | default(false)) else [])
+        + (['grafana'] if (infra_grafana_datasource.changed | default(false)
+                           or infra_grafana_dashboard_provider.changed | default(false)
+                           or infra_grafana_dashboards.changed | default(false)) else [])
         + (['paperless-redis', 'paperless'] if (infra_paperless_network.changed | default(false)) else [])
         + (['paperless-redis'] if (infra_paperless_redis_template.changed | default(false)) else [])
         + (['paperless'] if (infra_paperless_template.changed | default(false)) else [])
