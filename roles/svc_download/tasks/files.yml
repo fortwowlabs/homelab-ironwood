@@ -235,6 +235,80 @@
     group: "{{ svc_gid }}"
     mode: "0755"
 
+# SABnzbd has its own anti-DNS-rebinding allowlist and returns
+# "403 Access denied - Hostname verification failed" for any Host header it does
+# not recognise. Left alone it whitelists only the container's own hostname —
+# a random hex string that CHANGES every time the container is recreated — so
+# https://sabnzbd.<domain> is permanently broken even though the service is
+# published, DNS-named and tiled on the dashboard. Not a one-off: an image
+# update silently re-breaks it.
+#
+# lineinfile on exactly this key, never a template: sabnzbd.ini also holds the
+# Usenet provider credentials, and regenerating the file would destroy them.
+- name: Read SABnzbd's configuration if it exists
+  ansible.builtin.slurp:
+    src: /srv/appdata/sabnzbd/sabnzbd.ini
+  register: download_sabnzbd_ini
+  failed_when: false
+
+- name: Determine whether SABnzbd already trusts its proxied hostname
+  ansible.builtin.set_fact:
+    download_sabnzbd_whitelist_ok: >-
+      {{ download_sabnzbd_ini.content is defined
+         and (download_sabnzbd_ini.content | b64decode)
+             is search('(?m)^host_whitelist\s*=.*sabnzbd\.' ~ (service_domain | regex_escape)) }}
+
+# Set it through SABnzbd's own API rather than editing the file underneath it.
+# Two reasons: SABnzbd rewrites sabnzbd.ini from memory on shutdown, so a
+# file edit made while it runs is silently discarded; and stopping the unit is
+# not actually possible here — the jail's dependency chain cancels the job
+# ("Job for dl-sabnzbd.service canceled"). The API writes through to the ini
+# immediately and needs no restart.
+#
+# SABnzbd listens inside the VPN network namespace, so the call has to be made
+# from inside it. The API key is read from the ini the same way Recyclarr reads
+# Sonarr/Radarr's — no_log throughout so it never reaches the log.
+- name: Read SABnzbd's API key
+  ansible.builtin.set_fact:
+    download_sabnzbd_api_key: >-
+      {{ (download_sabnzbd_ini.content | b64decode)
+         | regex_search('(?m)^api_key\s*=\s*([a-f0-9]+)', '\1') | first | default('') }}
+  when: download_sabnzbd_ini.content is defined
+  no_log: true
+
+- name: Trust the proxied hostname in SABnzbd's host allowlist
+  ansible.builtin.command:
+    argv:
+      - ip
+      - netns
+      - exec
+      - vpn
+      - curl
+      - --fail
+      - --silent
+      - --max-time
+      - "15"
+      - --get
+      - --data-urlencode
+      - "apikey={{ download_sabnzbd_api_key }}"
+      - --data-urlencode
+      - mode=set_config
+      - --data-urlencode
+      - section=misc
+      - --data-urlencode
+      - keyword=host_whitelist
+      - --data-urlencode
+      - "value=sabnzbd.{{ service_domain }}"
+      - --data-urlencode
+      - output=json
+      - http://10.77.0.2:8080/api
+  when:
+    - download_sabnzbd_ini.content is defined
+    - not download_sabnzbd_whitelist_ok
+    - (download_sabnzbd_api_key | default('')) | length > 0
+  changed_when: true
+  no_log: true
+
 - name: Ensure the Beszel agent appdata directory exists
   ansible.builtin.file:
     path: /srv/appdata/beszel-agent

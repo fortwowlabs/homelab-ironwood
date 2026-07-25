@@ -608,6 +608,63 @@
     mode: "0644"
   register: infra_grafana_datasource
 
+# Home Assistant refuses proxied requests with a bare "400: Bad Request" until
+# it is told which proxy to trust — so https://home-assistant.<domain> is dead
+# on arrival even though DNS, TLS and Caddy are all correct. This was a manual
+# follow-up from the first service batch; automate it instead.
+#
+# blockinfile, NOT template: configuration.yaml is Home Assistant's own file.
+# HA itself, its File Editor add-on and its UI all write to it, so rendering
+# the whole file from this repo would silently destroy the user's automations
+# on the next converge. The marker keeps this repo's edit surgical and
+# idempotent.
+- name: Read Home Assistant's configuration if it has been onboarded
+  ansible.builtin.slurp:
+    src: /opt/homelab/appdata/home-assistant/configuration.yaml
+  register: infra_ha_config
+  failed_when: false
+
+# `http:` is a top-level YAML key, so adding ours when the user already has one
+# would produce a duplicate key and Home Assistant would refuse to start. Detect
+# an http: block that is NOT the one this repo manages, and stand down if found
+# rather than breaking their instance.
+- name: Determine whether Home Assistant's proxy config is safe to manage
+  ansible.builtin.set_fact:
+    infra_ha_content: "{{ (infra_ha_config.content | default('') | b64decode) }}"
+
+- name: Note a hand-written Home Assistant http block
+  ansible.builtin.debug:
+    msg: >-
+      configuration.yaml already defines a top-level `http:` key that this repo
+      did not write — leaving it alone. Add
+      `trusted_proxies: [{{ hostvars[media_host].ansible_host }}]` to it by hand,
+      or remove it to let this role manage the block.
+  when:
+    - infra_ha_config.content is defined
+    - infra_ha_content is search('(?m)^http:')
+    - not (infra_ha_content is search('ANSIBLE MANAGED — reverse proxy'))
+
+# Gated on the file existing: on a brand-new instance Home Assistant writes
+# configuration.yaml itself during first start, and injecting a partial config
+# before that would leave it unable to boot.
+- name: Trust the Caddy proxy in Home Assistant's configuration
+  ansible.builtin.blockinfile:
+    path: /opt/homelab/appdata/home-assistant/configuration.yaml
+    marker: "# {mark} ANSIBLE MANAGED — reverse proxy (roles/svc_infra)"
+    block: |
+      http:
+        use_x_forwarded_for: true
+        trusted_proxies:
+          - {{ hostvars[media_host].ansible_host }}
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  when:
+    - infra_ha_config.content is defined
+    - (not (infra_ha_content is search('(?m)^http:')))
+      or infra_ha_content is search('ANSIBLE MANAGED — reverse proxy')
+  register: infra_ha_proxy_config
+
 - name: Start firewalld before opening catalog service ports
   ansible.builtin.systemd:
     name: firewalld
@@ -736,6 +793,7 @@
         + (['nextcloud-db'] if (infra_nextcloud_db_template.changed | default(false)) else [])
         + (['nextcloud-redis'] if (infra_nextcloud_redis_template.changed | default(false)) else [])
         + (['nextcloud'] if (infra_nextcloud_template.changed | default(false)) else [])
+        + (['home-assistant'] if (infra_ha_proxy_config.changed | default(false)) else [])
       }}
   changed_when: infra_services_to_restart | length > 0
   notify: infra configuration changed
