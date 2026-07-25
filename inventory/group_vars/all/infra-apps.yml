@@ -290,3 +290,47 @@ infra_secret_apps:
       GF_SERVER_ROOT_URL: "https://grafana.{{ service_domain }}"
     require_vault: [vault_grafana_admin_password]
     backup_paths: [grafana]
+
+  # Vaultwarden — self-hosted Bitwarden-compatible password manager. The
+  # upstream alpine image sets no USER (runs as container-root), which
+  # rootless podman maps straight to the host homelab user — same reason
+  # home-assistant needs no `user:` override, unlike code-server/webtop's
+  # PUID/PGID dance. DOMAIN is required: WebAuthn/2FA challenges and
+  # password-reset/invite email links are bound to it and silently break
+  # without it. WebSocket live-sync (/notifications/hub) has shipped on the
+  # SAME port as the web UI since v1.29 (the old WEBSOCKET_PORT 3012 was
+  # removed in v1.31) and Caddy's reverse_proxy passes Upgrade/Connection
+  # through automatically — no extra Caddyfile.j2 handling needed, unlike
+  # nginx.
+  #
+  # ADMIN_TOKEN is an Argon2id PHC hash, not a plaintext token: Vaultwarden
+  # accepts either, but the hash form works fine set non-interactively via
+  # Environment= (no TTY needed), and it means the rendered Quadlet — 0600,
+  # but unencrypted on disk, unlike vault.yml itself — only ever exposes a
+  # salted hash instead of the real admin password. Generate it with
+  # `podman run --rm -it docker.io/vaultwarden/server@sha256:88b74551f5d79fd
+  # 43f897c23bd74d5295a6e1fafb5d1ec23a1da92e7a0f06767 /vaultwarden hash` (or
+  # the `argon2` CLI) — vault_vaultwarden_admin_token holds that PHC STRING,
+  # not the plaintext; record the plaintext you typed in separately (it
+  # cannot be recovered from the hash) to log in to /admin.
+  #
+  # SIGNUPS_ALLOWED starts false (secure-by-default: this is reachable to the
+  # whole LAN, and unlike the other infra_secret_apps there is no
+  # bootstrap-admin-via-env-var, so there is no way to pre-seed the one
+  # account you need). FIRST-RUN ONLY: flip this to "true" here, deploy,
+  # browse to https://vaultwarden.{{ service_domain }} and register your one
+  # account, then flip it back to "false" and deploy again so the running
+  # container picks up the change (env-var config needs a restart; there is
+  # no live toggle in the admin panel for this one).
+  vaultwarden:
+    image: "docker.io/vaultwarden/server@sha256:88b74551f5d79fd43f897c23bd74d5295a6e1fafb5d1ec23a1da92e7a0f06767"
+    ui_port: 8222
+    container_port: 80
+    volumes:
+      - /opt/homelab/appdata/vaultwarden/data:/data:Z
+    env:
+      DOMAIN: "https://vaultwarden.{{ service_domain }}"
+      ADMIN_TOKEN: "{{ vault_vaultwarden_admin_token }}"
+      SIGNUPS_ALLOWED: "false"
+    require_vault: [vault_vaultwarden_admin_token]
+    backup_paths: [vaultwarden]
