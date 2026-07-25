@@ -28,7 +28,7 @@
          | map('regex_replace', '^(.*)$',
                 '/opt/homelab/.config/containers/systemd/\1.container') | list }}
     infra_expected_network_paths: >-
-      {{ ['paperless', 'netbox', 'immich']
+      {{ ['paperless', 'netbox', 'immich', 'nextcloud']
          | map('regex_replace', '^(.*)$',
                 '/opt/homelab/.config/containers/systemd/\1.network') | list }}
   changed_when: false
@@ -387,6 +387,94 @@
   no_log: true
   diff: false
 
+- name: Create the Nextcloud appdata directory
+  ansible.builtin.file:
+    path: /opt/homelab/appdata/nextcloud
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+
+- name: Create the Nextcloud database and redis appdata directories
+  ansible.builtin.file:
+    path: "/opt/homelab/appdata/{{ item }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop: [nextcloud-db, nextcloud-redis]
+
+- name: Check the Nextcloud user-files directory on the NFS export
+  ansible.builtin.command: test -d /srv/media/nextcloud
+  register: infra_nextcloud_data_dir
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+# NFS root-squash: create the data dir as the service UID, not root (same
+# idiom as the Immich photo-library directory above / svc_media/tasks/nfs.yml).
+# Nextcloud (container-root == host homelab) then owns it and can write.
+- name: Create the Nextcloud user-files directory as the service UID
+  ansible.builtin.command: >-
+    setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups --
+    mkdir -p /srv/media/nextcloud
+  when: infra_nextcloud_data_dir.rc != 0
+  changed_when: true
+
+- name: Install the Nextcloud private network Quadlet
+  ansible.builtin.copy:
+    src: quadlets/nextcloud.network
+    dest: /opt/homelab/.config/containers/systemd/nextcloud.network
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_nextcloud_network
+
+- name: Require Nextcloud secrets
+  ansible.builtin.assert:
+    that:
+      - (vault_nextcloud_db_password | default('')) | length > 0
+      - (vault_nextcloud_admin_password | default('')) | length > 0
+    fail_msg: >-
+      Configure vault_nextcloud_db_password and vault_nextcloud_admin_password
+      (openssl rand -hex 24) in the encrypted inventory.
+  no_log: true
+  diff: false
+
+- name: Render the Nextcloud database Quadlet
+  ansible.builtin.template:
+    src: nextcloud-db.container.j2
+    dest: /opt/homelab/.config/containers/systemd/nextcloud-db.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    # 0600: this quadlet embeds POSTGRES_PASSWORD on an Environment= line.
+    mode: "0600"
+  register: infra_nextcloud_db_template
+  no_log: true
+  diff: false
+
+- name: Render the Nextcloud redis Quadlet
+  ansible.builtin.template:
+    src: nextcloud-redis.container.j2
+    dest: /opt/homelab/.config/containers/systemd/nextcloud-redis.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_nextcloud_redis_template
+
+- name: Render the Nextcloud Quadlet
+  ansible.builtin.template:
+    src: nextcloud.container.j2
+    dest: /opt/homelab/.config/containers/systemd/nextcloud.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    # 0600: this quadlet embeds POSTGRES_PASSWORD/NEXTCLOUD_ADMIN_PASSWORD on
+    # Environment= lines.
+    mode: "0600"
+  register: infra_nextcloud_template
+  no_log: true
+  diff: false
+
 - name: Ensure the Beszel agent appdata directory exists
   ansible.builtin.file:
     path: /opt/homelab/appdata/beszel-agent
@@ -529,6 +617,15 @@
     immediate: true
     state: enabled
 
+- name: Open Nextcloud to the LAN
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family=ipv4 source address={{ lan_cidr }} port
+      port=8081 protocol=tcp accept
+    permanent: true
+    immediate: true
+    state: enabled
+
 # node_exporter is a scrape target, not a user-facing UI: open :9100 ONLY to
 # Prometheus's own host (svc-infra), a single source address, not lan_cidr.
 - name: Open node_exporter to Prometheus only
@@ -571,6 +668,10 @@
         + (['immich-db'] if (infra_immich_db_template.changed | default(false)) else [])
         + (['immich-redis'] if (infra_immich_redis_template.changed | default(false)) else [])
         + (['immich-server'] if (infra_immich_server_template.changed | default(false)) else [])
+        + (['nextcloud-db', 'nextcloud-redis', 'nextcloud'] if (infra_nextcloud_network.changed | default(false)) else [])
+        + (['nextcloud-db'] if (infra_nextcloud_db_template.changed | default(false)) else [])
+        + (['nextcloud-redis'] if (infra_nextcloud_redis_template.changed | default(false)) else [])
+        + (['nextcloud'] if (infra_nextcloud_template.changed | default(false)) else [])
       }}
   changed_when: infra_services_to_restart | length > 0
   notify: infra configuration changed

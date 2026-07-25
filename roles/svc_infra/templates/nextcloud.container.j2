@@ -1,0 +1,85 @@
+{{ ansible_managed | comment }}
+# ~homelab/.config/containers/systemd/nextcloud.container   (rootless)
+# Published on svc-infra's LAN IP (not loopback) — Caddy runs on
+# {{ media_host }}, a different host (nextcloud.{{ service_domain }}). The
+# official image sets no USER at all (the Apache master starts as root and
+# drops its worker processes to www-data internally), so container-root maps
+# straight to the host homelab user under rootless podman — no User=0
+# override or PUID/PGID knob needed here (the Paperless/Home-Assistant
+# pattern, not the NetBox/Semaphore one).
+[Unit]
+Description=Nextcloud
+Requires=nextcloud-db.service nextcloud-redis.service
+After=nextcloud-db.service nextcloud-redis.service
+
+[Container]
+Image={{ nextcloud_images.webserver }}
+ContainerName=nextcloud
+Network=nextcloud.network
+PublishPort={{ ansible_host }}:8081:80
+# App code/config/apps/themes — small, local disk, tarred nightly
+# (infra_extra_backup_paths carries "nextcloud").
+Volume=%h/appdata/nextcloud:/var/www/html:Z
+# User files. Deliberately on the NFS media export, NOT local appdata: this
+# is arbitrary, unbounded-growth personal file storage — the same shape as
+# Immich's photo library, not like Paperless/NetBox's small bounded state —
+# and svc-infra's 120G local disk is already shared by 15+ other containers
+# (see the 2026-07-20 rpool-full incident). Backed up at the NAS layer, like
+# Immich's /srv/media/photos, not by this repo's nightly tar. The Postgres
+# data dir above stays on local disk regardless — see nextcloud-db.container.j2.
+Volume=/srv/media/nextcloud:/var/www/html/data:Z
+Environment=TZ={{ timezone }}
+Environment=POSTGRES_HOST=nextcloud-db
+Environment=POSTGRES_DB=nextcloud
+Environment=POSTGRES_USER=nextcloud
+Environment=POSTGRES_PASSWORD={{ vault_nextcloud_db_password }}
+Environment=REDIS_HOST=nextcloud-redis
+# Reverse-proxy correctness (the classic Nextcloud footgun): TRUSTED_PROXIES
+# must be Caddy's own address — svc-media, a different host from this
+# container — never a literal; derived from hostvars so a re-IP stays a
+# one-line inventory edit (see inventory/hosts.yml). These are read directly
+# by the image's own shipped /usr/src/nextcloud/config/reverse-proxy.config.php
+# (getenv() at runtime, every boot) — no manual config.php edit needed.
+Environment=TRUSTED_PROXIES={{ hostvars[media_host].ansible_host }}
+Environment=OVERWRITEHOST=nextcloud.{{ service_domain }}
+Environment=OVERWRITEPROTOCOL=https
+Environment=OVERWRITECLIURL=https://nextcloud.{{ service_domain }}
+# Space-separated (docker-entrypoint.sh splits on whitespace); only applied
+# by the entrypoint on a truly fresh install. Note OVERWRITEHOST being
+# non-empty already makes TrustedDomainHelper::isTrustedDomain() return true
+# unconditionally (lib/private/Security/TrustedDomainHelper.php) — this list
+# is still set for clarity/defense-in-depth, but is not what is actually
+# gating access once overwritehost is configured.
+Environment="NEXTCLOUD_TRUSTED_DOMAINS=nextcloud.{{ service_domain }} {{ ansible_host }}"
+# Non-interactive first-run install (entrypoint only reads these on a truly
+# empty /var/www/html) — no manual setup wizard left behind, unlike Home
+# Assistant's.
+Environment=NEXTCLOUD_ADMIN_USER=admin
+Environment=NEXTCLOUD_ADMIN_PASSWORD={{ vault_nextcloud_admin_password }}
+# Bump past the image's 512M default for a file-sync tool's browser uploads
+# (the desktop/mobile clients and modern Files-app uploads chunk large
+# transfers and are unaffected either way — this only helps single-shot
+# WebDAV PUTs / older clients).
+Environment=PHP_MEMORY_LIMIT=1024M
+Environment=PHP_UPLOAD_LIMIT=4G
+# The image's Apache config also caps request bodies independently of PHP
+# (LimitRequestBody, default 1GiB per the Dockerfile's APACHE_BODY_LIMIT) —
+# raising only PHP_UPLOAD_LIMIT above 1G would silently keep failing at the
+# Apache layer. 0 = no Apache-side limit; php.ini's PHP_UPLOAD_LIMIT above
+# remains the real, still-finite ceiling.
+Environment=APACHE_BODY_LIMIT=0
+HealthCmd=curl -f http://localhost/status.php || exit 1
+HealthInterval=30s
+HealthTimeout=10s
+HealthRetries=5
+HealthStartPeriod=120s
+
+[Service]
+# Fail fast if the NFS media export isn't actually mounted — a bare local dir
+# would silently divert user files off the share (same guard as Immich).
+ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

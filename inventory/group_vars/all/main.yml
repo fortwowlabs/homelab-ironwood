@@ -174,6 +174,10 @@ caddy_services:
   netbox:      { backend: "{{ hostvars[infra_host].ansible_host }}:8080", group: Infra, icon: netbox }
   home-assistant: { backend: "{{ hostvars[infra_host].ansible_host }}:8123", group: Infra, icon: home-assistant }
   immich:      { backend: "{{ hostvars[infra_host].ansible_host }}:2283", group: Media, icon: immich }
+  # Nextcloud reads the ORIGINAL Host header (to match TRUSTED_PROXIES /
+  # OVERWRITEHOST on its own side) — no host_header rewrite here, unlike
+  # glances above.
+  nextcloud:   { backend: "{{ hostvars[infra_host].ansible_host }}:8081", group: Infra, icon: nextcloud }
   it-tools:    { backend: "{{ hostvars[infra_host].ansible_host }}:8082", group: Infra, icon: it-tools }
   # host_header: glances' MCP transport (/mcp/sse) enforces a localhost-only
   # Host header as DNS-rebinding protection (no config flag to widen it) —

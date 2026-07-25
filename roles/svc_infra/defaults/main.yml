@@ -11,19 +11,24 @@ infra_extra_service_names: >-
      + ['node-exporter']
      + ['paperless-redis', 'paperless']
      + ['netbox-db', 'netbox-redis', 'netbox']
-     + ['immich-db', 'immich-redis', 'immich-server'] }}
+     + ['immich-db', 'immich-redis', 'immich-server']
+     + ['nextcloud-db', 'nextcloud-redis', 'nextcloud'] }}
 
 # Appdata-tar backup coverage for bespoke (non-catalog) services — appended
 # the same way as infra_extra_service_names above. Excluded on purpose:
-# beszel-agent/paperless-redis/netbox-redis (no real state), and the Postgres
-# data dirs (netbox-db/immich-db) — those are subuid-owned so the homelab tar
-# can't read them, and a raw datadir tar isn't a consistent DB backup anyway.
-# The databases are instead captured by application-consistent pg_dumpall (see
-# infra_db_backups below). The netbox/ appdata that IS tarred here is just
-# uploaded media/reports/scripts (homelab-owned via the User=0 quadlet); the
-# Immich photo library lives on the NFS media export (/srv/media/photos, backed
-# up at the NAS layer, not in this tar); immich-redis is a disposable cache.
-infra_extra_backup_paths: [paperless, netbox]
+# beszel-agent/paperless-redis/netbox-redis/nextcloud-redis (no real state),
+# and the Postgres data dirs (netbox-db/immich-db/nextcloud-db) — those are
+# subuid-owned so the homelab tar can't read them, and a raw datadir tar isn't
+# a consistent DB backup anyway. The databases are instead captured by
+# application-consistent pg_dumpall (see infra_db_backups below). The netbox/
+# appdata that IS tarred here is just uploaded media/reports/scripts
+# (homelab-owned via the User=0 quadlet); the Immich photo library and
+# Nextcloud's user files both live on the NFS media export (/srv/media/photos,
+# /srv/media/nextcloud — backed up at the NAS layer, not in this tar); the
+# nextcloud/ appdata that IS tarred here is just the small app code/config
+# tree (/var/www/html minus its data/ subdir, which is the NFS mount above
+# it); immich-redis/nextcloud-redis are disposable caches.
+infra_extra_backup_paths: [paperless, netbox, nextcloud]
 
 # Bespoke Postgres databases captured by an application-consistent pg_dumpall
 # via `podman exec` in the nightly backup (mirrors backup-media.sh's romm-db
@@ -32,7 +37,7 @@ infra_extra_backup_paths: [paperless, netbox]
 # so nothing here needs the db/user spelled out. pg_dumpall --clean --if-exists
 # captures roles+globals and restores over an existing cluster; it is also the
 # form Immich's backup docs specify for its vectorchord-patched cluster.
-infra_db_backups: [netbox-db, immich-db]
+infra_db_backups: [netbox-db, immich-db, nextcloud-db]
 
 # Every infra service, whether catalog-driven or bespoke, funnels through
 # this one name list so apps.yml/verify.yml don't need to know which category

@@ -1,0 +1,32 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Nextcloud PostgreSQL
+
+[Container]
+Image={{ nextcloud_images.postgres }}
+ContainerName=nextcloud-db
+Network=nextcloud.network
+# postgres:18+ stores data in a major-version subdir and wants the mount at
+# /var/lib/postgresql (NOT .../data — that path errors out on 18+), same as
+# netbox-db. See https://github.com/docker-library/postgres/pull/1259
+# Local disk, not the /srv/media NFS export: Postgres needs POSIX-correct
+# file locking that NFS can't reliably guarantee (the same reasoning as
+# netbox-db/immich-db) — only Nextcloud's bulk user-file volume goes on the
+# NFS share; see nextcloud.container.j2.
+Volume=%h/appdata/nextcloud-db:/var/lib/postgresql:Z
+Environment=TZ={{ timezone }}
+Environment=POSTGRES_DB=nextcloud
+Environment=POSTGRES_USER=nextcloud
+Environment=POSTGRES_PASSWORD={{ vault_nextcloud_db_password }}
+HealthCmd=pg_isready -q -d nextcloud -U nextcloud
+HealthInterval=10s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=20s
+Notify=healthy
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target

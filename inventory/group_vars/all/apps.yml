@@ -141,3 +141,19 @@ immich_images:
   machine_learning: "ghcr.io/immich-app/immich-machine-learning@sha256:d76fe88b69282c09a97eac4f82dafa82cfd77bce274bc742591cde974f87dacb"
   postgres: "ghcr.io/immich-app/postgres@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23"
   redis: "docker.io/valkey/valkey@sha256:4963247afc4cd33c7d3b2d2816b9f7f8eeebab148d29056c2ca4d7cbc966f2d9"
+
+# Nextcloud (svc-infra) — bespoke three-container app (webserver + its own
+# postgres + valkey cache/lock backend), same shape as NetBox. webserver is
+# the official docker.io/library/nextcloud apache variant, pinned to the
+# 34.0.2-apache release (the "stable"/"production" tag alias, verified
+# against the registry manifest digest directly, not just the Hub API).
+# postgres is the SAME digest as netbox_images.postgres (postgres:18-alpine)
+# — no Nextcloud-specific DB requirement, so it just matches the repo's
+# existing stock-postgres pin instead of adding a second one to track. redis
+# is valkey (never stock redis under rootless podman — see paperless_images'
+# comment above) at the SAME digest as netbox_images/paperless_images.redis
+# (valkey 9.1.0-alpine).
+nextcloud_images:
+  webserver: "docker.io/library/nextcloud@sha256:e93ccfc952c95f18175f3d297fb2f60c35070c05ca976050c250a9ddab793e75"
+  postgres: "docker.io/library/postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"
+  redis: "docker.io/valkey/valkey@sha256:c9b77919daeba2c02ad954d0c844cc4e7142069d177b89c5fd771f405daf9e02"
