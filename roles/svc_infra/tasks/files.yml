@@ -387,39 +387,96 @@
   no_log: true
   diff: false
 
-- name: Create the Nextcloud appdata directory
-  ansible.builtin.file:
-    path: /opt/homelab/appdata/nextcloud
-    state: directory
-    owner: "{{ svc_uid }}"
-    group: "{{ svc_gid }}"
-    mode: "0755"
-
-- name: Create the Nextcloud database and redis appdata directories
+# NOTE the deliberate absence of owner/group here, unlike every other appdata
+# directory in this role. These two are owned by the container's www-data (a
+# subuid), applied by the `podman unshare chown` task below. Enforcing
+# owner: homelab here as well would fight that chown — each converge would
+# reset it, the chown would set it back, and the play would report `changed`
+# forever while restarting Nextcloud every run.
+# mode is deliberately unmanaged too: Nextcloud tightens its data directory to
+# 0770 on install and re-asserting 0755 here would loosen it back every
+# converge — another permanent `changed` flip-flop, and a small security
+# regression each time. Existence is all this task needs to guarantee.
+- name: Create the Nextcloud app and user-files directories
   ansible.builtin.file:
     path: "/opt/homelab/appdata/{{ item }}"
     state: directory
+  loop: [nextcloud, nextcloud-data]
+
+# nextcloud-data holds user uploads and is deliberately NOT under the tarred
+# `nextcloud` backup path, so the nightly tar stays limited to the small
+# app/config tree. It is local rather than on the NFS export because the
+# image chowns its data dir to www-data, which cannot work against a
+# root-squashed export under rootless podman — see the long explanation in
+# nextcloud.container.j2.
+- name: Create the Nextcloud database directory
+  ansible.builtin.file:
+    path: /opt/homelab/appdata/nextcloud-db
+    state: directory
     owner: "{{ svc_uid }}"
     group: "{{ svc_gid }}"
     mode: "0755"
-  loop: [nextcloud-db, nextcloud-redis]
+  # No nextcloud-redis directory: that cache is volume-less on purpose, see
+  # nextcloud-redis.container.j2.
 
-- name: Check the Nextcloud user-files directory on the NFS export
-  ansible.builtin.command: test -d /srv/media/nextcloud
-  register: infra_nextcloud_data_dir
-  failed_when: false
+# Nextcloud's Apache master starts as root but forks its PHP workers as
+# www-data (uid 33 INSIDE the container), and those workers are what write
+# files. Under rootless podman container-uid 33 maps to a host SUBUID, never
+# to the homelab user that owns these bind mounts — so the workers get EACCES
+# and Nextcloud serves 503 with "Your data directory is not writable". The
+# image's own `rsync --chown www-data:root` does not fix the mount points
+# themselves.
+#
+# `podman unshare` runs the chown INSIDE the user namespace, so "33" resolves
+# to whatever host subuid podman actually maps it to — correct without
+# hardcoding a subuid that would differ per host or drift if /etc/subuid
+# changes. Gated on a stat so the recursive chown does not re-run (and does
+# not walk a large data dir) on every converge.
+- name: Read the namespaced owner of the Nextcloud bind mounts
+  ansible.builtin.command:
+    # chdir: runuser keeps the caller's cwd, and Ansible runs from the
+    # connecting user's home, which the homelab account cannot enter
+    # ("cannot chdir to /home/straderb: Permission denied").
+    chdir: /
+    argv:
+      - runuser
+      - -u
+      - homelab
+      - --
+      - env
+      - "XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}"
+      - podman
+      - unshare
+      - stat
+      - -c
+      - "%u:%g"
+      - "/opt/homelab/appdata/{{ item }}"
+  loop: [nextcloud, nextcloud-data]
+  register: infra_nextcloud_mount_owner
   changed_when: false
-  check_mode: false
 
-# NFS root-squash: create the data dir as the service UID, not root (same
-# idiom as the Immich photo-library directory above / svc_media/tasks/nfs.yml).
-# Nextcloud (container-root == host homelab) then owns it and can write.
-- name: Create the Nextcloud user-files directory as the service UID
-  ansible.builtin.command: >-
-    setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups --
-    mkdir -p /srv/media/nextcloud
-  when: infra_nextcloud_data_dir.rc != 0
+- name: Give the Nextcloud container user ownership of its bind mounts
+  ansible.builtin.command:
+    chdir: /
+    argv:
+      - runuser
+      - -u
+      - homelab
+      - --
+      - env
+      - "XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}"
+      - podman
+      - unshare
+      - chown
+      - -R
+      - "33:33"
+      - "/opt/homelab/appdata/{{ item.item }}"
+  loop: "{{ infra_nextcloud_mount_owner.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stdout | trim != "33:33"
   changed_when: true
+  notify: infra configuration changed
 
 - name: Install the Nextcloud private network Quadlet
   ansible.builtin.copy:

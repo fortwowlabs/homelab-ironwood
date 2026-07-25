@@ -6,16 +6,25 @@ Description=Nextcloud Redis (valkey)
 Image={{ nextcloud_images.redis }}
 ContainerName=nextcloud-redis
 Network=nextcloud.network
-# valkey (redis-wire-compatible), not stock redis — the same rootless-podman
-# lesson as paperless/netbox (commit 06ee437): redis's non-root default user
-# can't write a homelab-owned bind mount under rootless podman; valkey runs
-# as container-root (mapped to the host homelab user), so it owns /data and
-# persists cleanly. Used purely as Nextcloud's distributed cache +
-# transactional file-locking backend — no persistent state worth backing up,
-# and no auth (reachable only on the private nextcloud.network), same trust
-# model as immich-redis.
-Volume=%h/appdata/nextcloud-redis:/data:Z
+# valkey (redis-wire-compatible), never stock redis — the paperless/netbox
+# lesson (commit 06ee437). NO persistent volume, and persistence is turned
+# off outright: this is purely Nextcloud's distributed cache + transactional
+# file-locking backend, so there is nothing worth keeping across a restart.
+# Follows immich-redis (also volume-less), NOT paperless-redis.
+#
+# This is deliberate, not an oversight. With a bind-mounted /data this
+# container wedges: the valkey image's entrypoint drops privileges from
+# container-root to its own `valkey` user, which under rootless podman lands
+# on a SUBUID (observed: host uid 590822), not the homelab user that owns the
+# appdata directory — so the RDB child cannot create its temp file
+# ("Failed opening the temp RDB file ... Permission denied"), every save
+# fails, and once stop-writes-on-bgsave-error trips, Nextcloud 503s because
+# its lock backend rejects writes. netbox-redis only escapes this because its
+# appendonlydir happens to already be owned by that subuid. No auth: reachable
+# only on the private nextcloud.network.
 Environment=TZ={{ timezone }}
+# --save "" disables RDB snapshots entirely; --appendonly no disables AOF.
+Exec=valkey-server --save "" --appendonly no
 HealthCmd=redis-cli ping | grep -q PONG
 HealthInterval=15s
 HealthTimeout=5s

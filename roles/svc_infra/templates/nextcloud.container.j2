@@ -20,14 +20,27 @@ PublishPort={{ ansible_host }}:8081:80
 # App code/config/apps/themes — small, local disk, tarred nightly
 # (infra_extra_backup_paths carries "nextcloud").
 Volume=%h/appdata/nextcloud:/var/www/html:Z
-# User files. Deliberately on the NFS media export, NOT local appdata: this
-# is arbitrary, unbounded-growth personal file storage — the same shape as
-# Immich's photo library, not like Paperless/NetBox's small bounded state —
-# and svc-infra's 120G local disk is already shared by 15+ other containers
-# (see the 2026-07-20 rpool-full incident). Backed up at the NAS layer, like
-# Immich's /srv/media/photos, not by this repo's nightly tar. The Postgres
-# data dir above stays on local disk regardless — see nextcloud-db.container.j2.
-Volume=/srv/media/nextcloud:/var/www/html/data:Z
+# User files. LOCAL disk, in a directory deliberately OUTSIDE the tarred
+# `nextcloud` appdata path above, so the nightly tar keeps covering the small
+# app/config tree without ever growing to include arbitrary user uploads.
+#
+# Why not the NFS media export (which is where Immich's photo library lives,
+# and where this originally pointed)? Nextcloud's entrypoint runs as root and
+# rsyncs its app tree with `--chown www-data:root`, and the app itself then
+# runs as www-data (uid 33). Under rootless podman uid 33 maps to a subuid,
+# never to the host homelab user that owns the NFS dir, and the export is
+# root-squashed — so the chown fails outright ("chown /var/www/html/data:
+# Operation not permitted", container exit 23) and even past it the workers
+# could not write. `--userns=keep-id:uid=33` would fix the mapping in theory
+# but errors on this host (podman 5.8.2 / crun 1.27). Immich avoids all of
+# this only because it never chowns its library.
+#
+# TRADEOFF, know this: user files therefore live on svc-infra's 120G disk and
+# are NOT covered by the NAS-layer backup that protects /srv/media. To put
+# bulk data back on the NAS, add the share through Nextcloud's own External
+# Storage app — that works at the app layer and sidesteps the uid/NFS problem
+# entirely. Watch disk headroom (see the 2026-07-20 rpool-full incident).
+Volume=%h/appdata/nextcloud-data:/var/www/html/data:Z
 Environment=TZ={{ timezone }}
 Environment=POSTGRES_HOST=nextcloud-db
 Environment=POSTGRES_DB=nextcloud
@@ -75,9 +88,8 @@ HealthRetries=5
 HealthStartPeriod=120s
 
 [Service]
-# Fail fast if the NFS media export isn't actually mounted — a bare local dir
-# would silently divert user files off the share (same guard as Immich).
-ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
+# No NFS mount guard here (unlike Immich): user files are on local disk, see
+# the Volume= comment above.
 Restart=on-failure
 RestartSec=10
 
