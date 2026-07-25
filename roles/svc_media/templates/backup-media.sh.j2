@@ -13,6 +13,9 @@
 #   - Audiobookshelf: NOT tarred here. ABS's built-in backup (Settings >
 #     Backups, schedule it once in the UI) writes application-consistent
 #     archives to /config/backups == /srv/backups/audiobookshelf.
+#   - Minecraft: one tar per minecraft_servers entry. RCON save-off/
+#     save-all/save-on brackets each capture (a running server writes
+#     region files constantly) for a consistent-as-possible snapshot.
 # Restore is a MANUAL, quarterly-tested procedure — see README.
 set -euo pipefail
 
@@ -72,6 +75,21 @@ tar_tolerant calibre-web-automated \
 tar_tolerant romm \
     tar -C "$HOME/appdata" -czf "$APP_DEST/romm-appdata-$STAMP.tar.gz" romm/config romm/assets romm/resources
 
-# 3. Retention
+# 3. Minecraft world data. save-off/save-all pause autosave and force a
+#    flush before the tar; save-on resumes it afterwards. tar_tolerant still
+#    backstops any residual write race. rcon-cli (bundled in the itzg image)
+#    reads RCON_PORT/RCON_PASSWORD from the container's own environment, so
+#    no flags are needed here. Best-effort: if a server is mid-restart and
+#    RCON isn't up yet, the save-off/save-all calls just no-op (|| true) and
+#    tar_tolerant's own exit-1 tolerance covers the resulting live-write risk.
+{% for name in minecraft_servers.keys() %}
+podman exec {{ name | quote }} rcon-cli save-off >/dev/null 2>&1 || true
+podman exec {{ name | quote }} rcon-cli save-all >/dev/null 2>&1 || true
+tar_tolerant minecraft/{{ name }} \
+    tar -C "$HOME/appdata/minecraft" -czf "$APP_DEST/minecraft-{{ name }}-$STAMP.tar.gz" {{ name }}
+podman exec {{ name | quote }} rcon-cli save-on >/dev/null 2>&1 || true
+{% endfor %}
+
+# 4. Retention
 find "$DB_DEST" "$APP_DEST" -type f -mtime +{{ backup_retention_days | default(14) }} -delete
 logger -t backup-media "backup OK ($STAMP)"

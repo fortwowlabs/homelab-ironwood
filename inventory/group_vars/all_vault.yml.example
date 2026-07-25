@@ -146,3 +146,10 @@ vault_grafana_admin_password: "REPLACE_openssl_rand_hex_24"   # openssl rand -he
 # Single-quote the PHC value in YAML: it contains $ and may contain +//=.
 vault_vaultwarden_admin_token: "REPLACE_argon2id_phc_hash"        # the hash
 vault_vaultwarden_admin_token_plaintext: "REPLACE_openssl_rand_hex_24"  # what you type at /admin
+
+# Minecraft (v6, svc-media): shared RCON password for both LAN-only Paper
+# servers (inventory/group_vars/all/minecraft.yml). RCON itself is never
+# published or firewalled — this only gates `podman exec <name> rcon-cli`,
+# run locally on svc-media for the nightly world-flush-before-tar and any
+# ad-hoc admin (e.g. `whitelist add`).
+vault_minecraft_rcon_password: "REPLACE_openssl_rand_hex_24"   # openssl rand -hex 24

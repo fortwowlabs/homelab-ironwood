@@ -135,6 +135,48 @@
       docs/services.md "Beszel monitoring setup". ***
   when: not (beszel_agent_enabled | bool)
 
+# --- Minecraft (v6): LAN-only game servers, driven by minecraft_servers
+# (inventory/group_vars/all/minecraft.yml) through a single shared template.
+- name: Create Minecraft appdata directories
+  ansible.builtin.file:
+    path: "/opt/homelab/appdata/minecraft/{{ item.key }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop: "{{ minecraft_servers | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+
+- name: Require the Minecraft RCON password
+  ansible.builtin.assert:
+    that:
+      - (vault_minecraft_rcon_password | default('')) | string | length > 0
+      - not ((vault_minecraft_rcon_password | default('')) | string is match('REPLACE_'))
+    fail_msg: >-
+      Configure vault_minecraft_rcon_password in the encrypted inventory.
+      RCON is never published to the LAN, but backup-media.sh.j2 uses it
+      (via `podman exec <name> rcon-cli`) to flush each world before its
+      nightly tar, so every Minecraft Quadlet needs it to start.
+  no_log: true
+  diff: false
+  when: minecraft_servers | length > 0
+
+- name: Render Minecraft Quadlets
+  ansible.builtin.template:
+    src: minecraft.container.j2
+    dest: "/opt/homelab/.config/containers/systemd/{{ item.key }}.container"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    # 0600: this quadlet embeds RCON_PASSWORD on an Environment= line.
+    mode: "0600"
+  loop: "{{ minecraft_servers | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: media_minecraft_templates
+  no_log: true
+  diff: false
+
 - name: Render the media backup program
   ansible.builtin.template:
     src: backup-media.sh.j2
@@ -172,6 +214,12 @@
           + (['homepage'] if (media_homepage_templates.results | selectattr('changed') | list | length > 0) else [])
           + (['romm-db', 'romm'] if (media_romm_secret_templates.changed | default(false)) else [])
           + (['beszel-agent'] if (media_beszel_agent_template.changed | default(false)) else [])
+          + (
+              media_minecraft_templates.results
+              | selectattr('changed')
+              | map(attribute='item.key')
+              | list
+            )
         ) | unique | list
       }}
   changed_when: media_services_to_restart | length > 0

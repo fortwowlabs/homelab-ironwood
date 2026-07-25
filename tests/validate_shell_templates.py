@@ -40,6 +40,9 @@ def main() -> int:
     infra_defaults = yaml.safe_load(
         (ROOT / "roles/svc_infra/defaults/main.yml").read_text(encoding="utf-8")
     )
+    minecraft_document = yaml.safe_load(
+        (ROOT / "inventory/group_vars/all/minecraft.yml").read_text(encoding="utf-8")
+    )
     environment = Environment(
         loader=FileSystemLoader(str(ROOT)),
         undefined=StrictUndefined,
@@ -67,6 +70,9 @@ def main() -> int:
         "infra_secret_apps": as_attr(infra_apps_document.get("infra_secret_apps", {})),
         "infra_extra_backup_paths": infra_defaults["infra_extra_backup_paths"],
         "infra_db_backups": infra_defaults["infra_db_backups"],
+        # backup-media.sh.j2 iterates this; loaded from the real catalog
+        # above so the fixture can't drift from production.
+        "minecraft_servers": as_attr(minecraft_document["minecraft_servers"]),
         # Only the backup templates consume this; its value doesn't matter here
         # (nothing in TEMPLATES branches on which service VM it is), it just
         # needs to be defined.

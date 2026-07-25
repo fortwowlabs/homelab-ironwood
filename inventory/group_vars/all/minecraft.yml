@@ -1,0 +1,79 @@
+---
+# Minecraft Java Edition servers (v6, svc-media) — LAN-only game servers.
+# A generic catalog + a single Quadlet template (mirrors media_images/
+# infra_apps): a third server is one more minecraft_servers entry, plus one
+# more media_backup_artifacts entry (roles/svc_media/defaults/main.yml) so
+# the nightly-freshness gate covers it too — no other role code changes.
+#
+# Image: itzg/minecraft-server, the de-facto community image for running
+# Paper/Vanilla/Fabric servers in a container. Pinned by digest, resolved
+# 2026-07-25 straight off the real Docker Registry HTTP API (Docker-Content-
+# Digest header on a GET of the `latest` multi-arch manifest list for
+# itzg/minecraft-server on registry-1.docker.io) — not invented:
+#   docker.io/itzg/minecraft-server:latest
+#     -> sha256:9e09d64e8cab977f0152e1ca5f75d9ca972617cb946ef2f76acd4348bb950825
+minecraft_image: "docker.io/itzg/minecraft-server@sha256:9e09d64e8cab977f0152e1ca5f75d9ca972617cb946ef2f76acd4348bb950825"
+
+# Per-entry fields consumed by roles/svc_media (minecraft.container.j2 +
+# tasks/files.yml + tasks/access.yml + tasks/backup.yml + tasks/verify.yml).
+# The catalog KEY is also the container name, the systemd unit name, and the
+# DNS label (paired with extra_dns_records below) — one name, not three.
+#   port             host TCP port players connect to; published on
+#                    svc-media's LAN IP only (never 0.0.0.0) and opened to
+#                    lan_cidr — NOT the world — by access.yml.
+#   memory           JVM heap; itzg's MEMORY= sets both -Xms and -Xmx
+#                    (INIT_MEMORY/MAX_MEMORY) to this value.
+#   type / version   itzg's TYPE=/VERSION= (server platform + MC version).
+#   motd             server.properties motd — can contain spaces, quoted in
+#                    the Quadlet's Environment= line.
+#   difficulty       server.properties difficulty.
+#   view_distance    server.properties view-distance (chunk render radius);
+#                    kept modest to bound CPU/RAM alongside a 2G heap.
+#   online_mode      true = authenticate players against Mojang's session
+#                    servers (blocks username spoofing). Keep true.
+#   whitelist_enabled  server.properties white-list. Default false: the LAN
+#                    firewall scope (access.yml) plus online_mode are this
+#                    server's primary access controls, and an empty
+#                    whitelist would lock out the deploying admin too. Flip
+#                    to true and add players (`podman exec <name> rcon-cli
+#                    whitelist add <player>`) once you know who gets
+#                    standing access.
+#
+# Both servers share a 2G JVM heap — sized to fit comfortably alongside
+# Jellyfin/RomM/etc. on svc-media's ~7.5G available RAM (host_vars/
+# svc-media.yml sets vm_memory: 10240 for the whole VM).
+minecraft_servers:
+  minecraft:
+    port: 25565
+    memory: 2G
+    type: PAPER
+    version: LATEST
+    motd: "fort.wow Minecraft -- survival"
+    difficulty: normal
+    view_distance: 10
+    online_mode: true
+    whitelist_enabled: false
+
+  minecraft2:
+    port: 25566
+    memory: 2G
+    type: PAPER
+    version: LATEST
+    motd: "fort.wow Minecraft -- server 2"
+    difficulty: normal
+    view_distance: 10
+    online_mode: true
+    whitelist_enabled: false
+
+# Generic mechanism for LAN services with no Caddy vhost (a raw, non-HTTP
+# protocol — Caddy only speaks HTTP(S)) that still want a name in the
+# private DNS zone. See roles/svc_media/templates/dnsmasq-services.conf.j2,
+# which loops this list instead of hardcoding any one service's name. Each
+# entry is {name, host}; `host` is an inventory_hostname, resolved through
+# hostvars[host].ansible_host exactly like the physical-host records in that
+# template, so a renamed/moved service VM never means editing a literal IP.
+# Minecraft is the first consumer; a future non-HTTP service (another game
+# server, a raw database, ...) appends here instead of another template edit.
+extra_dns_records:
+  - { name: minecraft, host: "{{ media_host }}" }
+  - { name: minecraft2, host: "{{ media_host }}" }

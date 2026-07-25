@@ -1,0 +1,67 @@
+{{ ansible_managed | comment }}
+# ~homelab/.config/containers/systemd/{{ item.key }}.container   (rootless)
+# RENDERED from roles/svc_media/templates/minecraft.container.j2, driven by
+# minecraft_servers.{{ item.key }} (inventory/group_vars/all/minecraft.yml).
+#
+# LAN ONLY: {{ item.value.port }}/tcp published on svc-media's LAN address
+# alone (never 0.0.0.0), scoped to lan_cidr by a firewalld rich rule in
+# access.yml. Minecraft's wire protocol is raw TCP, not HTTP, so this is
+# deliberately NOT a caddy_services entry — Caddy only speaks HTTP(S).
+# Players connect to {{ item.key }}.{{ service_domain }}:{{ item.value.port }}
+# (extra_dns_records in group_vars/all/minecraft.yml, consumed by
+# dnsmasq-services.conf.j2).
+#
+# UID/GID: itzg/minecraft-server's entrypoint runs as UID 1000 by default
+# (it exposes explicit UID=/GID= env knobs for this) and chowns /data to
+# that UID on start. Rootless podman maps ONLY container-uid-0 straight
+# through to the invoking host account (homelab); any other numeric UID is
+# remapped into the subuid range — an opaque high host UID that homelab
+# itself cannot write — so /data would come up unwritable by anything else
+# on the box (this backup role, verify probes). UID=0/GID=0 below is the
+# same fix already used for seerr (User=0) and Syncthing/Paperless
+# (PUID=0/GID=0 or USERMAP_UID/GID=0): force container-root so the
+# entrypoint's chown lands as homelab, not a subuid-range stranger.
+#
+# RCON is enabled but NEVER published or firewalled — no PublishPort for
+# 25575, no firewalld rule for it anywhere in this role. It is reachable
+# only via `podman exec {{ item.key }} rcon-cli <command>` run locally on
+# svc-media (used by backup-media.sh.j2 for save-off/save-all/save-on
+# around the nightly tar, and available for ad-hoc admin like
+# `whitelist add`). Query (GameSpy4, UDP) is left off — itzg only turns it
+# on when ENABLE_QUERY=true, which this Quadlet never sets.
+#
+# Memory: MEMORY={{ item.value.memory }} sets itzg's INIT_MEMORY and
+# MAX_MEMORY (i.e. -Xms/-Xmx) both to {{ item.value.memory }}.
+[Unit]
+Description=Minecraft ({{ item.key }})
+
+[Container]
+Image={{ minecraft_image }}
+ContainerName={{ item.key }}
+PublishPort={{ ansible_host }}:{{ item.value.port }}:25565
+Volume=%h/appdata/minecraft/{{ item.key }}:/data:Z
+Environment=EULA=TRUE
+Environment=UID=0
+Environment=GID=0
+Environment=TYPE={{ item.value.type }}
+Environment=VERSION={{ item.value.version }}
+Environment=MEMORY={{ item.value.memory }}
+Environment="MOTD={{ item.value.motd }}"
+Environment=DIFFICULTY={{ item.value.difficulty }}
+Environment=VIEW_DISTANCE={{ item.value.view_distance }}
+Environment=ONLINE_MODE={{ item.value.online_mode | lower }}
+Environment=ENABLE_WHITELIST={{ item.value.whitelist_enabled | lower }}
+Environment=ENABLE_RCON=true
+Environment=RCON_PORT=25575
+Environment="RCON_PASSWORD={{ vault_minecraft_rcon_password }}"
+Environment=TZ={{ timezone }}
+
+[Service]
+Restart=on-failure
+RestartSec=10
+# First boot downloads the Paper jar and generates a world — give it more
+# grace than the generic infra apps before podman gives up.
+TimeoutStartSec=180
+
+[Install]
+WantedBy=default.target
