@@ -1,0 +1,5 @@
+# ~homelab/.config/containers/systemd/nextcloud.network
+# Private bridge for the Nextcloud app<->postgres<->valkey trio (same pattern
+# as NetBox / Paperless-ngx / Immich above).
+[Network]
+NetworkName=nextcloud

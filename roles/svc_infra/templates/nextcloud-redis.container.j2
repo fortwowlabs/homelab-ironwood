@@ -1,0 +1,32 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Nextcloud Redis (valkey)
+
+[Container]
+Image={{ nextcloud_images.redis }}
+ContainerName=nextcloud-redis
+Network=nextcloud.network
+# valkey (redis-wire-compatible), not stock redis — the same rootless-podman
+# lesson as paperless/netbox (commit 06ee437): redis's non-root default user
+# can't write a homelab-owned bind mount under rootless podman; valkey runs
+# as container-root (mapped to the host homelab user), so it owns /data and
+# persists cleanly. Used purely as Nextcloud's distributed cache +
+# transactional file-locking backend — no persistent state worth backing up,
+# and no auth (reachable only on the private nextcloud.network), same trust
+# model as immich-redis.
+Volume=%h/appdata/nextcloud-redis:/data:Z
+Environment=TZ={{ timezone }}
+HealthCmd=redis-cli ping | grep -q PONG
+HealthInterval=15s
+HealthTimeout=5s
+HealthRetries=5
+HealthStartPeriod=10s
+# Gate readiness on a real PING so nextcloud.service (Requires=+After=) waits
+# for the cache to answer, not merely for the container to start.
+Notify=healthy
+
+[Service]
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
