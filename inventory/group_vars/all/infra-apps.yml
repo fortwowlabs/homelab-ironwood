@@ -314,14 +314,21 @@ infra_secret_apps:
   # not the plaintext; record the plaintext you typed in separately (it
   # cannot be recovered from the hash) to log in to /admin.
   #
-  # SIGNUPS_ALLOWED starts false (secure-by-default: this is reachable to the
-  # whole LAN, and unlike the other infra_secret_apps there is no
-  # bootstrap-admin-via-env-var, so there is no way to pre-seed the one
-  # account you need). FIRST-RUN ONLY: flip this to "true" here, deploy,
-  # browse to https://vaultwarden.{{ service_domain }} and register your one
-  # account, then flip it back to "false" and deploy again so the running
-  # container picks up the change (env-var config needs a restart; there is
-  # no live toggle in the admin panel for this one).
+  # SIGNUPS_ALLOWED is false permanently — it never needs flipping. This is
+  # reachable to the whole LAN, and unlike the other infra_secret_apps there
+  # is no bootstrap-admin-via-env-var, but admin INVITES bypass this setting:
+  # per upstream, "the vaultwarden admin can invite anyone via the admin
+  # page, regardless of any of the restrictions above."
+  #
+  # FIRST RUN (one deploy, no config round-trip, no window where the LAN can
+  # self-register on a password manager):
+  #   1. https://vaultwarden.{{ service_domain }}/admin — log in with the
+  #      PLAINTEXT admin token (the vault holds only its Argon2 hash).
+  #   2. Invite your own email address there.
+  #   3. SMTP is not configured, so no mail is sent and no link is shown;
+  #      instead browse to https://vaultwarden.{{ service_domain }}/#/signup
+  #      and register using that exact invited address. Upstream documents
+  #      this as the mail-disabled path, and it works with signups off.
   vaultwarden:
     image: "docker.io/vaultwarden/server@sha256:88b74551f5d79fd43f897c23bd74d5295a6e1fafb5d1ec23a1da92e7a0f06767"
     ui_port: 8222
