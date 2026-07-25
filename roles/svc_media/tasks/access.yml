@@ -15,6 +15,17 @@
     state: enabled
   loop: [8080, 8096]
 
+# node_exporter is a scrape target, not a user-facing UI: open :9100 ONLY to
+# Prometheus's host (svc-infra), a single source address, not the whole LAN.
+- name: Open node_exporter to Prometheus only
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family=ipv4 source address={{ hostvars[infra_host].ansible_host }}/32
+      port port=9100 protocol=tcp accept
+    permanent: true
+    immediate: true
+    state: enabled
+
 - name: Remove the legacy unscoped Jellyfin port opening
   ansible.posix.firewalld:
     port: 8096/tcp

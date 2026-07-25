@@ -1,0 +1,26 @@
+{{ ansible_managed | comment }}
+# ~homelab/.config/containers/systemd/node-exporter.container   (rootless)
+# Prometheus host-metrics exporter. Network=host to report the real host
+# NICs, and read-only /proc,/sys,rootfs so the node/filesystem collectors
+# describe the HOST, not the container (same reasoning as beszel-agent's
+# Network=host). No writable state — nothing to persist. Scraped by
+# Prometheus on {{ infra_host }} ONLY: firewalld opens :9100 to that single
+# source address, not the whole LAN (see files.yml).
+[Unit]
+Description=Prometheus node exporter
+
+[Container]
+Image={{ node_exporter_image }}
+ContainerName=node-exporter
+Network=host
+Volume=/proc:/host/proc:ro
+Volume=/sys:/host/sys:ro
+Volume=/:/rootfs:ro
+Exec=--path.procfs=/host/proc --path.sysfs=/host/sys --path.rootfs=/rootfs --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run)($|/)
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target

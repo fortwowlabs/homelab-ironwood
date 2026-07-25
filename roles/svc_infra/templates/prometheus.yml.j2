@@ -1,0 +1,27 @@
+{{ ansible_managed | comment }}
+# Prometheus scrape config. Targets: Prometheus itself plus the node_exporter
+# on every service VM (each derived from hostvars[...].ansible_host so a
+# re-IP in inventory follows automatically). Adding a VM to the fleet means
+# adding it to `groups['service_vms']` — this loop picks it up with no edit.
+global:
+  scrape_interval: 30s
+  evaluation_interval: 30s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ['localhost:9090']
+
+  - job_name: node
+    static_configs:
+{% for host in groups['service_vms'] | sort %}
+      # svc-infra's own exporter: Prometheus runs in a rootless-podman netns
+      # here, so it can't reach the host's LAN IP directly (firewalld rejects
+      # the container's source, which isn't the /32-scoped host address) —
+      # podman's host.containers.internal gateway does reach it. Remote VMs
+      # use their LAN IP (rootless egress is SNAT'd to svc-infra's host IP,
+      # which their firewalld single-source rule allows).
+      - targets: ['{{ "host.containers.internal" if host == infra_host else hostvars[host].ansible_host }}:9100']
+        labels:
+          instance: {{ host }}
+{% endfor %}

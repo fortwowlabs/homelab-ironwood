@@ -124,6 +124,25 @@ infra_apps:
     volumes: []
     backup_paths: []
 
+  # Prometheus — scrapes the node_exporter on all three VMs (+ itself) and
+  # is Grafana's datasource. No secret, so a plain catalog entry; its scrape
+  # config is rendered separately (prometheus.yml.j2 → the /etc/prometheus
+  # bind) by a supplementary task in files.yml, since the generic template
+  # only handles env, not a config file. Published on host 9091 (→ container
+  # 9090) because 9090 is Cockpit on this host. user: "0" so the TSDB under
+  # /prometheus lands homelab-owned (the image runs as uid 65534/nobody,
+  # which rootless podman maps to an unwritable subuid). The TSDB is
+  # regenerable scrape data, so it is NOT in the backup set.
+  prometheus:
+    image: "docker.io/prom/prometheus@sha256:3c42b892cf723fa54d2f262c37a0e1f80aa8c8ddb1da7b9b0df9455a35a7f893"
+    ui_port: 9091
+    container_port: 9090
+    user: "0"
+    volumes:
+      - /opt/homelab/appdata/prometheus/etc:/etc/prometheus:Z
+      - /opt/homelab/appdata/prometheus/data:/prometheus:Z
+    backup_paths: []
+
   # Glances — host monitoring, web UI/REST API, and (per the LLM-TODO-LIST
   # ask "configured such that tools like yourself can connect to it") its
   # built-in MCP server: http://<svc-infra-ip>:61208/mcp/sse (see
@@ -249,3 +268,25 @@ infra_secret_apps:
       PASSWORD: "{{ vault_webtop_password }}"
     require_vault: [vault_webtop_password]
     backup_paths: [webtop]
+
+  # Grafana — dashboards over the Prometheus datasource (wired automatically
+  # via a provisioning YAML rendered into /etc/grafana/provisioning by a
+  # supplementary task in files.yml, so Prometheus is a datasource on first
+  # boot, not a manual click). GF_SECURITY_ADMIN_PASSWORD gates the admin
+  # login. Published on host 3005 (→ container 3000; 3000 is Semaphore).
+  # user: "0" so /var/lib/grafana lands homelab-owned (the image runs as
+  # uid 472). GF_SERVER_ROOT_URL points at the Caddy hostname so Grafana's
+  # generated links/redirects use it.
+  grafana:
+    image: "docker.io/grafana/grafana@sha256:1c1bd67c54c5fcf6e759897852b5a584191bd6796e8d328a5ace457799801261"
+    ui_port: 3005
+    container_port: 3000
+    user: "0"
+    volumes:
+      - /opt/homelab/appdata/grafana/data:/var/lib/grafana:Z
+      - /opt/homelab/appdata/grafana/provisioning:/etc/grafana/provisioning:Z
+    env:
+      GF_SECURITY_ADMIN_PASSWORD: "{{ vault_grafana_admin_password }}"
+      GF_SERVER_ROOT_URL: "https://grafana.{{ service_domain }}"
+    require_vault: [vault_grafana_admin_password]
+    backup_paths: [grafana]

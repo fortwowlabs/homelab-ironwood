@@ -266,6 +266,17 @@
       docs/services.md "Beszel monitoring setup". ***
   when: not (beszel_agent_enabled | bool)
 
+- name: Render the node_exporter Quadlet
+  # Rootful, init ns (not the VPN jail), like beszel-agent here. Scraped by
+  # Prometheus on svc-infra; the host-backstop nftables input chain opens
+  # :9100 to that single source address (see host-backstop.nft.j2).
+  ansible.builtin.template:
+    src: node-exporter.container.j2
+    dest: /etc/containers/systemd/node-exporter.container
+    mode: "0644"
+  register: download_node_exporter_template
+  notify: reload systemd
+
 - name: Ensure the Recyclarr appdata directory exists
   ansible.builtin.file:
     path: /srv/appdata/recyclarr

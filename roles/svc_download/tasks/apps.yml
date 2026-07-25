@@ -30,6 +30,11 @@
     state: "{{ 'restarted' if (download_recyclarr_template.changed | default(false)) else 'started' }}"
   when: download_recyclarr_enabled | default(false) | bool
 
+- name: Ensure the node_exporter is started
+  ansible.builtin.systemd:
+    name: node-exporter.service
+    state: "{{ 'restarted' if (download_node_exporter_template.changed | default(false)) else 'started' }}"
+
 - name: Allow socket proxy bind and connect operations under SELinux
   ansible.posix.seboolean:
     name: "{{ item }}"

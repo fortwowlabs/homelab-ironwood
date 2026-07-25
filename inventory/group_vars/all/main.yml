@@ -86,6 +86,18 @@ beszel_agent_enabled: >-
   {{ (vault_beszel_token | default('')) | length > 0
      and (vault_beszel_key | default('')) | length > 0 }}
 
+# --- node_exporter (v6, monitoring stack) ----------------------------------
+# Prometheus host-metrics exporter, one per VM (svc-download/svc-media/
+# svc-infra), each a bespoke per-role Quadlet (rootless on media/infra,
+# rootful init-ns on download) like the Beszel agents — NOT a catalog entry,
+# since it needs Network=host + read-only /proc,/sys,rootfs mounts and custom
+# Exec args. Scraped by the Prometheus infra_apps entry on svc-infra; the
+# scrape targets are all three hostvars[...].ansible_host:9100 (see
+# prometheus.yml.j2). Each exporter is reachable ONLY from svc-infra's IP
+# (firewalld single-source rule on media/infra, an nftables input rule on
+# download's host backstop).
+node_exporter_image: "docker.io/prom/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0"
+
 # --- Recyclarr (v6, download jail) -----------------------------------------
 # TRaSH-Guides sync for Sonarr/Radarr. Bespoke, not a download_apps entry:
 # the official image doesn't support PUID/PGID (needs Podman User= instead)
@@ -171,3 +183,5 @@ caddy_services:
   code-server: { backend: "{{ hostvars[infra_host].ansible_host }}:8443", group: Infra, icon: code-server }
   semaphore:   { backend: "{{ hostvars[infra_host].ansible_host }}:3000", group: Infra, icon: semaphore }
   webtop:      { backend: "{{ hostvars[infra_host].ansible_host }}:3003", group: Infra, icon: webtop }
+  prometheus:  { backend: "{{ hostvars[infra_host].ansible_host }}:9091", group: Infra, icon: prometheus }
+  grafana:     { backend: "{{ hostvars[infra_host].ansible_host }}:3005", group: Infra, icon: grafana }

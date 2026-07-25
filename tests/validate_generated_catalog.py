@@ -85,6 +85,7 @@ def main() -> int:
         "hostvars": {
             "svc-download": AttrDict(ansible_host="192.0.2.31"),
             "svc-media": AttrDict(ansible_host="192.0.2.30"),
+            "svc-infra": AttrDict(ansible_host="192.0.2.32"),
         },
         "download_host": "svc-download",
         "media_host": "svc-media",

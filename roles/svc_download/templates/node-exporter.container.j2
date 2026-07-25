@@ -1,0 +1,27 @@
+{{ ansible_managed | comment }}
+# /etc/containers/systemd/node-exporter.container   (rootful, init ns)
+# Prometheus host-metrics exporter. Deliberately NOT in the VPN jail (like
+# beszel-agent here): it monitors the host's init ns and is scraped inbound
+# from the LAN. Network=host to report the real host NICs; read-only
+# /proc,/sys,rootfs so the node/filesystem collectors describe the HOST.
+# No writable state. Scraped by Prometheus on {{ infra_host }} ONLY — the
+# host-backstop nftables input chain opens :9100 to that single source
+# address (see host-backstop.nft.j2), not the whole LAN.
+[Unit]
+Description=Prometheus node exporter
+
+[Container]
+Image={{ node_exporter_image }}
+ContainerName=node-exporter
+Network=host
+Volume=/proc:/host/proc:ro
+Volume=/sys:/host/sys:ro
+Volume=/:/rootfs:ro
+Exec=--path.procfs=/host/proc --path.sysfs=/host/sys --path.rootfs=/rootfs --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run)($|/)
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

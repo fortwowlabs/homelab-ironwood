@@ -394,6 +394,43 @@
       docs/services.md "Beszel monitoring setup". ***
   when: not (beszel_agent_enabled | bool)
 
+# --- Monitoring stack: node_exporter (bespoke, like beszel-agent) + the
+# supplementary config renders for the Prometheus/Grafana catalog entries.
+- name: Render the node_exporter Quadlet
+  ansible.builtin.template:
+    src: node-exporter.container.j2
+    dest: /opt/homelab/.config/containers/systemd/node-exporter.container
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_node_exporter_template
+
+- name: Render the Prometheus scrape configuration
+  ansible.builtin.template:
+    src: prometheus.yml.j2
+    dest: /opt/homelab/appdata/prometheus/etc/prometheus.yml
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_prometheus_config
+
+- name: Ensure the Grafana datasource provisioning directory exists
+  ansible.builtin.file:
+    path: /opt/homelab/appdata/grafana/provisioning/datasources
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+
+- name: Render the Grafana Prometheus datasource
+  ansible.builtin.template:
+    src: grafana-datasource.yml.j2
+    dest: /opt/homelab/appdata/grafana/provisioning/datasources/prometheus.yml
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_grafana_datasource
+
 - name: Start firewalld before opening catalog service ports
   ansible.builtin.systemd:
     name: firewalld
@@ -467,6 +504,17 @@
     immediate: true
     state: enabled
 
+# node_exporter is a scrape target, not a user-facing UI: open :9100 ONLY to
+# Prometheus's own host (svc-infra), a single source address, not lan_cidr.
+- name: Open node_exporter to Prometheus only
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family=ipv4 source address={{ hostvars[infra_host].ansible_host }}/32
+      port port=9100 protocol=tcp accept
+    permanent: true
+    immediate: true
+    state: enabled
+
 - name: Calculate infra services whose rendered configuration changed
   ansible.builtin.set_fact:
     infra_services_to_restart: >-
@@ -484,6 +532,9 @@
           | list
         )
         + (['beszel-agent'] if (infra_beszel_agent_template.changed | default(false)) else [])
+        + (['node-exporter'] if (infra_node_exporter_template.changed | default(false)) else [])
+        + (['prometheus'] if (infra_prometheus_config.changed | default(false)) else [])
+        + (['grafana'] if (infra_grafana_datasource.changed | default(false)) else [])
         + (['paperless-redis', 'paperless'] if (infra_paperless_network.changed | default(false)) else [])
         + (['paperless-redis'] if (infra_paperless_redis_template.changed | default(false)) else [])
         + (['paperless'] if (infra_paperless_template.changed | default(false)) else [])

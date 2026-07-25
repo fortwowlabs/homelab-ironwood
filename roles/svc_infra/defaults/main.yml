@@ -8,6 +8,7 @@
 # pattern (media_quadlet_catalog there mixes catalog and bespoke entries).
 infra_extra_service_names: >-
   {{ (['beszel-agent'] if beszel_agent_enabled | bool else [])
+     + ['node-exporter']
      + ['paperless-redis', 'paperless']
      + ['netbox-db', 'netbox-redis', 'netbox']
      + ['immich-db', 'immich-redis', 'immich-server'] }}

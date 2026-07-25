@@ -24,6 +24,7 @@
 
 define TRUENAS = {{ truenas_ip }}
 define LAN_ADMIN = {{ lan_cidr }}   # deliberate: whole flat LAN (owner's call)
+define INFRA_HOST = {{ hostvars[infra_host].ansible_host }}   # Prometheus host
 
 table inet host_backstop
 delete table inet host_backstop
@@ -100,6 +101,10 @@ table inet host_backstop {
         # Jailed-service UIs derive from download_apps. 9090 is Cockpit on
         # the host itself and remains intentionally separate from the catalog.
         ip saddr $LAN_ADMIN tcp dport { {{ download_apps | dict2items | selectattr('value.proxy') | map(attribute='value.ui_port') | join(', ') }}, 9090 } accept
+
+        # node_exporter (init ns, not the jail) scraped by Prometheus on
+        # {{ infra_host }} ONLY — scoped to that single host, not $LAN_ADMIN.
+        ip saddr $INFRA_HOST tcp dport 9100 accept
 
         icmp type echo-request accept
 
