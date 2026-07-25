@@ -18,7 +18,12 @@ NON_SECRET_VAULT_KEYS = {
     "vault_mullvad_wg_addr",
     "vault_pve_token_id",
     "vault_password_file",
+    # Python identifiers in this repo's own tooling, not credentials. They are
+    # permanently reachable blobs in history, so allowlisting is the only fix
+    # available — renaming the variables today would not un-reach the old blob.
     "vault_re",
+    "vault_ref_re",
+    "vault_refs",
 }
 SECRET_KEY_PATTERN = (
     r"(?:vault_[a-z0-9_]+|[a-z0-9_.-]*(?:password|passwd|token_secret|"
