@@ -1,14 +1,12 @@
-# Authelia SSO — forward-auth for 12 services
+# Authelia SSO — forward-auth for 11 services
 
 ## Context
 
 Most of this estate has no authentication. Anyone on the LAN or the tailnet can
 reach Syncthing's GUI, Prometheus, and all seven download apps without a
-password, and Calibre-Web still ships the publicly-known `admin`/`admin123`.
-Those have been open items in `docs/automation-opportunities.md` since the last
-batch, deferred because fixing each one individually meant per-app config
-surgery (SQLite edits for Calibre-Web, a bcrypt hash into a file Syncthing
-rewrites itself).
+password. Syncthing has been an open item in
+`docs/automation-opportunities.md` since the last batch, deferred because
+fixing it meant writing a bcrypt hash into a file Syncthing rewrites itself.
 
 A reverse-proxy SSO layer fixes all of them at once, in one place, without
 touching any application's own config. Caddy already fronts every service by
@@ -36,12 +34,12 @@ link launcher with no API-key widgets (`homepage/services.yaml.j2:17-19`).
 
 ## What gets protected
 
-Twelve services, all currently unauthenticated or weakly authenticated:
+Eleven services, all currently unauthenticated or weakly authenticated:
 
 | Group | Services |
 |---|---|
 | Download stack | `sonarr` `radarr` `prowlarr` `sabnzbd` `bazarr` `lazylibrarian` `jdownloader` |
-| High-risk | `calibre-web` `code-server` `webtop` |
+| High-risk | `code-server` `webtop` |
 | Open infra | `syncthing` `prometheus` |
 
 **Explicitly not protected** — native/mobile clients cannot follow a browser
@@ -49,6 +47,11 @@ redirect: `jellyfin` `immich` `nextcloud` `abs` `ntfy` `vaultwarden`. Also left
 alone: `home` (stays the open landing page), `it-tools`, `glances` (its
 `/mcp/sse` endpoint has no cookie jar), `bambuddy`, `cockpit-*` (own PAM auth),
 and every service that already has a real login.
+
+**`calibre-web` is deliberately excluded** — it keeps its own built-in auth and
+gains no SSO layer. Consequence to carry forward: its default
+`admin`/`admin123` remains live and remains a manual first-login fix. This plan
+does not address it. See "Docs to update".
 
 ## Design
 
@@ -174,7 +177,6 @@ sso_protected_services:
   - bazarr
   - lazylibrarian
   - jdownloader
-  - calibre-web
   - code-server
   - webtop
   - syncthing
@@ -258,7 +260,7 @@ knowing about.
 ## Ordering, and how to back out
 
 This is remotely-accessible infrastructure and a broken `forward_auth` locks
-out 12 services at once. **Two branches, not one** — deploy the identity
+out 11 services at once. **Two branches, not one** — deploy the identity
 provider and prove it works before anything depends on it.
 
 **Branch 1 — `feat/authelia`.** Deploy Authelia alone. Nothing else changes;
@@ -280,12 +282,14 @@ one config file on one host and the turnaround is seconds.
 validated at render time (`caddy validate`, `access.yml:126`), so a malformed
 directive fails the deploy rather than taking the proxy down.
 
-**Bypass while debugging:** most protected services stay reachable at their
+**Bypass while debugging:** every protected service stays reachable at its
 direct `IP:port`, since only the Caddy vhost gains auth — svc-download's seven
-apps, `prometheus` (`.32:9091`), `syncthing` (`.32:8384`), `code-server`
-(`.32:8443`), `webtop` (`.32:3003`). The exception is **`calibre-web`**, which
-publishes on `127.0.0.1:8083` on svc-media and therefore has no non-Caddy path
-— reach it over SSH if needed.
+apps on `.31`, plus `prometheus` (`.32:9091`), `syncthing` (`.32:8384`),
+`code-server` (`.32:8443`) and `webtop` (`.32:3003`). Nothing in the protected
+set publishes on loopback only, so there is no service that a broken
+`forward_auth` can cut off entirely. (This is a direct consequence of excluding
+`calibre-web`, which is loopback-only on svc-media — it was the one service
+with no escape hatch.)
 
 ## Verification
 
@@ -309,48 +313,33 @@ publishes on `127.0.0.1:8083` on svc-media and therefore has no non-Caddy path
 ## Double logins: which services still prompt underneath
 
 Forward-auth is an **outer gate**. It does not disable any application's own
-login, so a service that has one will ask twice. Of the twelve:
+login, so a service that has one will ask twice. Of the eleven, only two do:
 
 | Service | After SSO | Why |
 |---|---|---|
 | The 7 download apps | **one login** | `AuthenticationRequired=DisabledForLocalAddresses`; Caddy proxies from a LAN address, so they never prompt |
 | `prometheus` | **one login** | has no auth of its own |
 | `syncthing` | **one login** | GUI is unauthenticated today |
-| `calibre-web` | two logins | its own account system |
 | `code-server` | two logins | `PASSWORD` env |
 | `webtop` | two logins | KasmVNC basic auth |
 
-**The defaults underneath do not go away.** Calibre-Web's `admin`/`admin123`
-is still live after this change — SSO hides it from the network, it does not
-remove it. Change it at first login regardless; a proxy gate is not a reason
-to leave a known default in place.
+Neither `code-server` nor `webtop` supports header-based auth, so the second
+prompt stays. That is arguably correct for both — they are effectively remote
+shells, and a second factor in front of a shell is not a bad trade.
 
-### Optional: make Calibre-Web a true single sign-on
-
-Calibre-Web supports header-based auth — **"Allow Reverse Proxy
-Authentication"** in *Admin → Basic Configuration*, with a configurable header
-name. Point it at `Remote-User`, which the `forward_auth` block already copies,
-and the second prompt disappears.
-
-Upstream's caveat is that this "allows for unchallenged login" and therefore
-assumes the service cannot be reached except through the proxy. **That
-assumption holds here and nowhere else in this list**: Calibre-Web publishes on
-`127.0.0.1:8083` on svc-media, so Caddy is genuinely its only path. (It is also
-the reason Calibre-Web has no bypass if forward-auth breaks — see Rollback.)
-
-Do this *after* the two branches land and SSO is proven, not as part of them —
-it is a UI setting, not IaC, and it trades away the local login as a fallback.
-
-`code-server` and `webtop` have no equivalent header-auth mode; their second
-login stays.
+Do **not** try to remove their local passwords to smooth this out. Both publish
+on svc-infra's LAN IP, so the local login is what protects them if Caddy is
+bypassed or forward-auth fails open.
 
 ## Docs to update
 
 - `docs/first-login-walkthrough.md` — Phase 4's "✅ no login needed on LAN" and
   Phase 6's "No login required" tables both become false; add an SSO login step
   ahead of the services it now fronts.
-- `docs/automation-opportunities.md` — the "still live" warnings for Calibre-Web
-  and Syncthing are largely resolved by this; say so rather than leaving them.
+- `docs/automation-opportunities.md` — the "still live" warning for **Syncthing**
+  is resolved by this; say so. The **Calibre-Web** `admin`/`admin123` warning
+  stays exactly as it is — this change deliberately does not cover it, and it
+  remains the most exposed default in the estate.
 - `docs/services.md`, `docs/dns-pfsense-caddy.md` — the `curl --fail --head`
   examples that "expect HTTP/2 200" are wrong for protected names.
 
@@ -360,4 +349,4 @@ login stays.
 - Confirm whether the forward-auth challenge is `302` or `401` under `curl`.
 - Confirm Authelia's cookie is accepted across sibling subdomains as configured
   (`domain: fort.wow`) — this is what makes it *single* sign-on rather than
-  twelve logins.
+  eleven logins.
