@@ -29,6 +29,15 @@ collections/ansible_collections/
 .DS_Store
 .secrets/
 
+# Working notes kept at the repo root deliberately: task lists, review output
+# and session retrospectives. They are useful to have on disk next to the code,
+# but they quote live credentials and raw command output (LLM-TODO-LIST.md
+# holds the Beszel password in plaintext), so they must never be committed.
+LLM-TODO-LIST.md
+LLM-TODO-LIST-done-*.md
+REVIEW-FINDINGS-*.md
+SESSION-RETRO-*.md
+
 # Local copies of live appdata backups (API keys, indexer creds, DB dumps)
 # fetched from svc-download/svc-media for local restore convenience. These
 # are the same artifacts backup-dl-appdata.service / backup-media.service
