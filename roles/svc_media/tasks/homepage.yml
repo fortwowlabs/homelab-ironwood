@@ -1,0 +1,14 @@
+---
+- name: Render Homepage configuration from the service catalogs
+  ansible.builtin.template:
+    src: "homepage/{{ item }}.j2"
+    dest: "/opt/homelab/appdata/homepage/{{ item }}"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  loop:
+    - services.yaml
+    - settings.yaml
+    - widgets.yaml
+    - bookmarks.yaml
+  notify: restart homepage

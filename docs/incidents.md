@@ -19,7 +19,7 @@ commit and image digests, recent changes, commands run, and recovery evidence.
    services; its temporary NFS write probes are removed in cleanup paths.
 5. Run `make verify-disruptive` only when the download stack can tolerate a
    drill. Confirm it restored the exact previously running services, including
-   LazyLibrarian.
+   LazyLibrarian and Shelfmark.
 6. Accept recovery only when every targeted host reports a verification fact
    and the play exits zero. A green notification without those facts is a bug.
 
@@ -165,8 +165,8 @@ interfaces. Their useful lessons are represented in these runbooks:
 - NFS probes run as the service UID because root squash is intentional;
 - package/image egress is temporary and must restore the nftables backstop;
 - migrations are conditional on real legacy units/files;
-- Seerr, LazyLibrarian, and all catalog services participate in backup,
-  verification, canary, and recovery behavior.
+- Seerr, LazyLibrarian, Shelfmark, and all catalog services participate in
+  backup, verification, canary, and recovery behavior.
 
 Git history is the archive for obsolete narratives. The six linked guides in
 the repository README are the only canonical operator documentation.

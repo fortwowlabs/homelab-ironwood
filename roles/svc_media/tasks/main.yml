@@ -19,6 +19,10 @@
   ansible.builtin.import_tasks: access.yml
   tags: [access]
 
+- name: Configure Homepage service catalog
+  ansible.builtin.import_tasks: homepage.yml
+  tags: [files, access]
+
 - name: Configure media backups
   ansible.builtin.import_tasks: backup.yml
   tags: [backup]

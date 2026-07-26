@@ -17,6 +17,7 @@
   loop: "{{ download_quadlet_templates.results }}"
   loop_control:
     label: "{{ item.item.key }}"
+  when: not (ansible_check_mode and item.changed)
 
 - name: Ensure the Beszel agent is started
   ansible.builtin.systemd:
@@ -74,6 +75,7 @@
   loop: "{{ download_proxy_socket_templates.results }}"
   loop_control:
     label: "{{ item.item.key }}-proxy.socket"
+  when: not (ansible_check_mode and item.changed)
 
 - name: Arm continuous leak verification
   ansible.builtin.systemd:

@@ -86,12 +86,12 @@ If the canary reports `DOWN`, repair the missing unit or proxy. If it reports
 `LEAK`, leave the stack stopped until namespace membership, nftables policy,
 and Mullvad identity are understood. After a passing safe verification from the
 control node, start only the intended catalog services—including
-LazyLibrarian—on `svc-download`, verify again from the control node, and clear
-the trip marker on the guest:
+LazyLibrarian and Shelfmark—on `svc-download`, verify again from the control
+node, and clear the trip marker on the guest:
 
 ```bash
 # on svc-download
-sudo systemctl start dl-{sabnzbd,prowlarr,sonarr,radarr,lazylibrarian}.service
+sudo systemctl start dl-{sabnzbd,prowlarr,sonarr,radarr,lazylibrarian,shelfmark,bazarr,jdownloader}.service
 
 # on the control node
 make verify
@@ -138,7 +138,7 @@ of days (14 by default).
 
 | Workload | Artifact | Consistency |
 |---|---|---|
-| SABnzbd, Prowlarr, Sonarr, Radarr, LazyLibrarian | `/srv/backups/svc-download/<app>-YYYY-MM-DD.tar.gz` | Live appdata tar; arr application backups inside the archive are preferred when available |
+| Catalogued download apps, including Shelfmark | `/srv/backups/svc-download/<app>-YYYY-MM-DD.tar.gz` | Live appdata tar; application-consistent backups inside the archive are preferred when available |
 | Jellyfin | `/srv/backups/svc-media/appdata/jellyfin-config-YYYY-MM-DD.tar.gz` | Live config tar |
 | Seerr | `/srv/backups/svc-media/appdata/seerr-YYYY-MM-DD.tar.gz` | Live config tar |
 | RomM files | `/srv/backups/svc-media/appdata/romm-appdata-YYYY-MM-DD.tar.gz` | Live appdata tar |
@@ -182,7 +182,9 @@ archive under `/srv/appdata` (the archive contains the application directory).
 For Sonarr, Radarr, Prowlarr, or LazyLibrarian, prefer the application's own
 scheduled backup inside the tar when SQLite consistency is in doubt. Start the
 unit, check its corresponding proxy, and confirm the container remains in the
-VPN namespace.
+VPN namespace. After restoring Shelfmark, also confirm `/api/health`, its
+Prowlarr/SABnzbd connections, ebook and audiobook destinations, and one
+authorized search.
 
 ### Jellyfin or Seerr
 

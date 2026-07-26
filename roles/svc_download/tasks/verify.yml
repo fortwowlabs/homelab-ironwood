@@ -61,11 +61,49 @@
   delay: 5
   until: download_proxy_gate is not failed
 
+- name: Verify Shelfmark's application health endpoint
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:{{ download_apps.shelfmark.ui_port }}/api/health"
+    status_code: 200
+    timeout: 30
+  register: download_shelfmark_health
+  retries: 6
+  delay: 10
+  until: download_shelfmark_health.status == 200
+
+- name: Verify Shelfmark can write its config and delivery destinations
+  ansible.builtin.command:
+    argv:
+      - podman
+      - exec
+      - --user
+      - appuser
+      - shelfmark
+      - sh
+      - -c
+      - >-
+        config_probe=/config/.homelab-verify;
+        books_probe=/books/.homelab-verify;
+        audio_probe=/data/audiobooks/.homelab-verify;
+        trap 'rm -f "$config_probe" "$books_probe" "$audio_probe"' EXIT;
+        touch "$config_probe" "$books_probe" "$audio_probe"
+  register: download_shelfmark_write_gate
+  changed_when: false
+  retries: 6
+  delay: 10
+  until: download_shelfmark_write_gate is not failed
+
 - name: Verify Mullvad from inside a workload
   ansible.builtin.command: podman exec sabnzbd curl -4 -s --max-time 15 https://am.i.mullvad.net/connected
   register: download_mullvad_container
   changed_when: false
   failed_when: "'You are connected to Mullvad' not in download_mullvad_container.stdout"
+
+- name: Verify Mullvad from inside Shelfmark
+  ansible.builtin.command: podman exec shelfmark curl -4 -s --max-time 15 https://am.i.mullvad.net/connected
+  register: download_shelfmark_mullvad
+  changed_when: false
+  failed_when: "'You are connected to Mullvad' not in download_shelfmark_mullvad.stdout"
 
 - name: Run continuous leak canary immediately
   ansible.builtin.command:

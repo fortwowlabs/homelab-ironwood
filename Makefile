@@ -145,7 +145,7 @@ drift: check-diff ## Alias for the sanitized diff check
 reconcile: ## Reconcile cores, memory, onboot, and startup on existing VMs
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --tags provision -e pve_reconcile=true $(ARGS)
 
-access: ## Re-run the media VM's Caddy access layer
+access: ## Re-run the media VM's DNS, Caddy, and Homepage access layer
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit media_vms --tags access $(ARGS)
 
 verify: ## Run the non-disruptive verification playbook

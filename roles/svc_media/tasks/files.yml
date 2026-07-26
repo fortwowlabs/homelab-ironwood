@@ -65,20 +65,6 @@
     mode: "0644"
   register: media_romm_network
 
-- name: Render Homepage configuration from the service catalogs
-  ansible.builtin.template:
-    src: "homepage/{{ item }}.j2"
-    dest: "/opt/homelab/appdata/homepage/{{ item }}"
-    owner: "{{ svc_uid }}"
-    group: "{{ svc_gid }}"
-    mode: "0644"
-  loop:
-    - services.yaml
-    - settings.yaml
-    - widgets.yaml
-    - bookmarks.yaml
-  register: media_homepage_templates
-
 - name: Require RomM database and authentication secrets
   ansible.builtin.assert:
     that:
@@ -211,7 +197,6 @@
             | list
           )
           + (['romm-db', 'romm'] if media_romm_network.changed else [])
-          + (['homepage'] if (media_homepage_templates.results | selectattr('changed') | list | length > 0) else [])
           + (['romm-db', 'romm'] if (media_romm_secret_templates.changed | default(false)) else [])
           + (['beszel-agent'] if (media_beszel_agent_template.changed | default(false)) else [])
           + (

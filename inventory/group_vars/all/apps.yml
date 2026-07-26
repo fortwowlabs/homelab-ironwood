@@ -57,6 +57,33 @@ download_apps:
     dashboard: { group: Downloads, icon: lazylibrarian }
     proxy: true
 
+  # Shelfmark is an interactive search/request tool, not a replacement for
+  # LazyLibrarian's author/series automation. The full /data view matches
+  # SABnzbd's container paths so completed jobs need no remote-path mapping;
+  # ebooks land in CWA's ingest directory and audiobooks go straight to the
+  # existing Audiobookshelf library.
+  shelfmark:
+    image: "ghcr.io/calibrain/shelfmark@sha256:056f02e28d446b128d91fa10451c7cc376392f7383bbb841deec49838a419d53"
+    ui_port: 8084
+    volumes:
+      - /srv/appdata/shelfmark:/config:Z
+      - /srv/media/book-ingest:/books
+      - /srv/media:/data
+    media_mount: true
+    backup_paths: [shelfmark]
+    dashboard: { group: Downloads, icon: shelfmark }
+    proxy: true
+    env:
+      AUTH_METHOD: none
+      SEARCH_MODE: universal
+      BOOKS_OUTPUT_MODE: folder
+      INGEST_DIR: /books
+      DESTINATION_AUDIOBOOK: /data/audiobooks
+      HARDLINK_TORRENTS: "false"
+      FILE_ORGANIZATION: rename
+      FILE_ORGANIZATION_AUDIOBOOK: organize
+      SESSION_COOKIE_SECURE: "true"
+
   bazarr:
     image: "lscr.io/linuxserver/bazarr@sha256:4c30dc0bb9a5d223075e7f5d12c77bd293c4b460f86d696dbe64763104c1e88c"
     ui_port: 6767

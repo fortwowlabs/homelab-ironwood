@@ -150,13 +150,14 @@ from inside the network. Nothing to do for those three.
 | SABnzbd | sabnzbd.fort.wow | ✅ reachable; Usenet provider already configured (`news.eweka.nl`) |
 | Bazarr | bazarr.fort.wow | 🆕 no config yet — first-run wizard |
 | LazyLibrarian | lazylibrarian.fort.wow | 🆕 no config yet — first-run wizard |
+| Shelfmark | shelfmark.fort.wow | 🆕 intentionally open on LAN/tailnet; configure sources and clients |
 | jDownloader | jdownloader.fort.wow | ⚙️ noVNC desktop; sign in to MyJDownloader if you use it |
 
 Internal addresses for wiring these together — they all share the VPN jail's
 network namespace, so they reach each other on **localhost**:
 
 - Sonarr `localhost:8989`, Radarr `localhost:7878`, Prowlarr `localhost:9696`,
-  SABnzbd `localhost:8080`
+  SABnzbd `localhost:8080`, Shelfmark `localhost:8084`
 
 **Order within this phase:**
 
@@ -169,6 +170,13 @@ network namespace, so they reach each other on **localhost**:
 3. **Bazarr** — connect to Sonarr and Radarr (localhost addresses above).
    Its API keys are read automatically by Recyclarr, but Bazarr's own setup is
    manual.
+4. **Shelfmark** — leave authentication disabled as intended. Keep Universal
+   search, connect Prowlarr at `http://127.0.0.1:9696` and SABnzbd at
+   `http://127.0.0.1:8080`, and enter their API keys. Use SABnzbd categories
+   `books` and `audiobooks` with completed paths below `/data`; ebooks deliver
+   to `/books`, audiobooks to `/data/audiobooks`, and the library link is
+   `https://calibre-web.fort.wow`. Configure only direct sources you are
+   authorized to use.
 
 Recyclarr already syncs TRaSH-Guides quality profiles into Sonarr/Radarr
 automatically — no UI, nothing to configure.

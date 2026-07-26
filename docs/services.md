@@ -20,6 +20,7 @@ is `fort.wow`; derive the current service VM addresses from
 | `sonarr` | `svc-download` | Television automation inside the VPN jail |
 | `radarr` | `svc-download` | Movie automation inside the VPN jail |
 | `lazylibrarian` | `svc-download` | Book/audiobook automation inside the VPN jail |
+| `shelfmark` | `svc-download` | Interactive book/audiobook search and requests inside the VPN jail |
 | `cockpit-dl` | `svc-download` | Download VM host administration |
 
 Download UIs reach their jailed containers through generated systemd socket
@@ -104,11 +105,19 @@ credentials in task output.
    `/data` media mount.
 4. In LazyLibrarian, configure SABnzbd and destinations
    `/data/books`, `/data/ebooks`, and `/data/audiobooks`.
-5. In Jellyfin, create the administrator and add the NFS movie/TV libraries.
-6. In Seerr, sign in with Jellyfin and connect the Sonarr/Radarr instances.
-7. In Audiobookshelf, add `/audiobooks`, `/books`, and `/ebooks`, then schedule
+5. In Shelfmark, leave authentication disabled as intended, use Universal
+   search, configure Prowlarr at `http://127.0.0.1:9696` and SABnzbd at
+   `http://127.0.0.1:8080`, and add their API keys. Keep SABnzbd's `books` and
+   `audiobooks` completed paths beneath `/data`; Shelfmark sees that same path.
+   Ebooks deliver to `/books` (CWA ingest), audiobooks to
+   `/data/audiobooks`, and the library link is
+   `https://calibre-web.{{ service_domain }}`. Configure only direct sources
+   you are authorized to use; their credentials stay in Shelfmark appdata.
+6. In Jellyfin, create the administrator and add the NFS movie/TV libraries.
+7. In Seerr, sign in with Jellyfin and connect the Sonarr/Radarr instances.
+8. In Audiobookshelf, add `/audiobooks`, `/books`, and `/ebooks`, then schedule
    its built-in backup to `/config/backups`.
-8. In RomM, verify metadata-provider credentials and ingest owned ROMs under
+9. In RomM, verify metadata-provider credentials and ingest owned ROMs under
    `/srv/media/romm/roms/<platform>/`; there is no arr-style ROM acquisition
    pipeline.
 
@@ -122,7 +131,15 @@ The book flow is:
 
 ```text
 LazyLibrarian -> Prowlarr/SABnzbd -> NFS books/audiobooks -> Audiobookshelf
+
+Prowlarr/SABnzbd -> Shelfmark -> CWA ingest -> ebook library
+                           `-> NFS audiobooks -> Audiobookshelf
+
+Direct source -------> Shelfmark -> the same destinations
 ```
+
+Shelfmark complements LazyLibrarian rather than replacing its background
+author, series, and new-release monitoring.
 
 ## Beszel monitoring setup
 

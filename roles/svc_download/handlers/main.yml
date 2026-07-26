@@ -14,6 +14,7 @@
     name: "dl-{{ item }}.service"
     state: restarted
   loop: "{{ download_apps_to_restart | default([]) }}"
+  when: not ansible_check_mode
   listen: restart changed download units
 
 - name: restart changed catalog proxy sockets
@@ -21,11 +22,13 @@
     name: "{{ item }}-proxy.socket"
     state: restarted
   loop: "{{ download_proxy_sockets_to_restart | default([]) }}"
+  when: not ansible_check_mode
   listen: restart changed download units
 
 - name: try-restart changed catalog proxy services
   ansible.builtin.command: "systemctl try-restart {{ item }}-proxy.service"
   loop: "{{ download_proxy_services_to_restart | default([]) }}"
+  when: not ansible_check_mode
   changed_when: false
   listen: restart changed download units
 

@@ -3,8 +3,8 @@
 ## Context
 
 Most of this estate has no authentication. Anyone on the LAN or the tailnet can
-reach Syncthing's GUI, Prometheus, and all seven download apps without a
-password. Syncthing has been an open item in
+reach Syncthing's GUI, Prometheus, and the seven download apps selected below
+without a password. Syncthing has been an open item in
 `docs/automation-opportunities.md` since the last batch, deferred because
 fixing it meant writing a bcrypt hash into a file Syncthing rewrites itself.
 
@@ -46,7 +46,8 @@ Eleven services, all currently unauthenticated or weakly authenticated:
 redirect: `jellyfin` `immich` `nextcloud` `abs` `ntfy` `vaultwarden`. Also left
 alone: `home` (stays the open landing page), `it-tools`, `glances` (its
 `/mcp/sse` endpoint has no cookie jar), `bambuddy`, `cockpit-*` (own PAM auth),
-and every service that already has a real login.
+`shelfmark` (deliberately anonymous on the private LAN/tailnet), and every
+service that already has a real login.
 
 **`calibre-web` is deliberately excluded** — it keeps its own built-in auth and
 gains no SSO layer. Consequence to carry forward: its default
@@ -283,8 +284,8 @@ validated at render time (`caddy validate`, `access.yml:126`), so a malformed
 directive fails the deploy rather than taking the proxy down.
 
 **Bypass while debugging:** every protected service stays reachable at its
-direct `IP:port`, since only the Caddy vhost gains auth — svc-download's seven
-apps on `.31`, plus `prometheus` (`.32:9091`), `syncthing` (`.32:8384`),
+direct `IP:port`, since only the Caddy vhost gains auth — the seven selected
+svc-download apps on `.31`, plus `prometheus` (`.32:9091`), `syncthing` (`.32:8384`),
 `code-server` (`.32:8443`) and `webtop` (`.32:3003`). Nothing in the protected
 set publishes on loopback only, so there is no service that a broken
 `forward_auth` can cut off entirely. (This is a direct consequence of excluding
@@ -317,7 +318,7 @@ login, so a service that has one will ask twice. Of the eleven, only two do:
 
 | Service | After SSO | Why |
 |---|---|---|
-| The 7 download apps | **one login** | `AuthenticationRequired=DisabledForLocalAddresses`; Caddy proxies from a LAN address, so they never prompt |
+| The 7 SSO-protected download apps | **one login** | `AuthenticationRequired=DisabledForLocalAddresses`; Caddy proxies from a LAN address, so they never prompt |
 | `prometheus` | **one login** | has no auth of its own |
 | `syncthing` | **one login** | GUI is unauthenticated today |
 | `code-server` | two logins | `PASSWORD` env |

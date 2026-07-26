@@ -28,6 +28,7 @@ def main() -> int:
             failures.append(f"{task_file.relative_to(ROOT)} can start or restart a service")
 
     shared = (ROOT / "roles/service_vm/tasks/verify.yml").read_text(encoding="utf-8")
+    download = (ROOT / "roles/svc_download/tasks/verify.yml").read_text(encoding="utf-8")
     media = (ROOT / "roles/svc_media/tasks/verify.yml").read_text(encoding="utf-8")
     disruptive = (
         ROOT / "roles/svc_download/tasks/verify_disruptive.yml"
@@ -46,10 +47,25 @@ def main() -> int:
     if media.count("trap 'rm -f $p' EXIT") < 2:
         failures.append("container NFS write probes lack trap-based cleanup")
     for required in (
+        "/api/health",
+        "--user\n      - appuser\n      - shelfmark",
+        "books_probe=/books/.homelab-verify",
+        "audio_probe=/data/audiobooks/.homelab-verify",
+        """trap 'rm -f "$config_probe" "$books_probe" "$audio_probe"' EXIT""",
+        "podman exec shelfmark curl",
+    ):
+        if required not in download:
+            failures.append(f"Shelfmark verification lacks {required!r}")
+    for required in (
         "always:",
         "Capture VPN namespace state before the drill",
+        "Capture catalog proxy socket state before the fail-closed drill",
+        "Capture Recyclarr state before the fail-closed drill",
+        "Pause active catalog proxy sockets during the intentional outage",
         "Attempt to restore the VPN namespace when it was previously active",
         "Attempt to restore workloads that were previously active",
+        "Attempt to restore Recyclarr when it was previously active",
+        "Attempt to restore proxy sockets that were previously active",
         "Attempt to restore the leak-canary timer when it was previously active",
         "Wait for any in-flight canary check",
         "Assert every previously active service was restored",

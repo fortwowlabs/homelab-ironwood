@@ -8,6 +8,21 @@
   failed_when: false
   changed_when: false
 
+- name: Capture catalog proxy socket state before the fail-closed drill
+  ansible.builtin.command: "systemctl is-active {{ item.key }}-proxy.socket"
+  loop: "{{ download_apps | dict2items | selectattr('value.proxy', 'equalto', true) | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+  register: download_pre_drill_proxy_socket_state
+  failed_when: false
+  changed_when: false
+
+- name: Capture Recyclarr state before the fail-closed drill
+  ansible.builtin.command: systemctl is-active recyclarr.service
+  register: download_pre_drill_recyclarr_state
+  failed_when: false
+  changed_when: false
+
 - name: Capture leak-canary timer state before the drill
   ansible.builtin.command: systemctl is-active leak-canary.timer
   register: download_pre_drill_canary_state
@@ -48,6 +63,19 @@
           Clear and investigate /var/lib/leak-canary/tripped before running
           an intentional fail-closed drill.
 
+    - name: Pause active catalog proxy sockets during the intentional outage
+      ansible.builtin.systemd:
+        name: "{{ item.item.key }}-proxy.socket"
+        state: stopped
+      loop: >-
+        {{
+          download_pre_drill_proxy_socket_state.results
+          | selectattr('stdout', 'equalto', 'active')
+          | list
+        }}
+      loop_control:
+        label: "{{ item.item.key }}"
+
     - name: Stop the VPN namespace
       ansible.builtin.systemd:
         name: vpn-netns.service
@@ -85,6 +113,29 @@
       register: download_restore_app_attempts
       failed_when: false
 
+    - name: Attempt to restore Recyclarr when it was previously active
+      ansible.builtin.systemd:
+        name: recyclarr.service
+        state: started
+      when: download_pre_drill_recyclarr_state.stdout == 'active'
+      register: download_restore_recyclarr_attempt
+      failed_when: false
+
+    - name: Attempt to restore proxy sockets that were previously active
+      ansible.builtin.systemd:
+        name: "{{ item.item.key }}-proxy.socket"
+        state: started
+      loop: >-
+        {{
+          download_pre_drill_proxy_socket_state.results
+          | selectattr('stdout', 'equalto', 'active')
+          | list
+        }}
+      loop_control:
+        label: "{{ item.item.key }}"
+      register: download_restore_proxy_socket_attempts
+      failed_when: false
+
     - name: Attempt to restore the leak-canary timer when it was previously active
       ansible.builtin.systemd:
         name: leak-canary.timer
@@ -109,6 +160,27 @@
       failed_when: false
       changed_when: false
 
+    - name: Read restored Recyclarr state
+      ansible.builtin.command: systemctl is-active recyclarr.service
+      when: download_pre_drill_recyclarr_state.stdout == 'active'
+      register: download_post_drill_recyclarr_state
+      failed_when: false
+      changed_when: false
+
+    - name: Read restored proxy socket states
+      ansible.builtin.command: "systemctl is-active {{ item.item.key }}-proxy.socket"
+      loop: >-
+        {{
+          download_pre_drill_proxy_socket_state.results
+          | selectattr('stdout', 'equalto', 'active')
+          | list
+        }}
+      loop_control:
+        label: "{{ item.item.key }}"
+      register: download_post_drill_proxy_socket_states
+      failed_when: false
+      changed_when: false
+
     - name: Read restored leak-canary timer state
       ansible.builtin.command: systemctl is-active leak-canary.timer
       when: download_pre_drill_canary_state.stdout == 'active'
@@ -129,6 +201,12 @@
             or (download_post_drill_vpn_state.rc | default(1)) == 0
           - >-
             download_post_drill_app_states.results | default([])
+            | rejectattr('rc', 'equalto', 0) | list | length == 0
+          - >-
+            download_pre_drill_recyclarr_state.stdout != 'active'
+            or (download_post_drill_recyclarr_state.rc | default(1)) == 0
+          - >-
+            download_post_drill_proxy_socket_states.results | default([])
             | rejectattr('rc', 'equalto', 0) | list | length == 0
           - >-
             download_pre_drill_canary_state.stdout != 'active'

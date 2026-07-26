@@ -190,6 +190,12 @@ def main() -> int:
     backup_tasks = (
         ROOT / "roles/svc_download/tasks/backup.yml"
     ).read_text(encoding="utf-8")
+    catalog_handlers = (
+        ROOT / "roles/svc_download/handlers/main.yml"
+    ).read_text(encoding="utf-8")
+    catalog_app_tasks = (
+        ROOT / "roles/svc_download/tasks/apps.yml"
+    ).read_text(encoding="utf-8")
     if "download_apps | dict2items | selectattr('value.proxy') | list" not in verify_tasks:
         failures.append("verify: UI probes are not driven by proxy-eligible catalog entries")
     if disruptive_tasks.count("download_apps | dict2items") < 2:
@@ -209,6 +215,10 @@ def main() -> int:
         failures.append("image acquisition lacks an always-close backstop path")
     if "value.backup_paths" not in backup_tasks:
         failures.append("initial backup artifact gates are not catalog-driven")
+    if catalog_handlers.count("when: not ansible_check_mode") < 3:
+        failures.append("catalog restart handlers are not guarded during check mode")
+    if catalog_app_tasks.count("when: not (ansible_check_mode and item.changed)") < 2:
+        failures.append("new catalog units are not skipped safely during check mode")
 
     homepage = environment.get_template(
         "roles/svc_media/templates/homepage/services.yaml.j2"

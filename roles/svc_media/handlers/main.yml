@@ -26,3 +26,9 @@
     name: caddy
     state: restarted
   listen: restart caddy
+
+- name: Restart Homepage after catalog changes
+  ansible.builtin.command: systemctl --user -M homelab@ restart homepage.service
+  changed_when: true
+  when: not ansible_check_mode
+  listen: restart homepage
