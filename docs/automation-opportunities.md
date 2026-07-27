@@ -27,7 +27,7 @@ printer).
 
 ### 1.1 SABnzbd returns 403 through its own published URL 🐛
 
-**Now:** `https://sabnzbd.fort.wow` → `403 Access denied - Hostname
+**Now:** `https://sabnzbd.fortwow.dev` → `403 Access denied - Hostname
 verification failed`. The service is published through Caddy, has a DNS name and
 a dashboard tile, and cannot be used through any of them.
 
@@ -50,7 +50,7 @@ advertised but non-functional at its advertised address.
 
 ### 1.2 Home Assistant returns 400 through Caddy 🐛
 
-**Now:** `https://home-assistant.fort.wow` → `400 Bad Request` until
+**Now:** `https://home-assistant.fortwow.dev` → `400 Bad Request` until
 `trusted_proxies` is hand-edited into `configuration.yaml`. This has been an
 open manual follow-up since the first service batch.
 

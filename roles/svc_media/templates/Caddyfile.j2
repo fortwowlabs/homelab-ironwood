@@ -5,16 +5,13 @@
 # media/infra `caddy_services` catalog and the proxy-enabled entries in
 # `download_apps`. Add services to those catalogs, not here.
 #
-# Every service is one hostname vhost on :443, bound to the LAN IP
+# Every service is one hostname route on :443, bound to the LAN IP
 # ({{ ansible_host }}); dnsmasq answers <name>.{{ service_domain }} -> that IP,
 # and the tailnet reaches the same IP via the subnet router (Tailscale
-# split-DNS). TLS is Caddy's INTERNAL CA ({{ service_domain }} isn't a public domain) —
-# install its root once per device (docs/deployment.md).
+# split-DNS). Certbot obtains and renews the publicly trusted wildcard
+# certificate with a Cloudflare DNS-01 challenge.
 
 {
-	# Issue every site's cert from Caddy's own CA (no public ACME for a
-	# private TLD). auto_https still manages renewal/OCSP internally.
-	local_certs
 	auto_https disable_redirects
 	# No HTTP/3: SELinux labels these ports tcp-only, QUIC would EACCES.
 	servers {
@@ -22,28 +19,36 @@
 	}
 }
 
-{% for name, svc in caddy_services | dictsort %}
-# --- {{ name }} ---
-https://{{ name }}.{{ service_domain }} {
+https://*.{{ service_domain }} {
 	bind {{ ansible_host }}
-	reverse_proxy {{ svc.scheme | default('http') }}://{{ svc.backend }} {
+	tls /etc/caddy/certs/fullchain.pem /etc/caddy/certs/privkey.pem
+
+{% for name, svc in caddy_services | dictsort %}
+	# --- {{ name }} ---
+	@{{ name }} host {{ name }}.{{ service_domain }}
+	handle @{{ name }} {
+		reverse_proxy {{ svc.scheme | default('http') }}://{{ svc.backend }} {
 {% if svc.tls_skip_verify | default(false) %}
-		transport http {
-			tls_insecure_skip_verify
-		}
+			transport http {
+				tls_insecure_skip_verify
+			}
 {% endif %}
 {% if svc.host_header is defined %}
-		header_up Host {{ svc.host_header }}
+			header_up Host {{ svc.host_header }}
 {% endif %}
+		}
 	}
-}
 
 {% endfor %}
 {% for name, app in download_apps | dictsort if app.proxy %}
-# --- {{ name }} (download catalog) ---
-https://{{ name }}.{{ service_domain }} {
-	bind {{ ansible_host }}
-	reverse_proxy http://{{ hostvars[download_host].ansible_host }}:{{ app.ui_port }}
-}
+	# --- {{ name }} (download catalog) ---
+	@{{ name }} host {{ name }}.{{ service_domain }}
+	handle @{{ name }} {
+		reverse_proxy http://{{ hostvars[download_host].ansible_host }}:{{ app.ui_port }}
+	}
 
 {% endfor %}
+	handle {
+		abort
+	}
+}

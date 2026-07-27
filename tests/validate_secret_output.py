@@ -25,6 +25,7 @@ RENDERED_FILES = (
     "notify.env",
     "romm.env",
     "romm-db.env",
+    "cloudflare.ini",
 )
 
 

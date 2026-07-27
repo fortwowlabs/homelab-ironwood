@@ -48,7 +48,7 @@ minecraft_servers:
     memory: 2G
     type: PAPER
     version: LATEST
-    motd: "fort.wow Minecraft -- survival"
+    motd: "fortwow.dev Minecraft -- survival"
     difficulty: normal
     view_distance: 10
     online_mode: true
@@ -59,7 +59,7 @@ minecraft_servers:
     memory: 2G
     type: PAPER
     version: LATEST
-    motd: "fort.wow Minecraft -- server 2"
+    motd: "fortwow.dev Minecraft -- server 2"
     difficulty: normal
     view_distance: 10
     online_mode: true

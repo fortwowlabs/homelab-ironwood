@@ -1,7 +1,7 @@
 # Services and application wiring
 
-Normal access is `https://<name>.<service_domain>`. The default private domain
-is `fort.wow`; derive the current service VM addresses from
+Normal access is `https://<name>.<service_domain>`. The default split-horizon
+domain is `fortwow.dev`; derive the current service VM addresses from
 `inventory/hosts.yml` rather than copying IPs into documentation or role data.
 
 ## Service map
@@ -29,9 +29,11 @@ proxies. Do not publish a download container directly on the host network.
 ## Private DNS and HTTPS
 
 Caddy and dnsmasq run on `svc-media`. dnsmasq answers the service domain only;
-Caddy terminates HTTPS with its internal CA and routes media/infra traffic
-locally or to a download proxy. Jellyfin's backend uses its explicit LAN-bound
-listener, not an unintended wildcard/loopback publish.
+Caddy terminates HTTPS with a publicly trusted Let's Encrypt wildcard and
+routes media/infra traffic locally or to a download proxy. Jellyfin's backend
+uses its explicit LAN-bound listener, not an unintended wildcard/loopback
+publish. The public Cloudflare zone contains no service records; Certbot uses
+its DNS API only for temporary ACME challenge TXT records.
 
 Complete these external steps once:
 
@@ -39,19 +41,17 @@ Complete these external steps once:
    to `svc-media`'s `ansible_host`.
 2. In Tailscale DNS, add that same address as a nameserver restricted to the
    service domain. The dedicated subnet router must advertise the LAN subnet.
-3. Run `make access` and install the fetched
-   `<service_domain>-root-ca.crt` into each client's trust store.
+3. Keep Cloudflare DNSSEC/registrar DS records disabled unless pfSense has a
+   narrowly scoped `domain-insecure: "fortwow.dev"` exception.
 
-On macOS use Keychain Access or `security add-trusted-cert`; on iOS install the
-profile and explicitly enable full trust; on Linux add it to the distribution
-CA anchors; Firefox may require a separate import. Treat this private Caddy CA
-as distinct from the Proxmox API CA in [Deployment](deployment.md#trust-the-proxmox-api-certificate).
+No client CA installation is required. Certificate issuance, renewal, DNSSEC,
+and router steps are documented in [DNS and HTTPS](dns-pfsense-caddy.md).
 
 Verify from a client on both LAN and tailnet:
 
 ```bash
-dig +short jellyfin.fort.wow
-curl --fail --head https://jellyfin.fort.wow
+dig +short jellyfin.fortwow.dev
+curl --fail --head https://jellyfin.fortwow.dev
 ```
 
 The address must resolve to `svc-media`, and every configured Caddy backend

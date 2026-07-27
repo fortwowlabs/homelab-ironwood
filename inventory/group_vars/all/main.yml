@@ -121,14 +121,14 @@ ntfy_url:   "http://{{ hostvars[media_host].ansible_host }}:8080"
 ntfy_topic: "homelab-deploy"
 
 # --- svc-media access layer -----------------------------------------------
-# caddy  = deploy the Caddy reverse proxy for *.{{ service_domain }} (internal-CA TLS).
+# caddy  = deploy the Caddy reverse proxy for *.{{ service_domain }} (publicly trusted TLS).
 # manual = role stops at "containers healthy on the LAN"; you run Caddy by hand.
 # (v6: Tailscale removed from svc-media — remote access is via the subnet router.)
 media_access_layer: caddy
 
 # --- Service naming (v6) --------------------------------------------------
 # Every service is reachable at https://<key>.{{ service_domain }} instead of
-# an IP:port. Caddy on svc-media is the single reverse proxy (internal-CA TLS);
+# an IP:port. Caddy on svc-media is the single reverse proxy (Let's Encrypt TLS);
 # dnsmasq on svc-media answers *.{{ service_domain }} -> its ansible_host. pfSense
 # forwards the domain to it and Tailscale split-DNS does the same for the
 # tailnet — both one-time; see docs/services.md and docs/deployment.md.
@@ -139,11 +139,12 @@ media_access_layer: caddy
 #   backend         host:port Caddy proxies to (127.0.0.1 = on svc-media)
 #   scheme          optional, default http (set to https for TLS backends)
 #   tls_skip_verify optional bool, for self-signed https backends
-service_domain: fort.wow
+service_domain: fortwow.dev
+acme_email: brandon.strader@gmail.com
 
 # cloud-init's guest FQDN/resolv search domain. A distinct knob (pve_vm
 # consumes it, not Caddy/dnsmasq) but follows service_domain by default since
-# in practice they're the same private TLD — override only if you deliberately
+# in practice they're the same split-horizon domain — override only if you deliberately
 # want the guest OS's search domain to differ from the service naming domain.
 search_domain: "{{ service_domain }}"
 

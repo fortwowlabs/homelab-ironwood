@@ -16,9 +16,9 @@ consumers, and a failed host verification prevents a green deployment result.
   normal entry point is Caddy.
 - TrueNAS owns NFS authorization and on-disk ownership. Guest root squash is
   expected and must not be worked around.
-- The Caddy internal CA establishes private service identity. The Proxmox CA
-  independently establishes API identity; trusting one does not trust the
-  other.
+- Let's Encrypt establishes Caddy's service identity through a wildcard
+  obtained with a narrowly scoped Cloudflare DNS token. The Proxmox CA
+  independently establishes API identity.
 
 ## Secret handling
 

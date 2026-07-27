@@ -23,6 +23,8 @@ service_packages:
   - bind-utils
   - dnsmasq
   - caddy
+  - certbot
+  - python3-certbot-dns-cloudflare
   - cockpit
   - cockpit-podman
   - cockpit-storaged

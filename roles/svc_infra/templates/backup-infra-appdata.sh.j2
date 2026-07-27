@@ -2,8 +2,9 @@
 # backup-infra-appdata.sh — nightly infra-stack backups to the NFS backup
 # dataset. RENDERED BY ANSIBLE. Runs as the homelab user (User=homelab in
 # backup-infra-appdata.service; rootless podman needs XDG_RUNTIME_DIR, set
-# there) — the appdata it tars and the DB containers it dumps are all
-# homelab-owned. Retention: {{ backup_retention_days | default(14) }} days.
+# there). `podman unshare` maps container subuids while retaining homelab's
+# host identity for NFS writes; this is required for files such as Nextcloud's
+# uid-33-owned config.php. Retention: {{ backup_retention_days | default(14) }} days.
 #
 # What it covers:
 #   - Appdata tars: one per backup_path (catalog + bespoke) under
@@ -54,7 +55,10 @@ tar_tolerant() {
 
 mkdir -p "$DEST" "$DB_DEST"
 
-# 1. Appdata tars (homelab-owned; this script runs as homelab so no runuser).
+# 1. Appdata tars. Some rootless containers chown files to an internal UID,
+#    which is a host subuid and unreadable to homelab in the initial namespace.
+#    podman unshare maps those files back to their container IDs while uid 0
+#    remains the host homelab user, so NFS output ownership stays correct.
 {% set infra_backup_paths = [] %}
 {% for app_name, app in (infra_apps | combine(infra_secret_apps | default({}))).items() %}
 {%   for backup_path in app.backup_paths %}
@@ -66,7 +70,8 @@ mkdir -p "$DEST" "$DB_DEST"
 {% endfor %}
 for app in{% for backup_path in infra_backup_paths | unique %} {{ backup_path | quote }}{% endfor %}; do
     tar_tolerant "$app" \
-        tar -C /opt/homelab/appdata -czf "$DEST/${app}-${STAMP}.tar.gz" "$app"
+        podman unshare tar -C /opt/homelab/appdata \
+        -czf "$DEST/${app}-${STAMP}.tar.gz" "$app"
 done
 
 # 2. Database dumps — application-consistent pg_dumpall. POSTGRES_USER is

@@ -4,13 +4,12 @@ Every service, in the order to do them. The order is not arbitrary — several
 services depend on another being set up first, and doing them out of order means
 redoing work.
 
-**Prerequisites verified 2026-07-25** — both are already done, so you can start
-at Phase 1:
+Before starting:
 
 - DNS: all 37 service names resolve to `192.168.1.30` via dnsmasq, the pfSense
-  override, and the normal client path. The router override is working.
-- TLS: the workstation already trusts Caddy's internal CA (verified handshake,
-  no `-k` needed). Other devices still need Step 0.1.
+  override, and the normal client path.
+- TLS: a request without `-k` succeeds with the Let's Encrypt wildcard.
+  Standard clients need no custom CA installation.
 
 Setup guide for the router side, if you ever rebuild it:
 [dns-pfsense-caddy.md](dns-pfsense-caddy.md).
@@ -26,24 +25,10 @@ Setup guide for the router side, if you ever rebuild it:
 
 ## Phase 0 — Prerequisites
 
-Do both before touching any service.
+Complete DNS and confirm the public certificate before touching any service.
+See [DNS and HTTPS](dns-pfsense-caddy.md).
 
-### 0.1 Trust the Caddy internal CA
-
-Otherwise every single page throws a certificate warning and some apps
-(Immich/Nextcloud mobile clients especially) refuse to connect at all.
-
-The cert is at the repo root as `fort.wow-root-ca.crt` (gitignored). On macOS:
-
-```bash
-sudo security add-trusted-cert -d -r trustRoot \
-    -k /Library/Keychains/System.keychain fort.wow-root-ca.crt
-```
-
-Per-platform instructions, including the extra iOS "full trust" toggle, are in
-[dns-pfsense-caddy.md](dns-pfsense-caddy.md#step-2--trust-the-caddy-internal-ca).
-
-### 0.2 Open the vault
+### 0.1 Open the vault
 
 ```bash
 make vault-edit
@@ -60,14 +45,14 @@ printed anywhere else, and the file is gitignored.
 first means every credential from here on gets saved as you go, instead of being
 collected and entered later.
 
-1. Go to **https://vaultwarden.fort.wow/admin**
+1. Go to **https://vaultwarden.fortwow.dev/admin**
 2. Log in with the plaintext admin token — vault key
    `vault_vaultwarden_admin_token_plaintext`.
    (The vault also holds `vault_vaultwarden_admin_token`, which is the Argon2
    *hash* of it. That one is what the container reads; you cannot log in with it.)
 3. In the admin panel, **invite your own email address**.
 4. No SMTP is configured, so no mail is sent and no link appears. Instead go to
-   **https://vaultwarden.fort.wow/#/signup** and register using that exact
+   **https://vaultwarden.fortwow.dev/#/signup** and register using that exact
    invited address.
 
 Self-registration is switched off permanently and does not need toggling —
@@ -84,15 +69,15 @@ These already have accounts. Retrieve, log in, save to Vaultwarden. Any order.
 
 | Service | URL | Username | Vault key |
 |---|---|---|---|
-| Nextcloud | nextcloud.fort.wow | `admin` | `vault_nextcloud_admin_password` |
-| Grafana | grafana.fort.wow | `admin` | `vault_grafana_admin_password` |
-| Semaphore | semaphore.fort.wow | `admin` | `vault_semaphore_admin_password` |
-| NetBox | netbox.fort.wow | `admin` | `vault_netbox_superuser_password` |
-| Webtop | webtop.fort.wow | `admin` | `vault_webtop_password` (HTTP basic auth) |
-| code-server | code-server.fort.wow | — | `vault_codeserver_password` (password only) |
-| **Paperless-ngx** | paperless.fort.wow | `admin` | `vault_paperless_admin_password` |
-| **Mealie** | mealie.fort.wow | `admin@fort.wow` | `vault_mealie_admin_password` |
-| Beszel | beszel.fort.wow | `admin@fort.wow` | already created — see `LLM-TODO-LIST.md`; change the password on first login |
+| Nextcloud | nextcloud.fortwow.dev | `admin` | `vault_nextcloud_admin_password` |
+| Grafana | grafana.fortwow.dev | `admin` | `vault_grafana_admin_password` |
+| Semaphore | semaphore.fortwow.dev | `admin` | `vault_semaphore_admin_password` |
+| NetBox | netbox.fortwow.dev | `admin` | `vault_netbox_superuser_password` |
+| Webtop | webtop.fortwow.dev | `admin` | `vault_webtop_password` (HTTP basic auth) |
+| code-server | code-server.fortwow.dev | — | `vault_codeserver_password` (password only) |
+| **Paperless-ngx** | paperless.fortwow.dev | `admin` | `vault_paperless_admin_password` |
+| **Mealie** | mealie.fortwow.dev | `admin@fort.wow` | `vault_mealie_admin_password` |
+| Beszel | beszel.fortwow.dev | `admin@fort.wow` | already created — see `LLM-TODO-LIST.md`; change the password on first login |
 
 Change the Beszel password once you are in; it was set during an earlier session
 and is recorded in plaintext in `LLM-TODO-LIST.md`.
@@ -106,7 +91,7 @@ up Seerr first means redoing it.
 
 Verified 2026-07-25: Jellyfin's startup wizard has **not** been completed yet.
 
-### 3.1 Jellyfin — https://jellyfin.fort.wow
+### 3.1 Jellyfin — https://jellyfin.fortwow.dev
 Runs the first-run wizard: create your admin user, then add libraries. The NFS
 media paths inside the container are:
 
@@ -117,19 +102,19 @@ media paths inside the container are:
 (Confirm against what actually exists under `/srv/media` — the wizard will show
 you.) Set the metadata language, then finish. Save the credentials.
 
-### 3.2 Seerr — https://seerr.fort.wow
+### 3.2 Seerr — https://seerr.fortwow.dev
 Choose **Sign in with Jellyfin**, point it at `http://192.168.1.30:8096`, and
 use the Jellyfin admin account you just made. Then connect Sonarr and Radarr
 when prompted — see Phase 4 for their addresses.
 
-### 3.3 Audiobookshelf — https://abs.fort.wow
+### 3.3 Audiobookshelf — https://abs.fortwow.dev
 Creates the root user on first visit. Library path `/srv/media/audiobooks`.
 
-### 3.4 RomM — https://romm.fort.wow
+### 3.4 RomM — https://romm.fortwow.dev
 First-run admin account. Its database credentials are already in the vault
 (`vault_romm_*`) and are not the same as the web login.
 
-### 3.5 Calibre-Web — https://calibre-web.fort.wow ⚙️
+### 3.5 Calibre-Web — https://calibre-web.fortwow.dev ⚙️
 Ships with a **default account `admin` / `admin123`**. Log in and change it
 immediately — this is the only service with a publicly-known default.
 
@@ -144,14 +129,14 @@ from inside the network. Nothing to do for those three.
 
 | Service | URL | State |
 |---|---|---|
-| Sonarr | sonarr.fort.wow | ✅ no login needed on LAN |
-| Radarr | radarr.fort.wow | ✅ no login needed on LAN |
-| Prowlarr | prowlarr.fort.wow | ✅ no login needed on LAN |
-| SABnzbd | sabnzbd.fort.wow | ✅ reachable; Usenet provider already configured (`news.eweka.nl`) |
-| Bazarr | bazarr.fort.wow | 🆕 no config yet — first-run wizard |
-| LazyLibrarian | lazylibrarian.fort.wow | 🆕 no config yet — first-run wizard |
-| Shelfmark | shelfmark.fort.wow | 🆕 intentionally open on LAN/tailnet; configure sources and clients |
-| jDownloader | jdownloader.fort.wow | ⚙️ noVNC desktop; sign in to MyJDownloader if you use it |
+| Sonarr | sonarr.fortwow.dev | ✅ no login needed on LAN |
+| Radarr | radarr.fortwow.dev | ✅ no login needed on LAN |
+| Prowlarr | prowlarr.fortwow.dev | ✅ no login needed on LAN |
+| SABnzbd | sabnzbd.fortwow.dev | ✅ reachable; Usenet provider already configured (`news.eweka.nl`) |
+| Bazarr | bazarr.fortwow.dev | 🆕 no config yet — first-run wizard |
+| LazyLibrarian | lazylibrarian.fortwow.dev | 🆕 no config yet — first-run wizard |
+| Shelfmark | shelfmark.fortwow.dev | 🆕 intentionally open on LAN/tailnet; configure sources and clients |
+| jDownloader | jdownloader.fortwow.dev | ⚙️ noVNC desktop; sign in to MyJDownloader if you use it |
 
 Internal addresses for wiring these together — they all share the VPN jail's
 network namespace, so they reach each other on **localhost**:
@@ -175,7 +160,7 @@ network namespace, so they reach each other on **localhost**:
    `http://127.0.0.1:8080`, and enter their API keys. Use SABnzbd categories
    `books` and `audiobooks` with completed paths below `/data`; ebooks deliver
    to `/books`, audiobooks to `/data/audiobooks`, and the library link is
-   `https://calibre-web.fort.wow`. Configure only direct sources you are
+   `https://calibre-web.fortwow.dev`. Configure only direct sources you are
    authorized to use.
 
 Recyclarr already syncs TRaSH-Guides quality profiles into Sonarr/Radarr
@@ -189,17 +174,17 @@ Any order; none depend on each other.
 
 | Service | URL | What to do |
 |---|---|---|
-| Immich | immich.fort.wow | Create admin on first visit. Library is on NFS at `/srv/media/photos` |
-| Uptime Kuma | uptime-kuma.fort.wow | Create admin, then add monitors for the services you care about |
-| Bambuddy | bambuddy.fort.wow | Create admin; add your Bambu printer |
-| Syncthing | syncthing.fort.wow | **Set a GUI password immediately** (Actions > Settings > GUI) — it is unauthenticated until you do |
+| Immich | immich.fortwow.dev | Create admin on first visit. Library is on NFS at `/srv/media/photos` |
+| Uptime Kuma | uptime-kuma.fortwow.dev | Create admin, then add monitors for the services you care about |
+| Bambuddy | bambuddy.fortwow.dev | Create admin; add your Bambu printer |
+| Syncthing | syncthing.fortwow.dev | **Set a GUI password immediately** (Actions > Settings > GUI) — it is unauthenticated until you do |
 
 ### Home Assistant 🆕
 
 Previously this returned a bare HTTP 400 through Caddy until `trusted_proxies`
 was hand-edited in. The deploy now writes that block itself (as a marked,
 idempotent section it will not clobber your automations), so
-**https://home-assistant.fort.wow works directly** — just create your account.
+**https://home-assistant.fortwow.dev works directly** — just create your account.
 
 If you ever add your own top-level `http:` key to `configuration.yaml` by hand,
 the role stands down rather than creating a duplicate key that would stop HA
@@ -213,11 +198,11 @@ Nothing to do; listed so you know they exist.
 
 | Service | URL | Notes |
 |---|---|---|
-| Homepage | home.fort.wow | Dashboard tiles for everything |
-| IT Tools | it-tools.fort.wow | Offline dev utilities |
-| Glances | glances.fort.wow | Host metrics; REST API at `/api/4/...`, MCP at `/mcp/sse` |
-| Prometheus | prometheus.fort.wow | Scrape targets and raw queries |
-| ntfy | ntfy.fort.wow | Push notifications; deploy alerts already publish here |
+| Homepage | home.fortwow.dev | Dashboard tiles for everything |
+| IT Tools | it-tools.fortwow.dev | Offline dev utilities |
+| Glances | glances.fortwow.dev | Host metrics; REST API at `/api/4/...`, MCP at `/mcp/sse` |
+| Prometheus | prometheus.fortwow.dev | Scrape targets and raw queries |
+| ntfy | ntfy.fortwow.dev | Push notifications; deploy alerts already publish here |
 | Cockpit ×3 | cockpit-media / cockpit-dl / cockpit-infra | Log in with your **system** account (`straderb`), not a vault password |
 
 ---
@@ -226,8 +211,8 @@ Nothing to do; listed so you know they exist.
 
 Not web services — connect from the Minecraft client:
 
-- `minecraft.fort.wow:25565`
-- `minecraft2.fort.wow:25566`
+- `minecraft.fortwow.dev:25565`
+- `minecraft2.fortwow.dev:25566`
 
 Both are Paper, latest, 2 GB heap each, LAN-only. Admin commands run on the host
 rather than in a UI:

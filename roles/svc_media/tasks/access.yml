@@ -118,6 +118,85 @@
         immediate: true
         state: enabled
 
+    - name: Ensure Let's Encrypt hook directories exist
+      ansible.builtin.file:
+        path: "{{ item.path }}"
+        state: directory
+        owner: root
+        group: root
+        mode: "{{ item.mode }}"
+      loop:
+        - { path: /etc/letsencrypt, mode: "0755" }
+        - { path: /etc/letsencrypt/renewal-hooks, mode: "0755" }
+        - { path: /etc/letsencrypt/renewal-hooks/deploy, mode: "0755" }
+
+    - name: Render Cloudflare DNS credentials for Certbot
+      ansible.builtin.template:
+        src: cloudflare.ini.j2
+        dest: /etc/letsencrypt/cloudflare.ini
+        owner: root
+        group: root
+        mode: "0600"
+      no_log: true
+      diff: false
+
+    - name: Install the Certbot Caddy deploy hook
+      ansible.builtin.template:
+        src: certbot-deploy-caddy.sh.j2
+        dest: /etc/letsencrypt/renewal-hooks/deploy/caddy.sh
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Obtain the Let's Encrypt wildcard certificate
+      ansible.builtin.command:
+        cmd: >-
+          certbot certonly --non-interactive --agree-tos
+          -m {{ acme_email }}
+          --dns-cloudflare
+          --dns-cloudflare-credentials /etc/letsencrypt/cloudflare.ini
+          --dns-cloudflare-propagation-seconds 30
+          -d "*.{{ service_domain }}"
+        creates: /etc/letsencrypt/live/{{ service_domain }}/fullchain.pem
+      when: not ansible_check_mode
+
+    - name: Ensure the Caddy certificate directory exists
+      ansible.builtin.file:
+        path: /etc/caddy/certs
+        state: directory
+        owner: root
+        group: caddy
+        mode: "0750"
+
+    - name: Install the Let's Encrypt full chain for Caddy
+      ansible.builtin.copy:
+        src: /etc/letsencrypt/live/{{ service_domain }}/fullchain.pem
+        dest: /etc/caddy/certs/fullchain.pem
+        remote_src: true
+        owner: root
+        group: caddy
+        mode: "0640"
+      notify: restart caddy
+      when: not ansible_check_mode
+
+    - name: Install the Let's Encrypt private key for Caddy
+      ansible.builtin.copy:
+        src: /etc/letsencrypt/live/{{ service_domain }}/privkey.pem
+        dest: /etc/caddy/certs/privkey.pem
+        remote_src: true
+        owner: root
+        group: caddy
+        mode: "0640"
+      notify: restart caddy
+      when: not ansible_check_mode
+
+    - name: Enable automatic Let's Encrypt renewal
+      ansible.builtin.systemd:
+        name: certbot-renew.timer
+        enabled: true
+        state: started
+      when: not ansible_check_mode
+
     - name: Render Caddy configuration from service catalogs
       ansible.builtin.template:
         src: Caddyfile.j2
@@ -134,19 +213,6 @@
 
     - name: Apply Caddy configuration before validation
       ansible.builtin.meta: flush_handlers
-
-    - name: Wait for the internal CA root
-      ansible.builtin.wait_for:
-        path: /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
-        timeout: 30
-      when: not ansible_check_mode
-
-    - name: Fetch the public internal CA certificate
-      ansible.builtin.fetch:
-        src: /var/lib/caddy/.local/share/caddy/pki/authorities/local/root.crt
-        dest: "{{ playbook_dir }}/{{ service_domain }}-root-ca.crt"
-        flat: true
-      when: not ansible_check_mode
 
 - name: Note a deliberately disabled Caddy layer
   ansible.builtin.debug:

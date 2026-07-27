@@ -265,7 +265,7 @@ out 11 services at once. **Two branches, not one** — deploy the identity
 provider and prove it works before anything depends on it.
 
 **Branch 1 — `feat/authelia`.** Deploy Authelia alone. Nothing else changes;
-no vhost is protected yet. Confirm `https://auth.fort.wow` serves the portal
+no vhost is protected yet. Confirm `https://auth.fortwow.dev` serves the portal
 and the password logs in successfully. Then:
 
 ```bash
@@ -296,7 +296,7 @@ with no escape hatch.)
 
 1. `make validate` — offline gates, including the new `sso_protected_services` check.
 2. `make infra` — Authelia up; `systemctl --user -M homelab@ is-active authelia`.
-3. Portal loads at `https://auth.fort.wow`, login succeeds with the vault password.
+3. Portal loads at `https://auth.fortwow.dev`, login succeeds with the vault password.
 4. `make access` — Caddy re-rendered; `caddy validate` passes.
 5. Logged out (fresh private window): a protected service redirects to the portal;
    after login it loads. Confirm the session cookie carries across two different
@@ -349,5 +349,5 @@ bypassed or forward-auth fails open.
 - Pin the Authelia image digest from the registry (repo convention: never a tag).
 - Confirm whether the forward-auth challenge is `302` or `401` under `curl`.
 - Confirm Authelia's cookie is accepted across sibling subdomains as configured
-  (`domain: fort.wow`) — this is what makes it *single* sign-on rather than
+  (`domain: fortwow.dev`) — this is what makes it *single* sign-on rather than
   eleven logins.

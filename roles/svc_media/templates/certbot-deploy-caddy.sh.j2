@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cert_source=/etc/letsencrypt/live/{{ service_domain }}
+cert_destination=/etc/caddy/certs
+
+install -d -o root -g caddy -m 0750 "$cert_destination"
+install -o root -g caddy -m 0640 \
+  "$cert_source/fullchain.pem" "$cert_destination/fullchain.pem"
+install -o root -g caddy -m 0640 \
+  "$cert_source/privkey.pem" "$cert_destination/privkey.pem"
+if systemctl is-active --quiet caddy; then
+  systemctl reload caddy
+fi

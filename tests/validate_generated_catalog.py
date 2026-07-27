@@ -73,8 +73,19 @@ def main() -> int:
     )
     caddy_services = as_attr(
         {
-            "home": {"group": "Infra", "icon": "homepage"},
-            "jellyfin": {"group": "Media", "icon": "jellyfin"},
+            "home": {
+                "backend": "192.0.2.32:3000",
+                "group": "Infra",
+                "host_header": "localhost:3000",
+                "icon": "homepage",
+                "scheme": "https",
+                "tls_skip_verify": True,
+            },
+            "jellyfin": {
+                "backend": "192.0.2.30:8096",
+                "group": "Media",
+                "icon": "jellyfin",
+            },
         }
     )
     common = {
@@ -86,6 +97,7 @@ def main() -> int:
             "svc-download": AttrDict(ansible_host="192.0.2.31"),
             "svc-media": AttrDict(ansible_host="192.0.2.30"),
             "svc-infra": AttrDict(ansible_host="192.0.2.32"),
+            "thurgadin": AttrDict(pve_api_host="192.0.2.10"),
         },
         "download_host": "svc-download",
         "media_host": "svc-media",
@@ -219,6 +231,35 @@ def main() -> int:
         failures.append("catalog restart handlers are not guarded during check mode")
     if catalog_app_tasks.count("when: not (ansible_check_mode and item.changed)") < 2:
         failures.append("new catalog units are not skipped safely during check mode")
+
+    caddyfile = environment.get_template(
+        "roles/svc_media/templates/Caddyfile.j2"
+    ).render(**common)
+    dnsmasq = environment.get_template(
+        "roles/svc_media/templates/dnsmasq-services.conf.j2"
+    ).render(**common)
+    expected_proxy_names = [*caddy_services, *eligible]
+    for name in expected_proxy_names:
+        hostname = f"{name}.{common['service_domain']}"
+        if caddyfile.count(f"@{name} host {hostname}") != 1:
+            failures.append(f"{name}: expected one generated Caddy host matcher")
+        if caddyfile.count(f"handle @{name} {{") != 1:
+            failures.append(f"{name}: expected one generated Caddy handle")
+        if dnsmasq.count(f"address=/{hostname}/{common['ansible_host']}") != 1:
+            failures.append(f"{name}: expected one generated dnsmasq address")
+    if "local_certs" in caddyfile:
+        failures.append("caddy: obsolete internal-CA configuration was rendered")
+    if (
+        "tls /etc/caddy/certs/fullchain.pem /etc/caddy/certs/privkey.pem"
+        not in caddyfile
+    ):
+        failures.append("caddy: file-backed wildcard certificate was not rendered")
+    if "reverse_proxy https://192.0.2.32:3000" not in caddyfile:
+        failures.append("caddy: per-service upstream scheme was not preserved")
+    if "tls_insecure_skip_verify" not in caddyfile:
+        failures.append("caddy: per-service TLS transport option was not preserved")
+    if "header_up Host localhost:3000" not in caddyfile:
+        failures.append("caddy: per-service Host header override was not preserved")
 
     homepage = environment.get_template(
         "roles/svc_media/templates/homepage/services.yaml.j2"

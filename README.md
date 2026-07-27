@@ -2,8 +2,8 @@
 
 Ansible provisions and operates two Rocky Linux service VMs on Proxmox: a
 fail-closed Mullvad download jail and a rootless media/application host. Caddy
-and dnsmasq provide private `*.fort.wow` service names; TrueNAS supplies the NFS
-media and backup datasets.
+and dnsmasq provide split-horizon `*.fortwow.dev` service names with publicly
+trusted TLS; TrueNAS supplies the NFS media and backup datasets.
 
 ## Architecture
 
@@ -92,5 +92,5 @@ tags.
 - [Incidents](docs/incidents.md) — symptom-led recovery runbooks
 
 TrueNAS creation, Proxmox host preparation, application UI setup, LAN/tailnet
-DNS forwarding, client trust of Caddy's internal CA, and destructive restore
+DNS forwarding, Cloudflare token provisioning, and destructive restore
 decisions remain deliberately manual.

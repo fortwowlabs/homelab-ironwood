@@ -256,10 +256,10 @@ role only creates/reads `/srv/backups/<new-name>`, it won't migrate the old
 one). Any bookmarks or DNS caches pointed at `<old-name>.{{ service_domain }}`
 break until they're updated too.
 
-## Changing the internal domain
+## Changing the service domain
 
-`service_domain` (`inventory/group_vars/all/main.yml`, `fort.wow` today) is
-the single source for the private TLD every service is reachable under —
+`service_domain` (`inventory/group_vars/all/main.yml`, `fortwow.dev` today) is
+the single source for the split-horizon domain every service uses —
 Caddy's vhosts, dnsmasq's zone file, cloud-init's guest search domain
 (`search_domain` follows it by default), and every `<name>.{{ service_domain
 }}` reference in a template derive from this one value.
@@ -270,12 +270,19 @@ Ansible-managed (see docs/deployment.md and docs/services.md):
 
 - pfSense's DNS Resolver **Domain Override**, which forwards the old TLD to
   the media VM — it must be repointed at the new domain.
-- Every client device's installed copy of Caddy's **internal CA root** stays
-  valid (the CA isn't domain-scoped), but each device still needs the new
-  `*.{{ service_domain }}` names resolvable via the updated pfSense override
-  (and Tailscale split-DNS, if used) before HTTPS to them works again.
+- Tailscale's split-DNS domain must be replaced while retaining the media VM
+  nameserver and approved subnet route.
+- The public DNS provider, ACME token scope, Certbot lineage, deploy hook, and
+  Caddy certificate paths must all cover the new registered domain.
 
-To change it: update `service_domain` (and `search_domain` only if it should
-diverge), re-run the playbooks so Caddy/dnsmasq re-render under the new TLD,
-then update the pfSense override and any split-DNS entry. Expect a brief
-window where the old and new names both need to resolve during the cutover.
+To change it, first prepare the public zone, DNSSEC posture, scoped API token,
+and certificate-lineage migration. Then update `service_domain` (and
+`search_domain` only if it should diverge), run the media deployment so
+dnsmasq, Certbot, and Caddy converge, deploy all var-driven consumers, and
+replace the pfSense and Tailscale entries. A hard cutover makes old names stop
+working; coordinate DNS changes with the Ansible run.
+
+`search_domain` is applied only when a VM is created. Existing VMs keep their
+old guest FQDN/search domain until recreation; never use `qm set
+--searchdomain` to correct this cosmetic drift because it changes cloud-init
+instance identity.

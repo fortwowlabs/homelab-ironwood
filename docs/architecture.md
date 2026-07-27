@@ -48,8 +48,9 @@ catalogued download service and leaves a persistent trip marker.
 
 Media and infrastructure containers run rootless as the service account.
 Jellyfin is also bound to the VM's LAN address for local playback; Caddy
-provides the normal named HTTPS endpoints. dnsmasq answers only the private
-service domain. Firewalld scopes host ports to the configured LAN.
+provides the normal named HTTPS endpoints with a publicly trusted wildcard
+managed by Certbot. dnsmasq answers only the split-horizon service domain.
+Firewalld scopes host ports to the configured LAN.
 
 ### Storage and access
 

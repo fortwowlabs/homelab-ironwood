@@ -110,7 +110,7 @@
 
 - name: Smoke-test every configured Caddy backend
   ansible.builtin.command: >-
-    curl -sk --max-time 15 -o /dev/null -w '%{http_code}'
+    curl -s --max-time 15 -o /dev/null -w '%{http_code}'
     --resolve {{ item }}.{{ service_domain }}:443:{{ ansible_host }}
     https://{{ item }}.{{ service_domain }}
   loop: >-
@@ -129,6 +129,33 @@
   retries: 3
   delay: 5
   until: media_caddy_gates is not failed
+  when: media_access_layer | default('manual') == 'caddy'
+
+- name: Verify the Caddy certificate issuer and wildcard SAN
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      openssl s_client -connect {{ ansible_host }}:443
+      -servername home.{{ service_domain }} </dev/null 2>/dev/null
+      | openssl x509 -noout -issuer -ext subjectAltName
+    executable: /bin/bash
+  register: media_caddy_certificate_gate
+  changed_when: false
+  failed_when: >-
+    "Let's Encrypt" not in media_caddy_certificate_gate.stdout
+    or ('DNS:*.' ~ service_domain) not in media_caddy_certificate_gate.stdout
+  when: media_access_layer | default('manual') == 'caddy'
+
+- name: Verify automatic certificate renewal is active and enabled
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - "{{ item }}"
+      - certbot-renew.timer
+  loop:
+    - is-active
+    - is-enabled
+  changed_when: false
   when: media_access_layer | default('manual') == 'caddy'
 
 - name: Mark svc-media verification complete

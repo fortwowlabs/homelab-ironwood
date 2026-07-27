@@ -64,6 +64,15 @@ printed or serialized. This repository had such an exposure during review, so
 rotation is a deployment prerequisite, not an optional hardening task. Follow
 the ordered procedure in [Security](security.md#credential-exposure-response).
 
+### Cloudflare and Let's Encrypt
+
+The `fortwow.dev` Cloudflare zone must be active and remain empty of public
+service records. Leave zone DNSSEC and registrar DS records disabled for the
+split-horizon deployment. Create a Cloudflare API token with Zone/DNS/Edit
+scoped only to `fortwow.dev`, then store it in the encrypted vault as
+`vault_cloudflare_api_token`. Certbot uses it only to create and remove ACME
+DNS-01 TXT records; no inbound Internet port is required.
+
 ## Control-node setup
 
 `make deps` creates `.venv` and installs the committed versions of Ansible
@@ -125,8 +134,10 @@ mismatch, or failed host verification aborts the run. A safe partial
 EFI/import/boot/resize sequence resumes one step at a time; existing disks are
 never moved, recreated, or shrunk automatically.
 
-After the first converge, complete the DNS/client trust and application UI
-steps in [Services](services.md). `make check` must show no unexpected changes.
+After the first converge, complete the pfSense/Tailscale split-DNS and
+application UI steps in [Services](services.md). Publicly trusted certificates
+need no client trust-store changes. `make check` must show no unexpected
+changes.
 
 ## Refactor rollout
 

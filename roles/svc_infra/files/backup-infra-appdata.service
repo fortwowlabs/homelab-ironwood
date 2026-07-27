@@ -7,9 +7,9 @@ RequiresMountsFor=/srv/backups
 [Service]
 Type=oneshot
 # Run as the homelab user (uid = svc_uid = 10001), like backup-media.service:
-# the appdata it tars is homelab-owned, and `podman exec` for the pg_dumpall of
-# the rootless netbox-db/immich-db containers needs the homelab rootless
-# runtime (XDG_RUNTIME_DIR), which lingering keeps alive at /run/user/10001.
+# `podman unshare` maps any container-subuid-owned appdata, and `podman exec`
+# for pg_dumpall needs the homelab rootless runtime (XDG_RUNTIME_DIR), which
+# lingering keeps alive at /run/user/10001.
 User=homelab
 Group=homelab
 Environment=XDG_RUNTIME_DIR=/run/user/10001
