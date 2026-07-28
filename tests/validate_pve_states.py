@@ -18,6 +18,7 @@ ROLE = ROOT / "roles/pve_vm/tasks/main.yml"
 USER_DATA = ROOT / "roles/pve_vm/templates/user-data.yaml.j2"
 SERVICE_VM_MAIN = ROOT / "roles/service_vm/tasks/main.yml"
 SERVICE_VM_BOOTSTRAP = ROOT / "roles/service_vm/tasks/bootstrap.yml"
+SERVICE_VM_FAILED_UNITS = ROOT / "roles/service_vm/tasks/failed-units.yml"
 SIZE_MULTIPLIERS = {
     "K": 1024,
     "M": 1024**2,
@@ -253,6 +254,14 @@ def validate_role_contract(failures: list[str]) -> None:
         failures.append("cloud-init: deployed VMs do not preserve their instance cache")
     if "Verify cloud-init trusts the deployed instance cache" not in service_vm_bootstrap:
         failures.append("cloud-init: instance-cache policy is not verified")
+
+    failed_units = SERVICE_VM_FAILED_UNITS.read_text(encoding="utf-8")
+    if "Check for failed system services" not in failed_units:
+        failures.append("service VM verify: failed system services are not checked")
+    for role in ("svc_download", "svc_media", "svc_infra"):
+        role_verify = (ROOT / f"roles/{role}/tasks/verify.yml").read_text(encoding="utf-8")
+        if "tasks_from: failed-units" not in role_verify:
+            failures.append(f"{role} verify: failed system services are not checked last")
 
 
 def main() -> int:

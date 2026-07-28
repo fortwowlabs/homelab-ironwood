@@ -236,6 +236,8 @@ def main() -> int:
         failures.append("new catalog units are not skipped safely during check mode")
     if "masked: true" not in download_package_tasks or "dnf-makecache.timer" not in download_package_tasks:
         failures.append("download packages: automatic DNF refresh is not masked")
+    if "reset-failed" not in download_package_tasks or download_package_tasks.count("dnf-makecache.timer") < 2:
+        failures.append("download packages: stale automatic DNF timer failures are not cleared")
     if "Verify automatic DNF metadata refresh remains masked" not in verify_tasks:
         failures.append("download verify: automatic DNF refresh masking is not checked")
 

@@ -1,0 +1,11 @@
+---
+- name: Check for failed system services
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - --failed
+      - --no-legend
+      - --plain
+  register: service_vm_failed_units
+  changed_when: false
+  failed_when: service_vm_failed_units.stdout | trim | length > 0

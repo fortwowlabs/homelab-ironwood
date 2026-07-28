@@ -23,7 +23,12 @@
     state: stopped
     masked: true
 
-- name: Clear a stale automatic DNF metadata refresh failure
-  ansible.builtin.command: systemctl reset-failed dnf-makecache.service
+- name: Clear stale automatic DNF metadata refresh failures
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - reset-failed
+      - dnf-makecache.service
+      - dnf-makecache.timer
   changed_when: false
   failed_when: false
