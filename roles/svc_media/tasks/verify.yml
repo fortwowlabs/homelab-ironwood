@@ -141,9 +141,30 @@
   changed_when: false
   failed_when: ansible_host not in media_verify_dns_gate.stdout
 
+# The permissive rule below (fail only on a connection failure or a 5xx) is
+# deliberately weak for most services, because a healthy backend can legally
+# answer with almost any status. It is NOT weak enough for the SSO ones: an
+# unauthenticated request to a protected service must be challenged, and a
+# plain 200 there means forward-auth is not being applied — the service is
+# wide open while the inventory says it is protected. That is the fail-open
+# case, so it is asserted rather than assumed.
+#
+# Checking only the STATUS would be too weak to catch that: Jellyfin, which is
+# deliberately unprotected, answers / with its own 302 to web/, so "a
+# protected service returned 302" proves nothing on its own. The redirect
+# TARGET is what distinguishes an Authelia challenge from an application's own
+# redirect, so that is what is asserted. Observed live: Authelia answers a
+# browser-ish request with 302 to the portal (carrying ?rd=<original url>) and
+# an API-ish one with 401, keyed off the Accept header — curl here sends
+# neither header explicitly, so both shapes are accepted.
+#
+# Note the coupling this creates: if Authelia is down, Caddy's forward_auth
+# emits 502 and the existing 5xx rule fails every protected service at once.
+# That is correct — they really are broken — but it does make the identity
+# provider a single point of failure for `make verify`.
 - name: Smoke-test every configured Caddy backend
   ansible.builtin.command: >-
-    curl -s --max-time 15 -o /dev/null -w '%{http_code}'
+    curl -s --max-time 15 -o /dev/null -w '%{http_code} %{redirect_url}'
     --resolve {{ item }}.{{ service_domain }}:443:{{ ansible_host }}
     https://{{ item }}.{{ service_domain }}
   loop: >-
@@ -156,9 +177,27 @@
     }}
   register: media_caddy_gates
   changed_when: false
+  vars:
+    # "<code> <redirect_url>"; redirect_url is empty for a non-redirect.
+    media_gate_code: "{{ media_caddy_gates.stdout.split(' ')[0] }}"
+    media_gate_portal: "https://auth.{{ service_domain }}"
   failed_when: >-
-    media_caddy_gates.stdout == '000'
-    or media_caddy_gates.stdout is match('^5[0-9]{2}$')
+    media_gate_code == '000'
+    or media_gate_code is match('^5[0-9]{2}$')
+    or (
+      item in (sso_protected_services | default([]))
+      and not (
+        media_gate_code == '401'
+        or (
+          media_gate_code == '302'
+          and media_gate_portal in media_caddy_gates.stdout
+        )
+      )
+    )
+    or (
+      item == 'auth'
+      and media_gate_code != '200'
+    )
   retries: 3
   delay: 5
   until: media_caddy_gates is not failed

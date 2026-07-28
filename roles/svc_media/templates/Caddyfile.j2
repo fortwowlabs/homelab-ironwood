@@ -17,6 +17,32 @@
 		protocols h1 h2
 	}
 }
+{#
+  Authelia forward-auth gate, emitted into a vhost only when its name appears
+  in `sso_protected_services` (inventory/group_vars/all/main.yml).
+
+  A MACRO rather than the block written out twice, because there are two vhost
+  loops below (caddy_services and the proxied download_apps) and an auth
+  directive that drifted between them would silently protect a service in one
+  catalog and not the other.
+
+  Caddy orders `forward_auth` ahead of `reverse_proxy` in its default
+  directive order, so the gate runs before the request is proxied regardless
+  of where it lands textually — but it is emitted first anyway, so reading the
+  rendered file matches what actually happens.
+
+  copy_headers passes the authenticated identity down to the backend. Nothing
+  behind this consumes those headers today; it is harmless now and is most of
+  what a later native-OIDC phase would otherwise have to add.
+-#}
+{% macro sso_gate(name) %}
+{% if name in sso_protected_services | default([]) %}
+		forward_auth {{ hostvars[infra_host].ansible_host }}:{{ infra_secret_apps.authelia.ui_port }} {
+			uri /api/authz/forward-auth
+			copy_headers Remote-User Remote-Groups Remote-Email Remote-Name
+		}
+{% endif %}
+{% endmacro %}
 
 https://*.{{ service_domain }} {
 	bind {{ ansible_host }}
@@ -26,7 +52,7 @@ https://*.{{ service_domain }} {
 	# --- {{ name }} ---
 	@{{ name }} host {{ name }}.{{ service_domain }}
 	handle @{{ name }} {
-{% if (svc.tls_skip_verify | default(false)) or (svc.host_header is defined) %}
+{{ sso_gate(name) }}{% if (svc.tls_skip_verify | default(false)) or (svc.host_header is defined) %}
 		reverse_proxy {{ svc.scheme | default('http') }}://{{ svc.backend }} {
 {% if svc.tls_skip_verify | default(false) %}
 			transport http {
@@ -47,7 +73,7 @@ https://*.{{ service_domain }} {
 	# --- {{ name }} (download catalog) ---
 	@{{ name }} host {{ name }}.{{ service_domain }}
 	handle @{{ name }} {
-		reverse_proxy http://{{ hostvars[download_host].ansible_host }}:{{ app.ui_port }}
+{{ sso_gate(name) }}		reverse_proxy http://{{ hostvars[download_host].ansible_host }}:{{ app.ui_port }}
 	}
 
 {% endfor %}

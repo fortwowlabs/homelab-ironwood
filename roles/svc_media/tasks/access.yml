@@ -1,4 +1,18 @@
 ---
+# tests/validate_sso.py checks this offline in `make validate`, which is where
+# a typo should be caught. Repeated here because access.yml is also reachable
+# directly via `make access` — the fast path used to roll SSO back — and the
+# portal locking itself out is not a failure worth discovering by hand.
+- name: Assert the Authelia portal is not behind its own forward-auth
+  ansible.builtin.assert:
+    that:
+      - "'auth' not in (sso_protected_services | default([]))"
+    fail_msg: >-
+      sso_protected_services lists 'auth', the Authelia portal itself.
+      Rendering that produces an infinite redirect: the login form would be
+      gated behind a login. Remove it from
+      inventory/group_vars/all/main.yml.
+
 - name: Start firewalld before applying service rules
   ansible.builtin.systemd:
     name: firewalld

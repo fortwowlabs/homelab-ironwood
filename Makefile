@@ -101,6 +101,7 @@ validate-catalog:
 	$(PYTHON) tests/validate_catalog.py
 	$(PYTHON) tests/validate_infra_catalog.py
 	$(PYTHON) tests/validate_generated_catalog.py
+	$(PYTHON) tests/validate_sso.py
 
 validate-provisioning:
 	$(PYTHON) tests/validate_pve_states.py

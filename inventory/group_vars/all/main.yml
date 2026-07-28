@@ -205,3 +205,59 @@ caddy_services:
   # NEVER appear in that list: protecting the portal with itself is an
   # infinite redirect. See docs/plans/authelia-sso.md.
   auth:        { backend: "{{ hostvars[infra_host].ansible_host }}:9092", group: Infra, icon: authelia }
+
+# Services placed behind the Authelia login. ONE list, consumed by both of the
+# vhost loops in roles/svc_media/templates/Caddyfile.j2 — the download catalog
+# and caddy_services render separately, and putting an `sso: true` field on
+# each catalog instead would mean two schemas and two validators for one
+# decision.
+#
+# Adding a name here is the only step needed to protect a service. Emptying
+# the list and re-running `make access` is the rollback, and it takes seconds:
+# Caddy is validated at render time, so a malformed directive fails the deploy
+# rather than taking the proxy down.
+#
+# `auth` must NEVER appear here — Authelia cannot be the thing standing in
+# front of Authelia, and the result is an infinite redirect rather than an
+# error. tests/validate_infra_catalog.py fails the build if it does, and every
+# name here is also checked to actually exist in one of the two catalogs: a
+# typo would otherwise leave a service unprotected while looking configured,
+# which is the dangerous direction to fail in.
+#
+# Deliberately NOT protected — a native or mobile client cannot follow a
+# browser redirect to a login form, so proxy auth breaks them outright:
+# jellyfin, immich, nextcloud, abs, ntfy, vaultwarden. Also left open: home
+# (the landing page), it-tools, glances (its /mcp/sse endpoint has no cookie
+# jar), bambuddy, the cockpit-* vhosts (own PAM auth), and shelfmark.
+#
+# calibre-web is excluded for a different reason and it is not a good one: it
+# is loopback-only on svc-media, so unlike every name below it has no direct
+# IP:port escape hatch if forward-auth misbehaves. Its default admin/admin123
+# is still live and still a manual first-login fix — see
+# docs/automation-opportunities.md.
+#
+# Machine-to-machine traffic is unaffected: every such path in this estate
+# already bypasses Caddy entirely (ntfy publishers, Beszel agents, Prometheus
+# scraping, Grafana's datasource, Recyclarr, and the arr apps talking to each
+# other all use IP:port or jail-localhost).
+sso_protected_services:
+  # svc-download catalog — these seven set
+  # AuthenticationRequired=DisabledForLocalAddresses, and Caddy proxies from a
+  # LAN address, so they never prompt underneath. One login, not two.
+  - sonarr
+  - radarr
+  - prowlarr
+  - sabnzbd
+  - bazarr
+  - lazylibrarian
+  - jdownloader
+  # Effectively remote shells. Both keep their own password underneath, so
+  # these are the two services that will ask twice — that is the correct trade
+  # in front of a shell, and their local login is also what protects them if
+  # Caddy is bypassed. Do not remove it to smooth out the double prompt.
+  - code-server
+  - webtop
+  # Unauthenticated today, which is the whole reason this exists. Syncthing's
+  # GUI has been an open item for exactly this; Prometheus has no auth at all.
+  - syncthing
+  - prometheus
