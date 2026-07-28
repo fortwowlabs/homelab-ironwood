@@ -1,5 +1,37 @@
 # Authelia SSO — forward-auth for 11 services
 
+> **STATUS: IMPLEMENTED 2026-07-28.** Both branches shipped and merged —
+> `a47cd94` (the identity provider) and `a6ed9ea` (forward-auth). Kept for the
+> reasoning, not as a to-do list.
+>
+> Four things came out differently from what is written below; the body has
+> NOT been rewritten, so read these first:
+>
+> - **Image config path.** Authelia bakes `X_AUTHELIA_CONFIG=/config/
+>   configuration.yml`, so the config template is
+>   `authelia-configuration.yml.j2` rendering to that exact name, not
+>   `authelia.yml`. A differently-named file is ignored and Authelia starts on
+>   its defaults instead — silently.
+> - **No `user:` override needed.** The plan assumed the usual rootless-podman
+>   PUID dance. The image sets no `USER` and already defaults `PUID=0/PGID=0`,
+>   so it runs as container-root and `/config` is writable. This matters more
+>   than usual because Authelia rewrites `users.yml` itself.
+> - **The challenge is BOTH 302 and 401** — the open question at the bottom of
+>   this document. curl draws a 302 to the portal, the Ansible `uri` module's
+>   urllib draws a 401, purely from the `Accept` header. Both shapes are live
+>   in this estate, so both are accepted.
+> - **Status alone was too weak a smoke test.** Jellyfin, deliberately
+>   unprotected, answers `/` with its own 302 to `web/`, so "a protected
+>   service returned 302" proves nothing. The test asserts the redirect TARGET
+>   is the portal. This was not in the plan and is the check that would
+>   actually catch forward-auth silently not applying.
+>
+> Also: the guard test landed as `tests/validate_sso.py` rather than inside
+> `validate_infra_catalog.py`, since the list spans three catalogs. And the
+> secrets live in the vault as five vars, not four — the plaintext password is
+> stored beside its hash, following the `vault_vaultwarden_admin_token`
+> precedent, because it cannot be recovered from the hash.
+
 ## Context
 
 Most of this estate has no authentication. Anyone on the LAN or the tailnet can

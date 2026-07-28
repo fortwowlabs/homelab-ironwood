@@ -103,14 +103,23 @@ at deploy time.
 *not* automate. Flagged here because it is the most exposed default in the
 estate, not because it should be scripted.
 
-### 2.4 Syncthing GUI password
+### 2.4 Syncthing GUI password — RESOLVED 2026-07-28
 
-Syncthing's web UI is unauthenticated until you set a password; it is currently
-open to anyone on the LAN. The password can be written into its `config.xml`.
+Syncthing's web UI was unauthenticated and open to anyone on the LAN. Writing a
+password into its `config.xml` was rejected as too fragile: Syncthing rewrites
+that file itself and wants a bcrypt hash, so it needed the same stop-edit-start
+dance as SABnzbd.
 
-**Risk: medium.** Syncthing rewrites `config.xml` itself and wants a bcrypt
-hash, so the same stop-edit-start dance as SABnzbd. **Recommendation: set it by
-hand now** (30 seconds), and automate only if it keeps getting lost on rebuilds.
+**Solved from the other direction instead.** Syncthing is now behind Authelia
+forward-auth (`sso_protected_services`), so `syncthing.fortwow.dev` requires a
+login without touching Syncthing's own config at all. That is what made this
+tractable — the fix was one line in a list, not a config round-trip.
+
+Residual, and worth being precise about: the GUI is still unauthenticated
+*underneath*. Only the Caddy hostname is gated, so `192.168.1.32:8384` is still
+open on the LAN. That is an acceptable trade here (the direct port is also the
+escape hatch if SSO breaks) but it is not the same as "Syncthing now has a
+password".
 
 ---
 
@@ -180,9 +189,10 @@ If you want these done, the sensible grouping is:
 That would take the walkthrough from ~20 manual steps to ~12, and every one
 remaining would be a genuine human decision rather than a chore.
 
-Deferred deliberately: Calibre-Web and Syncthing passwords (change by hand —
-automating them is more fragile than the problem), and Uptime Kuma monitors
-(no supported provisioning path).
+Deferred deliberately: Calibre-Web's password (change by hand — automating it
+is more fragile than the problem) and Uptime Kuma monitors (no supported
+provisioning path). Syncthing was on this list too, until SSO removed the need
+to touch its config at all — see 2.4.
 
 ---
 
@@ -221,9 +231,13 @@ Unchanged from the analysis above:
 
 - **Calibre-Web** `admin` / `admin123` — no env-var override; automating means
   writing to its SQLite `app.db`, which is more fragile than the 30-second
-  manual change. **Still live — change it early.**
-- **Syncthing** GUI password — unauthenticated until set; needs a bcrypt hash
-  written into a file Syncthing rewrites itself. **Still live — set it early.**
+  manual change. **Still live — change it early.** Note the SSO work of
+  2026-07-28 did *not* cover this: Calibre-Web is loopback-only on svc-media,
+  so unlike every service that went behind forward-auth it would have had no
+  direct `IP:port` escape hatch. It is now the most exposed default left.
+- **Syncthing** GUI password — no longer urgent: the web UI is behind SSO as of
+  2026-07-28 (see 2.4). Its own GUI password is still unset, which only matters
+  on the direct `192.168.1.32:8384` path.
 - **Uptime Kuma monitors** — no supported provisioning path.
 - Everything in Tier 4: account creation where only you should know the
   password, indexer credentials, printer pairing, Semaphore's project wiring.

@@ -22,9 +22,38 @@ domain is `fortwow.dev`; derive the current service VM addresses from
 | `lazylibrarian` | `svc-download` | Book/audiobook automation inside the VPN jail |
 | `shelfmark` | `svc-download` | Interactive book/audiobook search and requests inside the VPN jail |
 | `cockpit-dl` | `svc-download` | Download VM host administration |
+| `auth` | `svc-infra` | Authelia SSO portal; fronts eleven services (see below) |
 
 Download UIs reach their jailed containers through generated systemd socket
 proxies. Do not publish a download container directly on the host network.
+
+### Single sign-on
+
+`auth` on `svc-infra` is the Authelia login portal. Eleven services sit behind
+it via Caddy `forward_auth`: the seven download apps above, plus `code-server`,
+`webtop`, `syncthing` and `prometheus`.
+
+The protected set is `sso_protected_services` in
+`inventory/group_vars/all/main.yml` — one list, consumed by both vhost loops in
+`Caddyfile.j2`. Adding a name protects a service; emptying the list and running
+`make access` is the rollback. `tests/validate_sso.py` rejects a name with no
+Caddy vhost, because that would leave the service unprotected while looking
+configured.
+
+Two things worth knowing before debugging anything here:
+
+- **Auth is applied at the Caddy vhost only.** Every protected service is still
+  reachable unauthenticated at its direct `IP:port`. That is the intended
+  escape hatch, and it is also why Syncthing's own GUI password still matters
+  on the LAN.
+- **`make verify` now depends on Authelia.** If the portal is down, Caddy's
+  `forward_auth` returns 502 and the smoke test fails for all eleven at once.
+  That is correct — they really are broken — but the cause is one container.
+
+Services deliberately left open are listed with their reasons alongside the
+`sso_protected_services` definition; the short version is that native and
+mobile clients (Jellyfin, Immich, Nextcloud, Audiobookshelf, ntfy, Vaultwarden)
+cannot follow a browser redirect to a login form.
 
 ## Private DNS and HTTPS
 

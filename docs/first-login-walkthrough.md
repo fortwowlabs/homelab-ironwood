@@ -37,6 +37,39 @@ make vault-edit
 Keep it open in another window — Phases 2 and 4 read from it. Values are never
 printed anywhere else, and the file is gitignored.
 
+### 0.2 Sign in to SSO 🔑
+
+Do this before anything else. Eleven services sit behind a single sign-on
+gate, and logging in here once means none of them prompt again for the next
+12 hours — otherwise you get bounced to the portal partway through Phase 4.
+
+**https://auth.fortwow.dev** — user `admin`, password in the vault as
+`vault_authelia_user_password_plaintext`.
+
+One login covers all of them: the session cookie is issued for the whole
+`fortwow.dev` domain rather than per host.
+
+| Behind SSO | Why |
+|---|---|
+| Sonarr, Radarr, Prowlarr, SABnzbd, Bazarr, LazyLibrarian, jDownloader | had no login of their own on the LAN |
+| Syncthing, Prometheus | were completely unauthenticated |
+| code-server, Webtop | remote shells — these keep their own password underneath as well, so they ask twice, deliberately |
+
+**Not** behind SSO, on purpose: Jellyfin, Immich, Nextcloud, Audiobookshelf,
+ntfy and Vaultwarden, because their native and mobile apps cannot follow a
+browser redirect to a login form; plus Homepage, IT Tools, Glances, Bambuddy,
+Shelfmark and the Cockpit vhosts.
+
+Changing the password: regenerate the hash into the vault
+(`vault_authelia_user_password_hash`) and redeploy. Changing it in the portal
+UI works until the next deploy reverts it — Authelia rewrites its own users
+file, and this repo rewrites it back.
+
+If SSO ever misbehaves, every protected service is still reachable directly at
+its `IP:port` (listed in Phase 4 and Phase 6) — only the Caddy hostname is
+gated. To turn it off entirely, empty `sso_protected_services` in
+`inventory/group_vars/all/main.yml` and run `make access`.
+
 ---
 
 ## Phase 1 — Vaultwarden first 🆕
@@ -122,21 +155,25 @@ immediately — this is the only service with a publicly-known default.
 
 ## Phase 4 — Download stack ✅ / ⚙️
 
-**Verified 2026-07-25:** Sonarr, Radarr and Prowlarr are configured with
-`AuthenticationMethod=Forms` and `AuthenticationRequired=DisabledForLocalAddresses`.
-Because Caddy proxies from a LAN address, **you will not be prompted to log in**
-from inside the network. Nothing to do for those three.
+**All of these except Shelfmark are behind SSO** — do Phase 0.2 first or every
+URL below bounces you to the portal.
+
+Once past that, they do not prompt a *second* time. Sonarr, Radarr and Prowlarr
+are configured with `AuthenticationMethod=Forms` and
+`AuthenticationRequired=DisabledForLocalAddresses` (verified 2026-07-25), and
+Caddy proxies from a LAN address, so their own login never triggers. One login
+total, at the portal.
 
 | Service | URL | State |
 |---|---|---|
-| Sonarr | sonarr.fortwow.dev | ✅ no login needed on LAN |
-| Radarr | radarr.fortwow.dev | ✅ no login needed on LAN |
-| Prowlarr | prowlarr.fortwow.dev | ✅ no login needed on LAN |
-| SABnzbd | sabnzbd.fortwow.dev | ✅ reachable; Usenet provider already configured (`news.eweka.nl`) |
-| Bazarr | bazarr.fortwow.dev | 🆕 no config yet — first-run wizard |
-| LazyLibrarian | lazylibrarian.fortwow.dev | 🆕 no config yet — first-run wizard |
-| Shelfmark | shelfmark.fortwow.dev | 🆕 intentionally open on LAN/tailnet; configure sources and clients |
-| jDownloader | jdownloader.fortwow.dev | ⚙️ noVNC desktop; sign in to MyJDownloader if you use it |
+| Sonarr | sonarr.fortwow.dev | ✅ SSO only; no second login |
+| Radarr | radarr.fortwow.dev | ✅ SSO only; no second login |
+| Prowlarr | prowlarr.fortwow.dev | ✅ SSO only; no second login |
+| SABnzbd | sabnzbd.fortwow.dev | ✅ SSO only; Usenet provider already configured (`news.eweka.nl`) |
+| Bazarr | bazarr.fortwow.dev | 🆕 behind SSO; no config yet — first-run wizard |
+| LazyLibrarian | lazylibrarian.fortwow.dev | 🆕 behind SSO; no config yet — first-run wizard |
+| Shelfmark | shelfmark.fortwow.dev | 🆕 **not** behind SSO — intentionally open on LAN/tailnet; configure sources and clients |
+| jDownloader | jdownloader.fortwow.dev | ⚙️ behind SSO; noVNC desktop; sign in to MyJDownloader if you use it |
 
 Internal addresses for wiring these together — they all share the VPN jail's
 network namespace, so they reach each other on **localhost**:
@@ -177,7 +214,7 @@ Any order; none depend on each other.
 | Immich | immich.fortwow.dev | Create admin on first visit. Library is on NFS at `/srv/media/photos` |
 | Uptime Kuma | uptime-kuma.fortwow.dev | Create admin, then add monitors for the services you care about |
 | Bambuddy | bambuddy.fortwow.dev | Create admin; add your Bambu printer |
-| Syncthing | syncthing.fortwow.dev | **Set a GUI password immediately** (Actions > Settings > GUI) — it is unauthenticated until you do |
+| Syncthing | syncthing.fortwow.dev | ✅ now covered by SSO (Phase 0.2). Its GUI is still unauthenticated *underneath*, so if you reach it directly at `192.168.1.32:8384` there is no password — set one under Actions > Settings > GUI if that path matters to you |
 
 ### Home Assistant 🆕
 
@@ -192,17 +229,18 @@ booting, and prints a note telling you to add `trusted_proxies` yourself.
 
 ---
 
-## Phase 6 — No login required ✅
+## Phase 6 — Nothing to configure ✅
 
-Nothing to do; listed so you know they exist.
+No per-service setup; listed so you know they exist. The SSO column is the only
+thing to notice — most of these are genuinely open, Prometheus is not.
 
 | Service | URL | Notes |
 |---|---|---|
-| Homepage | home.fortwow.dev | Dashboard tiles for everything |
-| IT Tools | it-tools.fortwow.dev | Offline dev utilities |
-| Glances | glances.fortwow.dev | Host metrics; REST API at `/api/4/...`, MCP at `/mcp/sse` |
-| Prometheus | prometheus.fortwow.dev | Scrape targets and raw queries |
-| ntfy | ntfy.fortwow.dev | Push notifications; deploy alerts already publish here |
+| Homepage | home.fortwow.dev | Open. Dashboard tiles for everything |
+| IT Tools | it-tools.fortwow.dev | Open. Offline dev utilities |
+| Glances | glances.fortwow.dev | Open — its `/mcp/sse` endpoint has no cookie jar, so it cannot go behind SSO. Host metrics; REST API at `/api/4/...` |
+| Prometheus | prometheus.fortwow.dev | **Behind SSO** (Phase 0.2); no login of its own. Scrape targets and raw queries |
+| ntfy | ntfy.fortwow.dev | Open — mobile clients cannot follow a login redirect. Push notifications; deploy alerts already publish here |
 | Cockpit ×3 | cockpit-media / cockpit-dl / cockpit-infra | Log in with your **system** account (`straderb`), not a vault password |
 
 ---
