@@ -1,0 +1,12 @@
+[Unit]
+Description=Check backup freshness daily, after every VM's backup window
+
+[Timer]
+# The three backup timers fire 03:09-03:40; 04:40 leaves an hour for the
+# slowest of them (svc-infra's database dumps) to finish writing.
+OnCalendar=*-*-* 04:40:00
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

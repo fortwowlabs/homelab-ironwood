@@ -55,3 +55,31 @@
     mode: "0600"
   no_log: true
   diff: false
+
+# The ping UUIDs are bearer credentials: anyone holding one can keep a check
+# green forever, which is worse than no check at all. Same 0600-root
+# treatment as the ntfy token beside it.
+#
+# svc-download is excluded on purpose. Its nftables backstop permits egress
+# only to Mullvad, the NAS, LAN ntfy and Beszel — there is no DNS and no
+# outbound 443 — so it cannot reach hc-ping.com by construction. Its backups
+# are checked from svc-infra over the shared NFS export instead.
+- name: Render healthchecks.io ping credentials
+  ansible.builtin.template:
+    src: healthchecks.env.j2
+    dest: /etc/homelab-healthchecks.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  when: not (service_guarded_egress | bool)
+
+- name: Install the healthchecks.io ping helper
+  ansible.builtin.template:
+    src: hc-ping.sh.j2
+    dest: /usr/local/sbin/hc-ping.sh
+    owner: root
+    group: root
+    mode: "0750"
+  when: not (service_guarded_egress | bool)

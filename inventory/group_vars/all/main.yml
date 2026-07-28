@@ -170,6 +170,20 @@ disk_alert_nfs_threshold: 90
 # alert channel becomes background noise.
 alert_realert_hours: 6
 
+# healthchecks.io is the one piece of this that deliberately lives outside
+# the house. Everything else alerts by pushing to ntfy on the LAN, which is
+# silent in exactly the scenario that matters most while away: the whole
+# environment, the network, or the power being gone. These jobs ping OUT on
+# success; healthchecks.io alerts on the ping that never arrives. See the
+# vault_hc_ping_* block in inventory/group_vars/all_vault.yml.example for the
+# one-time account setup. Empty UUIDs are safe — the ping is skipped.
+healthchecks_base_url: "https://hc-ping.com"
+# How stale the newest backup artifact may be before homelab-backups-fresh
+# treats a host as failed. The three backup timers run 03:09–03:40 and the
+# checker runs at 04:40, so 26h tolerates one missed night's window without
+# tolerating a silently-stopped backup.
+backup_max_age_hours: 26
+
 # Days of remaining certificate life below which homelab-certwatch fails (and
 # therefore alerts). The wildcard renews at 30 days left, so 21 means "two
 # renewal attempts have already failed" — a real problem, not a blip.

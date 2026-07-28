@@ -1,0 +1,10 @@
+[Unit]
+Description=Heartbeat to healthchecks.io (proves svc-media and ntfy are alive)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/homelab-healthchecks.env
+EnvironmentFile=/etc/homelab-notify.env
+ExecStart=/usr/local/sbin/homelab-heartbeat.sh

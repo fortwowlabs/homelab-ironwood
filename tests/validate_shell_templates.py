@@ -25,7 +25,10 @@ TEMPLATES = (
     "roles/mon/templates/failed-units-watch.sh.j2",
     "roles/service_vm/templates/maintenance-egress.sh.j2",
     "roles/service_vm/templates/notify-failure.sh.j2",
+    "roles/service_vm/templates/hc-ping.sh.j2",
+    "roles/svc_infra/templates/backups-fresh.sh.j2",
     "roles/svc_media/templates/certwatch.sh.j2",
+    "roles/svc_media/templates/heartbeat.sh.j2",
 )
 
 
@@ -72,6 +75,9 @@ def main() -> int:
         # whether to sweep the rootless user manager. Render the media/infra
         # arm — it is the superset, so ShellCheck sees every line.
         "group_names": ["service_vms", "media_vms"],
+        # backups-fresh.sh.j2 bakes the host list in at render time.
+        "groups": {"service_vms": ["svc-media", "svc-download", "svc-infra"]},
+        "backup_max_age_hours": 26,
         "service_domain": "example.test",
         "svc_uid": 10001,
         "download_apps": apps,

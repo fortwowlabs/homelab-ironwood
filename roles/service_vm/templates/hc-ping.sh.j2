@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# hc-ping.sh — report a job's outcome to healthchecks.io.
+#
+#   hc-ping.sh <UUID> [suffix]     suffix: "" (success), "fail", or "start"
+#
+# This is the outbound half of the dead-man's switch. Everything else in this
+# repo alerts by pushing to ntfy on the LAN, which cannot tell you that the
+# LAN is gone. healthchecks.io notices the ABSENCE of these pings and alerts
+# from outside the house.
+#
+# Never exits nonzero. A missed ping is not a reason to fail the job that was
+# reporting; and if pings stop arriving for real, that is precisely what
+# healthchecks.io is there to notice.
+set -uo pipefail
+
+uuid="${1:-}"
+suffix="${2:-}"
+base="${HC_BASE:-https://hc-ping.com}"
+
+if [[ -z "$uuid" ]]; then
+    # The expected state on a fresh clone: the checks have not been created
+    # in the healthchecks.io account yet. Say so once, in the journal, rather
+    # than failing a deploy over a monitoring account that is not set up.
+    logger -t hc-ping "no healthchecks UUID configured; skipping ping${suffix:+ (${suffix})}"
+    exit 0
+fi
+
+url="${base}/${uuid}"
+[[ -n "$suffix" ]] && url="${url}/${suffix}"
+
+# --retry matters more here than anywhere else in the repo: a ping lost to a
+# blip is indistinguishable, to healthchecks.io, from the machine being dead.
+if ! curl -fsS --max-time 20 --retry 5 --retry-delay 5 --retry-connrefused \
+        -o /dev/null "$url"; then
+    logger -p daemon.err -t hc-ping "healthchecks ping FAILED (${suffix:-success}) — expect an external alert"
+fi
+exit 0

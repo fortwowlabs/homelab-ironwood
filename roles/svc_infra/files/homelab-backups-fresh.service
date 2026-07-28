@@ -1,0 +1,9 @@
+[Unit]
+Description=Check that every VM's backups are fresh
+After=network-online.target srv-backups.mount
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/homelab-healthchecks.env
+ExecStart=/usr/local/sbin/backups-fresh.sh

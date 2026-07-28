@@ -1,0 +1,13 @@
+[Unit]
+Description=Send the healthchecks.io heartbeat daily
+
+[Timer]
+OnCalendar=*-*-* 07:00:00
+# Also on boot: a VM that just came back should say so promptly rather than
+# waiting until the next morning to clear an alert that already fired.
+OnBootSec=10min
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# heartbeat.sh — prove that the machine which carries all the alerting is up.
+#
+# Every ntfy alert in this repo is published to a container on svc-media. If
+# svc-media is down, nothing can tell you anything: the alerting host and the
+# alerting channel are the same box. This is the only check whose whole
+# purpose is to notice that.
+#
+# It pings healthchecks.io only after confirming ntfy actually answers, so a
+# running-but-broken ntfy fails the check rather than reporting a heartbeat
+# that means nothing.
+set -uo pipefail
+
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-healthchecks.env ]] && . /etc/homelab-healthchecks.env
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-notify.env ]] && . /etc/homelab-notify.env
+
+if ! curl -fsS --max-time 10 -o /dev/null "${NTFY_URL}/v1/health"; then
+    echo "ntfy is not answering at ${NTFY_URL} — alerting is down on this host" >&2
+    /usr/local/sbin/hc-ping.sh "${HC_PING_HEARTBEAT:-}" fail
+    exit 1
+fi
+
+/usr/local/sbin/hc-ping.sh "${HC_PING_HEARTBEAT:-}"
+echo "ntfy healthy; heartbeat sent"
+exit 0

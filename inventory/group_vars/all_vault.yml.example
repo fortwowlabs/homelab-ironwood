@@ -212,3 +212,36 @@ vault_authelia_jwt_secret:             "REPLACE_openssl_rand_hex_32"   # openssl
 # users.yml itself on a UI change and the next deploy would revert it.
 vault_authelia_user_password_hash: "REPLACE_argon2id_phc_hash"        # the hash
 vault_authelia_user_password_plaintext: "REPLACE_openssl_rand_hex_24"  # what you type at the portal
+
+# --- healthchecks.io: the dead-man's switch ------------------------------
+# Everything else in this repo alerts by pushing to ntfy. That cannot tell
+# you about the one failure that matters most while you are away: the whole
+# environment (or ntfy itself, or the house's power) being gone. Silence and
+# health look identical from a phone.
+#
+# healthchecks.io inverts it: these jobs ping OUT on success, and if a ping
+# does not arrive within its grace period, healthchecks.io — running on
+# somebody else's infrastructure — emails and pushes you.
+#
+# ONE-TIME SETUP (nothing automates this; the account is yours):
+#   1. Sign up at https://healthchecks.io (free tier covers 20 checks).
+#   2. Add its notification channels FIRST — email plus a phone push. A
+#      check with no channel fails silently, which defeats the point.
+#   3. Create the five checks below with the listed period/grace.
+#   4. Copy each check's ping UUID (the last path element of its ping URL,
+#      NOT the whole URL) into vault.yml with `make vault-edit`.
+#
+# Leaving a UUID empty is safe and supported: the job skips its ping and
+# says so in the journal. That is the state a fresh clone deploys in.
+#
+#   check name          period / grace   pinged by
+#   homelab-verify      1 day  / 6 h     nightly verify on svc-infra
+#   homelab-backups     1 day  / 6 h     backups-fresh check on svc-infra
+#   homelab-pve         1 day  / 6 h     daily health check on the PVE host
+#   homelab-heartbeat   1 day  / 3 h     svc-media (proves the ntfy host lives)
+#   homelab-scrub      32 day  / 3 d     monthly ZFS scrub on the PVE host
+vault_hc_ping_verify:    ""   # UUID only, e.g. 1a2b3c4d-....  Empty = disabled.
+vault_hc_ping_backups:   ""
+vault_hc_ping_pve:       ""
+vault_hc_ping_heartbeat: ""
+vault_hc_ping_scrub:     ""

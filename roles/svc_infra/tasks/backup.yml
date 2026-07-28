@@ -41,6 +41,36 @@
     state: started
     daemon_reload: true
 
+# The freshness check for ALL THREE VMs runs here, because this is the host
+# that can both read the shared backup export and reach healthchecks.io.
+# svc-download can do only the first of those.
+- name: Render the cross-host backup freshness check
+  ansible.builtin.template:
+    src: backups-fresh.sh.j2
+    dest: /usr/local/sbin/backups-fresh.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the backup freshness units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - homelab-backups-fresh.service
+    - homelab-backups-fresh.timer
+  register: infra_backups_fresh_units
+
+- name: Arm the daily backup freshness check
+  ansible.builtin.systemd:
+    name: homelab-backups-fresh.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ infra_backups_fresh_units is changed }}"
+
 - name: Check for fresh nonempty catalog backup artifacts
   ansible.builtin.shell: |
     set -euo pipefail

@@ -41,3 +41,4 @@ onfailure_units_extra:
   - backup-media.service
   - certbot-renew.service
   - homelab-certwatch.service
+  - homelab-heartbeat.service

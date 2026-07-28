@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# backups-fresh.sh — one place that answers "are all three VMs still backing
+# up?", and the thing that pings the healthchecks.io backups check.
+#
+# Why this lives on svc-infra rather than in each backup script:
+#   - svc-download CANNOT reach hc-ping.com. Its nftables backstop allows
+#     egress only to Mullvad, the NAS, LAN ntfy and Beszel; there is no DNS
+#     and no outbound 443. Checking its artifacts over the shared NFS export
+#     from here covers it without punching a hole in that backstop.
+#   - A backup script only runs when its timer fires. A timer that stopped
+#     firing at all — masked unit, disabled timer, VM that never came back
+#     from a reboot — produces no failure to report. Reading the artifacts
+#     detects absence, which is the failure mode that matters here.
+#
+# Exits nonzero when anything is stale, so the OnFailure drop-in raises the
+# ntfy alert. This script owns the healthchecks side; it does not duplicate
+# the ntfy side.
+set -uo pipefail
+
+BACKUP_ROOT=/srv/backups
+MAX_AGE_HOURS={{ backup_max_age_hours | default(26) }}
+HOSTS=({% for h in groups['service_vms'] | sort %}{{ h | quote }} {% endfor %})
+
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-healthchecks.env ]] && . /etc/homelab-healthchecks.env
+
+fail() {
+    echo "$1" >&2
+    /usr/local/sbin/hc-ping.sh "${HC_PING_BACKUPS:-}" fail
+    exit 1
+}
+
+# /srv/backups is an x-systemd.automount, so a cold path can look empty until
+# something touches it. Trigger the mount before concluding anything, and
+# treat an unreachable NAS as its own distinct failure — "the NAS is down" and
+# "backups stopped running" need different responses.
+stat "${BACKUP_ROOT}/." >/dev/null 2>&1 || true
+if ! findmnt -n -t nfs4 -M "$BACKUP_ROOT" >/dev/null 2>&1; then
+    fail "backup share ${BACKUP_ROOT} is not mounted — the NAS is unreachable, so backup freshness is UNKNOWN, not OK"
+fi
+
+stale=""
+for host in "${HOSTS[@]}"; do
+    dir="${BACKUP_ROOT}/${host}"
+    if [[ ! -d "$dir" ]]; then
+        stale+=$'\n'"${host}: no backup directory at ${dir}"
+        continue
+    fi
+    # Recursive on purpose: svc-media files live under appdata/ and romm-db/
+    # rather than at the top level, so a depth-1 glob would call it stale
+    # every single night.
+    newest=$(find "$dir" -type f -name '*.gz' -printf '%T@ %p\n' 2>/dev/null \
+                 | sort -rn | head -1)
+    if [[ -z "$newest" ]]; then
+        stale+=$'\n'"${host}: no backup artifacts under ${dir}"
+        continue
+    fi
+    epoch=${newest%% *}
+    path=${newest#* }
+    age_h=$(( ( $(date +%s) - ${epoch%.*} ) / 3600 ))
+    if (( age_h > MAX_AGE_HOURS )); then
+        stale+=$'\n'"${host}: newest backup is ${age_h}h old (limit ${MAX_AGE_HOURS}h): ${path}"
+    else
+        echo "${host}: OK, newest backup ${age_h}h old"
+    fi
+done
+
+if [[ -n "$stale" ]]; then
+    fail "stale or missing backups:${stale}"
+fi
+
+/usr/local/sbin/hc-ping.sh "${HC_PING_BACKUPS:-}"
+echo "all backups fresh (limit ${MAX_AGE_HOURS}h)"
+exit 0

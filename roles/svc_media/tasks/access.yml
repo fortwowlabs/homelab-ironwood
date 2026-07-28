@@ -243,6 +243,37 @@
         daemon_reload: "{{ media_certwatch_units is changed }}"
       when: not ansible_check_mode
 
+    # svc-media carries both ntfy and the whole access layer, so it is the
+    # host whose death silences everything else. Its heartbeat is what turns
+    # that silence into an external alert.
+    - name: Install the healthchecks heartbeat script
+      ansible.builtin.template:
+        src: heartbeat.sh.j2
+        dest: /usr/local/sbin/homelab-heartbeat.sh
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Install the healthchecks heartbeat units
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - homelab-heartbeat.service
+        - homelab-heartbeat.timer
+      register: media_heartbeat_units
+
+    - name: Arm the healthchecks heartbeat
+      ansible.builtin.systemd:
+        name: homelab-heartbeat.timer
+        enabled: true
+        state: started
+        daemon_reload: "{{ media_heartbeat_units is changed }}"
+      when: not ansible_check_mode
+
     - name: Render Caddy configuration from service catalogs
       ansible.builtin.template:
         src: Caddyfile.j2
