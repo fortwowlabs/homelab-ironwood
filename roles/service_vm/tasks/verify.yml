@@ -2,6 +2,19 @@
 - name: Verify bootstrap identity and SELinux
   ansible.builtin.import_tasks: bootstrap.yml
 
+# The fstab entries use x-systemd.automount, so after a clean boot findmnt can
+# legitimately see only the autofs trigger until something accesses the path.
+# Touch the mountpoint read-only before requiring the backing NFS4 mount.
+- name: Trigger lazy NFS automounts
+  ansible.builtin.command:
+    argv:
+      - stat
+      - -c
+      - "%m"
+      - "{{ item.path }}/."
+  loop: "{{ service_nfs_mounts }}"
+  changed_when: false
+
 - name: Check NFS mounts are active
   ansible.builtin.command: "findmnt -n -t nfs4 -M {{ item.path }}"
   loop: "{{ service_nfs_mounts }}"

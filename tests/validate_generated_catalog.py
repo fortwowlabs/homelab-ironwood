@@ -208,6 +208,9 @@ def main() -> int:
     catalog_app_tasks = (
         ROOT / "roles/svc_download/tasks/apps.yml"
     ).read_text(encoding="utf-8")
+    download_package_tasks = (
+        ROOT / "roles/svc_download/tasks/packages.yml"
+    ).read_text(encoding="utf-8")
     if "download_apps | dict2items | selectattr('value.proxy') | list" not in verify_tasks:
         failures.append("verify: UI probes are not driven by proxy-eligible catalog entries")
     if disruptive_tasks.count("download_apps | dict2items") < 2:
@@ -231,6 +234,10 @@ def main() -> int:
         failures.append("catalog restart handlers are not guarded during check mode")
     if catalog_app_tasks.count("when: not (ansible_check_mode and item.changed)") < 2:
         failures.append("new catalog units are not skipped safely during check mode")
+    if "masked: true" not in download_package_tasks or "dnf-makecache.timer" not in download_package_tasks:
+        failures.append("download packages: automatic DNF refresh is not masked")
+    if "Verify automatic DNF metadata refresh remains masked" not in verify_tasks:
+        failures.append("download verify: automatic DNF refresh masking is not checked")
 
     caddyfile = environment.get_template(
         "roles/svc_media/templates/Caddyfile.j2"

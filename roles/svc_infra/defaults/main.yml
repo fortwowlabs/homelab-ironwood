@@ -42,6 +42,19 @@ infra_extra_backup_paths: [paperless, netbox, nextcloud]
 # form Immich's backup docs specify for its vectorchord-patched cluster.
 infra_db_backups: [netbox-db, immich-db, nextcloud-db]
 
+# These bind mounts are written directly by non-root processes inside
+# rootless containers. Their IDs are namespaced and must not be reset to the
+# host homelab account on every converge.
+infra_namespaced_appdata:
+  - path: /opt/homelab/appdata/netbox-redis
+    uid: 999
+    gid: 1000
+    restart_services: [netbox-redis, netbox]
+  - path: /opt/homelab/appdata/immich-db
+    uid: 999
+    gid: 999
+    restart_services: [immich-db, immich-server]
+
 # Every infra service, whether catalog-driven or bespoke, funnels through
 # this one name list so apps.yml/verify.yml don't need to know which category
 # a service belongs to. A plain default (not set_fact) so it's available

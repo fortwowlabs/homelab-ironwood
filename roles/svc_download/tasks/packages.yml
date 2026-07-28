@@ -11,3 +11,19 @@
     path: /usr/lib/systemd/systemd-socket-proxyd
   register: download_proxyd
   failed_when: not download_proxyd.stat.exists
+
+# The host backstop intentionally blocks routine repository egress. Letting
+# dnf-makecache.timer run outside the guarded maintenance window guarantees a
+# failed unit after boot even though package state is healthy. Operators still
+# get explicit, fail-closed package installation through service_vm/packages.
+- name: Disable automatic DNF metadata refresh outside maintenance windows
+  ansible.builtin.systemd:
+    name: dnf-makecache.timer
+    enabled: false
+    state: stopped
+    masked: true
+
+- name: Clear a stale automatic DNF metadata refresh failure
+  ansible.builtin.command: systemctl reset-failed dnf-makecache.service
+  changed_when: false
+  failed_when: false

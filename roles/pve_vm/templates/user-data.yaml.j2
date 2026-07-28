@@ -25,8 +25,9 @@ users:
     lock_passwd: true
     homedir: /opt/homelab
 
-groups:
-  - homelab: []
+# A plain group name is the schema-valid form for a group with no initial
+# members. The homelab user above is assigned to it as its primary group.
+groups: [homelab]
 
 growpart:
   mode: auto

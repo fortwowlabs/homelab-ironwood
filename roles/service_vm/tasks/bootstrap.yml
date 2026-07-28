@@ -6,6 +6,15 @@
   changed_when: false
   failed_when: "'status: done' not in service_vm_cloud_init.stdout"
 
+- name: Verify cloud-init trusts the deployed instance cache
+  ansible.builtin.command:
+    argv:
+      - grep
+      - -Fx
+      - "manual_cache_clean: true"
+      - /etc/cloud/cloud.cfg.d/99-homelab-instance-cache.cfg
+  changed_when: false
+
 - name: Read service identity
   ansible.builtin.command: id homelab
   check_mode: false

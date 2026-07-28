@@ -28,6 +28,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "inventory/group_vars/all/infra-apps.yml"
 TEMPLATE_DIR = ROOT / "roles/svc_infra/templates"
+DEFAULTS_PATH = ROOT / "roles/svc_infra/defaults/main.yml"
+FILES_TASKS_PATH = ROOT / "roles/svc_infra/tasks/files.yml"
+VERIFY_TASKS_PATH = ROOT / "roles/svc_infra/tasks/verify.yml"
 APPDATA_ROOT = "/opt/homelab/appdata"
 
 REQUIRED_FIELDS = {"image", "ui_port", "volumes", "backup_paths"}
@@ -239,6 +242,24 @@ def main() -> int:
             "infra_apps and infra_secret_apps both declare "
             f"{', '.join(duplicates)} — combine() would silently shadow the infra_apps entry"
         )
+
+    defaults = yaml.safe_load(DEFAULTS_PATH.read_text(encoding="utf-8"))
+    namespaced_appdata = defaults.get("infra_namespaced_appdata", [])
+    expected_namespaced_paths = {
+        "/opt/homelab/appdata/netbox-redis",
+        "/opt/homelab/appdata/immich-db",
+    }
+    if {item.get("path") for item in namespaced_appdata} != expected_namespaced_paths:
+        failures.append("infra namespaced appdata: required bind mounts are not catalogued")
+    if any(not item.get("restart_services") for item in namespaced_appdata):
+        failures.append("infra namespaced appdata: every bind mount needs restart consumers")
+
+    file_tasks = FILES_TASKS_PATH.read_text(encoding="utf-8")
+    verify_tasks = VERIFY_TASKS_PATH.read_text(encoding="utf-8")
+    if "infra_namespaced_appdata_chowns.results" not in file_tasks:
+        failures.append("infra namespaced appdata: ownership repairs do not drive restarts")
+    if "Verify namespaced infra appdata ownership" not in verify_tasks:
+        failures.append("infra namespaced appdata: ownership is not verified")
 
     for catalog_name, catalog in (("infra_apps", plain), ("infra_secret_apps", secret)):
         for app_name, app in catalog.items():

@@ -1,4 +1,16 @@
 ---
+- name: Trust the deployed VM's cloud-init cache across reboots
+  ansible.builtin.copy:
+    dest: /etc/cloud/cloud.cfg.d/99-homelab-instance-cache.cfg
+    content: |
+      # Managed by Ansible. These VMs are deployed appliances, not templates.
+      # Proxmox can rotate NoCloud instance IDs when it refreshes the seed.
+      manual_cache_clean: true
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [always]
+
 - name: Validate VM bootstrap invariants
   ansible.builtin.import_tasks: bootstrap.yml
   tags: [always]

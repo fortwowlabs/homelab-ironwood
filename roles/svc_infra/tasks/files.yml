@@ -244,14 +244,80 @@
     mode: "0755"
   loop: [media, reports, scripts]
 
-- name: Create the NetBox database and redis appdata directories
+- name: Create the NetBox database appdata directory
   ansible.builtin.file:
-    path: "/opt/homelab/appdata/{{ item }}"
+    path: /opt/homelab/appdata/netbox-db
     state: directory
     owner: "{{ svc_uid }}"
     group: "{{ svc_gid }}"
     mode: "0755"
-  loop: [netbox-db, netbox-redis]
+
+- name: Check namespaced infra appdata directories
+  ansible.builtin.stat:
+    path: "{{ item.path }}"
+  loop: "{{ infra_namespaced_appdata }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: infra_namespaced_appdata_directories
+
+- name: Create missing namespaced appdata as the rootless service account
+  ansible.builtin.file:
+    path: "{{ item.item.path }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  loop: "{{ infra_namespaced_appdata_directories.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: not item.stat.exists
+
+- name: Read namespaced infra appdata ownership
+  ansible.builtin.command:
+    chdir: /
+    argv:
+      - runuser
+      - -u
+      - homelab
+      - --
+      - env
+      - "XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}"
+      - podman
+      - unshare
+      - stat
+      - -c
+      - "%u:%g"
+      - "{{ item.path }}"
+  loop: "{{ infra_namespaced_appdata }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: infra_namespaced_appdata_owners
+  changed_when: false
+
+- name: Give container users ownership of namespaced infra appdata
+  ansible.builtin.command:
+    chdir: /
+    argv:
+      - runuser
+      - -u
+      - homelab
+      - --
+      - env
+      - "XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}"
+      - podman
+      - unshare
+      - chown
+      - -R
+      - "{{ item.item.uid }}:{{ item.item.gid }}"
+      - "{{ item.item.path }}"
+  loop: "{{ infra_namespaced_appdata_owners.results }}"
+  loop_control:
+    label: "{{ item.item.path }}"
+  when: >-
+    item.stdout | trim
+    != (item.item.uid | string) ~ ':' ~ (item.item.gid | string)
+  register: infra_namespaced_appdata_chowns
+  changed_when: true
 
 - name: Install the NetBox private network Quadlet
   ansible.builtin.copy:
@@ -312,15 +378,6 @@
   register: infra_netbox_template
   no_log: true
   diff: false
-
-- name: Create the Immich database and redis appdata directories
-  ansible.builtin.file:
-    path: "/opt/homelab/appdata/{{ item }}"
-    state: directory
-    owner: "{{ svc_uid }}"
-    group: "{{ svc_gid }}"
-    mode: "0755"
-  loop: [immich-db, immich-redis]
 
 - name: Check the Immich photo library directory on the NFS export
   ansible.builtin.command: test -d /srv/media/photos
@@ -830,6 +887,13 @@
         + (['nextcloud-redis'] if (infra_nextcloud_redis_template.changed | default(false)) else [])
         + (['nextcloud'] if (infra_nextcloud_template.changed | default(false)) else [])
         + (['home-assistant'] if (infra_ha_proxy_config.changed | default(false)) else [])
+        + (
+          infra_namespaced_appdata_chowns.results | default([])
+          | selectattr('changed')
+          | map(attribute='item.item.restart_services')
+          | list
+          | flatten
+        )
       }}
   changed_when: infra_services_to_restart | length > 0
   notify: infra configuration changed

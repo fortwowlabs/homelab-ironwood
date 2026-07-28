@@ -19,6 +19,12 @@
   changed_when: false
   failed_when: download_verify_firewalld_state.rc not in [3, 4]
 
+- name: Verify automatic DNF metadata refresh remains masked
+  ansible.builtin.command: systemctl is-enabled dnf-makecache.timer
+  register: download_dnf_makecache_timer
+  changed_when: false
+  failed_when: download_dnf_makecache_timer.stdout != "masked"
+
 - name: Verify numeric HTTPS egress from the host remains fenced
   ansible.builtin.command:
     argv:

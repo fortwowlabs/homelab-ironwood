@@ -4,6 +4,31 @@
   loop: "{{ infra_service_names }}"
   changed_when: false
 
+- name: Verify namespaced infra appdata ownership
+  ansible.builtin.command:
+    chdir: /
+    argv:
+      - runuser
+      - -u
+      - homelab
+      - --
+      - env
+      - "XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}"
+      - podman
+      - unshare
+      - stat
+      - -c
+      - "%u:%g"
+      - "{{ item.path }}"
+  loop: "{{ infra_namespaced_appdata }}"
+  loop_control:
+    label: "{{ item.path }}"
+  register: infra_namespaced_appdata_gates
+  changed_when: false
+  failed_when: >-
+    infra_namespaced_appdata_gates.stdout | trim
+    != (item.uid | string) ~ ':' ~ (item.gid | string)
+
 - name: Find fresh nonempty infra backup artifacts
   ansible.builtin.command:
     argv:

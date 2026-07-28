@@ -15,6 +15,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/pve-states.yml"
 ROLE = ROOT / "roles/pve_vm/tasks/main.yml"
+USER_DATA = ROOT / "roles/pve_vm/templates/user-data.yaml.j2"
+SERVICE_VM_MAIN = ROOT / "roles/service_vm/tasks/main.yml"
+SERVICE_VM_BOOTSTRAP = ROOT / "roles/service_vm/tasks/bootstrap.yml"
 SIZE_MULTIPLIERS = {
     "K": 1024,
     "M": 1024**2,
@@ -239,6 +242,17 @@ def validate_role_contract(failures: list[str]) -> None:
     ):
         if forbidden in text:
             failures.append(f"role: forbidden provisioning behavior {forbidden!r}")
+
+    user_data = USER_DATA.read_text(encoding="utf-8")
+    if "groups: [homelab]" not in user_data:
+        failures.append("cloud-init: homelab group must use the schema-valid plain-name form")
+
+    service_vm_main = SERVICE_VM_MAIN.read_text(encoding="utf-8")
+    service_vm_bootstrap = SERVICE_VM_BOOTSTRAP.read_text(encoding="utf-8")
+    if "manual_cache_clean: true" not in service_vm_main:
+        failures.append("cloud-init: deployed VMs do not preserve their instance cache")
+    if "Verify cloud-init trusts the deployed instance cache" not in service_vm_bootstrap:
+        failures.append("cloud-init: instance-cache policy is not verified")
 
 
 def main() -> int:
