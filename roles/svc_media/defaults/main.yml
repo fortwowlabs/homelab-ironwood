@@ -15,6 +15,13 @@ media_quadlet_catalog:
   # directory: it only mounts /proc, /sys, and rootfs read-only.
   - { name: node-exporter, src: node-exporter.container.j2 }
 
+# The pinned MariaDB image runs its server as mysql (999:999). Keep this
+# explicit because rootless Podman maps that identity to host subuids; using
+# the homelab account's host UID on this bind mount makes MariaDB unable to
+# create or remove files in /var/lib/mysql during shutdown.
+romm_db_container_uid: 999
+romm_db_container_gid: 999
+
 # A single manifest drives initial-backup gating and safe artifact validation.
 media_backup_artifacts:
   - name: jellyfin

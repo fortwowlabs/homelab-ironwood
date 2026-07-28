@@ -9,6 +9,28 @@
     }}
   changed_when: false
 
+- name: Verify MariaDB owns its data directory in the container namespace
+  ansible.builtin.command:
+    chdir: /
+    argv:
+      - runuser
+      - -u
+      - homelab
+      - --
+      - env
+      - "XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}"
+      - podman
+      - unshare
+      - stat
+      - -c
+      - "%u:%g"
+      - /opt/homelab/appdata/romm/mysql
+  register: media_romm_db_owner_gate
+  changed_when: false
+  failed_when: >-
+    media_romm_db_owner_gate.stdout | trim
+    != (romm_db_container_uid | string) ~ ':' ~ (romm_db_container_gid | string)
+
 - name: Verify Jellyfin answers on its LAN-bound address
   ansible.builtin.uri:
     url: "http://{{ ansible_host }}:8096/System/Info/Public"

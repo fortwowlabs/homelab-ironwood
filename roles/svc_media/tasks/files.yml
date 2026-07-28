@@ -22,10 +22,69 @@
     - /opt/homelab/appdata/romm/assets
     - /opt/homelab/appdata/romm/config
     - /opt/homelab/appdata/romm/redis-data
-    - /opt/homelab/appdata/romm/mysql
     - /opt/homelab/appdata/homepage
     - /opt/homelab/appdata/ntfy/cache
     - /opt/homelab/appdata/ntfy/etc
+
+# Do not enforce host ownership after initial creation. MariaDB owns this mount
+# as uid/gid 999 inside the container namespace, which maps to subuids on the
+# host. Resetting it to homelab on every converge leaves the running server able
+# to read its files but unable to create or remove files in the mount root on
+# shutdown.
+- name: Check whether the RomM database directory exists
+  ansible.builtin.stat:
+    path: /opt/homelab/appdata/romm/mysql
+  register: media_romm_db_directory
+
+- name: Create the RomM database directory as the rootless service account
+  ansible.builtin.file:
+    path: /opt/homelab/appdata/romm/mysql
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+  when: not media_romm_db_directory.stat.exists
+
+- name: Read the namespaced owner of the RomM database directory
+  ansible.builtin.command:
+    chdir: /
+    argv:
+      - runuser
+      - -u
+      - homelab
+      - --
+      - env
+      - "XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}"
+      - podman
+      - unshare
+      - stat
+      - -c
+      - "%u:%g"
+      - /opt/homelab/appdata/romm/mysql
+  register: media_romm_db_owner
+  changed_when: false
+
+- name: Give MariaDB ownership of its data directory
+  ansible.builtin.command:
+    chdir: /
+    argv:
+      - runuser
+      - -u
+      - homelab
+      - --
+      - env
+      - "XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}"
+      - podman
+      - unshare
+      - chown
+      - -R
+      - "{{ romm_db_container_uid }}:{{ romm_db_container_gid }}"
+      - /opt/homelab/appdata/romm/mysql
+  when: >-
+    media_romm_db_owner.stdout | trim
+    != (romm_db_container_uid | string) ~ ':' ~ (romm_db_container_gid | string)
+  changed_when: true
+  notify: media configuration changed
 
 - name: Render rootless media Quadlets
   ansible.builtin.template:

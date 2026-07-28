@@ -285,6 +285,12 @@ def main() -> int:
         failures.append("media catalog: runtime task fact breaks standalone verification")
     if "media_quadlet_catalog | map(attribute='name')" not in media_verify_tasks:
         failures.append("media catalog: verification is not driven by the role default")
+    if "/opt/homelab/appdata/romm/mysql" not in media_file_tasks:
+        failures.append("media storage: RomM database directory is not managed")
+    if "media_romm_db_owner.stdout | trim" not in media_file_tasks:
+        failures.append("media storage: RomM database ownership is not idempotently gated")
+    if "media_romm_db_owner_gate.stdout | trim" not in media_verify_tasks:
+        failures.append("media storage: RomM database ownership is not verified")
 
     homepage = environment.get_template(
         "roles/svc_media/templates/homepage/services.yaml.j2"
