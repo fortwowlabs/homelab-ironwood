@@ -189,6 +189,11 @@
   changed_when: false
   when: media_access_layer | default('manual') == 'caddy'
 
+- name: Verify node_exporter metrics
+  ansible.builtin.include_role:
+    name: service_vm
+    tasks_from: node-exporter
+
 - name: Verify the system has no failed services
   ansible.builtin.include_role:
     name: service_vm

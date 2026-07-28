@@ -140,6 +140,10 @@ def main() -> int:
             service = service_template.render(**common, item=item)
             if socket.count(f":{app.ui_port}") != 1:
                 failures.append(f"{name}: expected one generated proxy listener")
+            if "FreeBind=yes" not in socket or "WantedBy=sockets.target" not in socket:
+                failures.append(f"{name}: proxy socket is not safe for early boot")
+            if "network-online.target" in socket:
+                failures.append(f"{name}: proxy socket creates a sockets.target ordering cycle")
             if service.count(f"10.77.0.2:{app.ui_port}") != 1:
                 failures.append(f"{name}: expected one generated proxy target")
 
@@ -168,6 +172,13 @@ def main() -> int:
         failures.append("firewall: INFRA_HOST was not defined from the svc-infra inventory address")
     if not re.search(r"^\s*ip saddr \$INFRA_HOST tcp dport 9100 accept$", backstop, re.MULTILINE):
         failures.append("firewall: node_exporter scrape rule was not rendered for INFRA_HOST")
+
+    for role in ("svc_download", "svc_media", "svc_infra"):
+        node_exporter = (
+            ROOT / f"roles/{role}/templates/node-exporter.container.j2"
+        ).read_text(encoding="utf-8")
+        if "User=0" not in node_exporter or "SecurityLabelDisable=true" not in node_exporter:
+            failures.append(f"{role}: node_exporter cannot read host pseudo-filesystems")
 
     backup = environment.get_template(
         "roles/svc_download/templates/backup-dl-appdata.sh.j2"
@@ -240,6 +251,12 @@ def main() -> int:
         failures.append("download packages: stale automatic DNF timer failures are not cleared")
     if "Verify automatic DNF metadata refresh remains masked" not in verify_tasks:
         failures.append("download verify: automatic DNF refresh masking is not checked")
+    if "Verify numeric HTTPS egress from the host remains fenced" not in verify_tasks or "--kill-after=2" not in verify_tasks:
+        failures.append("download verify: blocked-egress probe has no process-level deadline")
+    if "Verify every catalog UI proxy socket is active" not in verify_tasks:
+        failures.append("download verify: proxy socket boot activation is not checked")
+    if "timeout: 5" not in verify_tasks:
+        failures.append("download verify: UI probes do not have a short timeout")
 
     caddyfile = environment.get_template(
         "roles/svc_media/templates/Caddyfile.j2"

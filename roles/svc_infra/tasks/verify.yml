@@ -120,6 +120,11 @@
   changed_when: false
   when: item.stdout | length > 0
 
+- name: Verify node_exporter metrics
+  ansible.builtin.include_role:
+    name: service_vm
+    tasks_from: node-exporter
+
 - name: Verify the system has no failed services
   ansible.builtin.include_role:
     name: service_vm

@@ -13,6 +13,10 @@ Description=Prometheus node exporter
 Image={{ node_exporter_image }}
 ContainerName=node-exporter
 Network=host
+# Container UID 0 maps to the unprivileged homelab account in this rootless
+# unit. Label separation must be disabled so it can read host proc metadata.
+User=0
+SecurityLabelDisable=true
 Volume=/proc:/host/proc:ro
 Volume=/sys:/host/sys:ro
 Volume=/:/rootfs:ro

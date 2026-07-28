@@ -14,6 +14,11 @@ Description=Prometheus node exporter
 Image={{ node_exporter_image }}
 ContainerName=node-exporter
 Network=host
+# This dedicated, digest-pinned host monitor must read host pseudo-filesystems.
+# Its mounts remain read-only; disabling label separation avoids container_t
+# denying /proc/<pid>/mountinfo on SELinux hosts.
+User=0
+SecurityLabelDisable=true
 Volume=/proc:/host/proc:ro
 Volume=/sys:/host/sys:ro
 Volume=/:/rootfs:ro

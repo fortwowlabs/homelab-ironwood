@@ -28,6 +28,9 @@
 - name: Verify numeric HTTPS egress from the host remains fenced
   ansible.builtin.command:
     argv:
+      - timeout
+      - --kill-after=2
+      - "10"
       - curl
       - -4
       - --insecure
@@ -35,6 +38,8 @@
       - --show-error
       - --output
       - /dev/null
+      - --connect-timeout
+      - "2"
       - --max-time
       - "5"
       - https://1.1.1.1/
@@ -55,10 +60,18 @@
     label: "{{ item.key }}"
   changed_when: false
 
+- name: Verify every catalog UI proxy socket is active
+  ansible.builtin.command: "systemctl is-active {{ item.key }}-proxy.socket"
+  loop: "{{ download_apps | dict2items | selectattr('value.proxy') | list }}"
+  loop_control:
+    label: "{{ item.key }}"
+  changed_when: false
+
 - name: Verify every catalog UI proxy answers
   ansible.builtin.uri:
     url: "http://{{ ansible_host }}:{{ item.value.ui_port }}"
     status_code: [200, 301, 302, 303, 401, 403]
+    timeout: 5
   loop: "{{ download_apps | dict2items | selectattr('value.proxy') | list }}"
   loop_control:
     label: "{{ item.key }}"
@@ -172,10 +185,6 @@
   changed_when: false
   when: beszel_agent_enabled | bool
 
-- name: Verify the node_exporter is active
-  ansible.builtin.command: systemctl is-active node-exporter.service
-  changed_when: false
-
 - name: Check whether Recyclarr is deployed
   # Independent of download_recyclarr_enabled (a files.yml runtime fact): the
   # standalone verify.yml playbook never runs files.yml, only this tasks_from
@@ -189,6 +198,11 @@
   ansible.builtin.command: systemctl is-active recyclarr.service
   changed_when: false
   when: download_recyclarr_quadlet_stat.stat.exists
+
+- name: Verify node_exporter metrics
+  ansible.builtin.include_role:
+    name: service_vm
+    tasks_from: node-exporter
 
 - name: Verify the system has no failed services
   ansible.builtin.include_role:

@@ -262,6 +262,8 @@ def validate_role_contract(failures: list[str]) -> None:
         role_verify = (ROOT / f"roles/{role}/tasks/verify.yml").read_text(encoding="utf-8")
         if "tasks_from: failed-units" not in role_verify:
             failures.append(f"{role} verify: failed system services are not checked last")
+        if "tasks_from: node-exporter" not in role_verify:
+            failures.append(f"{role} verify: node_exporter metrics are not functionally checked")
 
 
 def main() -> int:

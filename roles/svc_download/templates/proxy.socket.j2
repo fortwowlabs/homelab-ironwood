@@ -2,11 +2,11 @@
 # homelab-iac catalog-managed
 [Unit]
 Description={{ item.key }} UI proxy socket (LAN to VPN namespace)
-Wants=network-online.target
-After=network-online.target
 
 [Socket]
 ListenStream={{ ansible_host }}:{{ item.value.ui_port }}
+# This socket is pulled in by sockets.target, before the network is online.
+# FreeBind avoids a sockets.target -> network -> sockets.target ordering cycle.
 FreeBind=yes
 
 [Install]

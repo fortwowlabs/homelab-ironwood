@@ -1,0 +1,10 @@
+---
+- name: Verify node_exporter exposes host filesystem metrics
+  ansible.builtin.shell:
+    cmd: >-
+      set -o pipefail;
+      curl --fail --silent --show-error --max-time 5
+      http://127.0.0.1:9100/metrics
+      | awk '/^node_filesystem_size_bytes/{found=1} END{exit !found}'
+    executable: /bin/bash
+  changed_when: false
