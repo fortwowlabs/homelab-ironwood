@@ -9,8 +9,10 @@
 # tailnet here too — see docs/services.md.
 
 # Bind only the LAN IP so we never fight systemd-resolved on 127.0.0.53.
+# The address can appear after dnsmasq starts during boot; Linux bind-dynamic
+# attaches it when NetworkManager finishes instead of failing the unit.
 listen-address={{ ansible_host }}
-bind-interfaces
+bind-dynamic
 
 # We answer {{ service_domain }} and nothing else; no upstream forwarding.
 no-resolv

@@ -264,6 +264,9 @@ def main() -> int:
     dnsmasq = environment.get_template(
         "roles/svc_media/templates/dnsmasq-services.conf.j2"
     ).render(**common)
+    media_verify_tasks = (
+        ROOT / "roles/svc_media/tasks/verify.yml"
+    ).read_text(encoding="utf-8")
     expected_proxy_names = [*caddy_services, *eligible]
     for name in expected_proxy_names:
         hostname = f"{name}.{common['service_domain']}"
@@ -275,6 +278,10 @@ def main() -> int:
             failures.append(f"{name}: expected one generated dnsmasq address")
     if "local_certs" in caddyfile:
         failures.append("caddy: obsolete internal-CA configuration was rendered")
+    if "bind-dynamic" not in dnsmasq or "bind-interfaces" in dnsmasq:
+        failures.append("dnsmasq: LAN listener cannot survive late address assignment")
+    if "Verify the private DNS service answers from its LAN address" not in media_verify_tasks:
+        failures.append("dnsmasq: standalone verification does not test a real lookup")
     if (
         "tls /etc/caddy/certs/fullchain.pem /etc/caddy/certs/privkey.pem"
         not in caddyfile

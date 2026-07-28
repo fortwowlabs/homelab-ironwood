@@ -129,6 +129,18 @@
     label: "{{ item.item.name }}"
   changed_when: false
 
+- name: Verify the private DNS service is active
+  ansible.builtin.command: systemctl is-active dnsmasq.service
+  changed_when: false
+
+- name: Verify the private DNS service answers from its LAN address
+  ansible.builtin.command: >-
+    dig +short +time=2 +tries=2 @{{ ansible_host }}
+    jellyfin.{{ service_domain }}
+  register: media_verify_dns_gate
+  changed_when: false
+  failed_when: ansible_host not in media_verify_dns_gate.stdout
+
 - name: Smoke-test every configured Caddy backend
   ansible.builtin.command: >-
     curl -s --max-time 15 -o /dev/null -w '%{http_code}'
