@@ -256,8 +256,12 @@ def validate_role_contract(failures: list[str]) -> None:
         failures.append("cloud-init: instance-cache policy is not verified")
 
     failed_units = SERVICE_VM_FAILED_UNITS.read_text(encoding="utf-8")
-    if "Check for failed system services" not in failed_units:
-        failures.append("service VM verify: failed system services are not checked")
+    for check_name in (
+        "Check for failed system services",
+        "Check for failed rootless user services",
+    ):
+        if check_name not in failed_units:
+            failures.append(f"service VM verify: {check_name.lower()} are not checked")
     for role in ("svc_download", "svc_media", "svc_infra"):
         role_verify = (ROOT / f"roles/{role}/tasks/verify.yml").read_text(encoding="utf-8")
         if "tasks_from: failed-units" not in role_verify:
