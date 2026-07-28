@@ -30,6 +30,22 @@ download_host: "{{ groups['download_vms'] | first }}"
 media_host:    "{{ groups['media_vms'] | first }}"
 infra_host:    "{{ groups['infra_vms'] | first }}"
 
+# --- Windows 11 / RTX 4090 GPU host (NOT managed by Ansible) ---
+# A workstation, not a VM: it runs Ollama and ComfyUI natively so Open WebUI
+# has somewhere to do inference and image generation, and so Continue for
+# VSCode can talk straight to it. There is no Ansible connection to it and
+# there never will be — see docs/gpu-host.md for the manual setup.
+#
+# The address is reserved ahead of the hardware. Make the matching DHCP
+# reservation when the PC arrives; nothing here reaches out to it until
+# gpu_host_online is flipped.
+gpu_host_ip: "192.168.1.40"
+# While false, Open WebUI is deployed with its Ollama and image-generation
+# backends switched OFF, so the UI shows no dead-backend errors for a machine
+# that does not exist yet. Flipping this to true and running `make infra` is
+# the entire go-live step.
+gpu_host_online: false
+
 # --- TrueNAS NFS (created by hand in Phase 1 — NOT automated) ---
 # These live INSIDE the exported `tank` dataset (exports are tank + rust;
 # verify with `showmount -e 192.168.1.20`).
@@ -191,6 +207,12 @@ caddy_services:
   prometheus:  { backend: "{{ hostvars[infra_host].ansible_host }}:9091", group: Infra, icon: prometheus }
   grafana:     { backend: "{{ hostvars[infra_host].ansible_host }}:3005", group: Infra, icon: grafana }
   mealie:      { backend: "{{ hostvars[infra_host].ansible_host }}:9925", group: Infra, icon: mealie }
+  # Open WebUI. Deliberately NOT in sso_protected_services: it has its own
+  # account system and its own first-visit admin setup, and fronting that with
+  # Authelia would mean two logins for one service. Its native apps and the
+  # /api/ surface Continue-style clients use would not survive a redirect to
+  # the portal either.
+  chat:        { backend: "{{ hostvars[infra_host].ansible_host }}:3007", group: Infra, icon: open-webui }
   # WebSocket live-sync (/notifications/hub) rides the same port as the web
   # UI (see the vaultwarden catalog comment in infra-apps.yml) and Caddy's
   # reverse_proxy passes Upgrade/Connection through automatically — no

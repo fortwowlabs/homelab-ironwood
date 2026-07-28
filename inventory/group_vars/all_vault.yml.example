@@ -119,6 +119,11 @@ vault_netbox_secret_key:         "REPLACE_openssl_rand_hex_32"   # openssl rand 
 vault_netbox_redis_password:     "REPLACE_openssl_rand_hex_24"   # openssl rand -hex 24
 vault_netbox_superuser_password: "REPLACE_openssl_rand_hex_16"   # openssl rand -hex 16
 
+# Open WebUI (v6, infra_secret_apps): signs session JWTs. Open WebUI refuses
+# to start with authentication enabled and no key set, and rotating it logs
+# every user out — set once and leave it.
+vault_openwebui_secret_key: "REPLACE_openssl_rand_hex_32"   # openssl rand -hex 32
+
 # SearXNG (v6, download_apps): server.secret_key. Rendered into
 # /srv/appdata/searxng/settings.yml rather than an Environment= line, because
 # the download quadlet render is not no_log. The image's entrypoint would

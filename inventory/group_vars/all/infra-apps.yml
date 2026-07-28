@@ -423,3 +423,52 @@ infra_secret_apps:
       - vault_authelia_storage_encryption_key
       - vault_authelia_jwt_secret
     backup_paths: [authelia]
+
+  # Open WebUI — the chat and image-generation front end. It holds no models
+  # itself; all inference happens on the Windows 11 / RTX 4090 box at
+  # gpu_host_ip (see docs/gpu-host.md), which is why this is a plain
+  # single-container entry with no GPU plumbing on svc-infra at all.
+  #
+  # The image sets USER 0:0 and never drops privileges, so it lands on the
+  # host homelab user under rootless podman with no PUID/user override — the
+  # comfortable case for once.
+  #
+  # ENABLE_PERSISTENT_CONFIG=false is the important line. By default Open
+  # WebUI copies each of the settings below into its SQLite database on FIRST
+  # boot and thereafter ignores the environment entirely, so a later change
+  # here would render, restart, and silently do nothing. With persistence off
+  # this catalog stays the source of truth, matching how every other service
+  # in this repo is configured. The trade: the corresponding toggles in the
+  # admin UI stop sticking across a restart. Change them here instead.
+  #
+  # Web search points at SearXNG inside svc-download's VPN jail, reached
+  # through its generated socket proxy on the LAN. That indirection is the
+  # whole point — it puts every search query behind Mullvad without svc-infra
+  # needing any VPN of its own.
+  #
+  # The Ollama and image-generation backends are gated on gpu_host_online so
+  # that, while the PC does not exist, the UI simply offers no model rather
+  # than surfacing connection errors. ENABLE_OPENAI_API is false because
+  # nothing here should ever talk to a paid external endpoint by default.
+  open-webui:
+    image: "ghcr.io/open-webui/open-webui@sha256:6a773e5c3a246b65cbe74ce942b294292c0e5f81c138f703d111bc162f7d7c3d"
+    ui_port: 3007
+    container_port: 8080
+    volumes:
+      - /opt/homelab/appdata/open-webui:/app/backend/data:Z
+    env:
+      WEBUI_URL: "https://chat.{{ service_domain }}"
+      # Signs session JWTs. Must stay stable: rotating it logs everyone out.
+      WEBUI_SECRET_KEY: "{{ vault_openwebui_secret_key }}"
+      ENABLE_PERSISTENT_CONFIG: "false"
+      ENABLE_OPENAI_API: "false"
+      ENABLE_OLLAMA_API: "{{ 'true' if gpu_host_online | bool else 'false' }}"
+      OLLAMA_BASE_URL: "http://{{ gpu_host_ip }}:11434"
+      ENABLE_IMAGE_GENERATION: "{{ 'true' if gpu_host_online | bool else 'false' }}"
+      IMAGE_GENERATION_ENGINE: comfyui
+      COMFYUI_BASE_URL: "http://{{ gpu_host_ip }}:8188"
+      ENABLE_WEB_SEARCH: "true"
+      WEB_SEARCH_ENGINE: searxng
+      SEARXNG_QUERY_URL: "http://{{ hostvars[download_host].ansible_host }}:{{ download_apps.searxng.ui_port }}/search?q=<query>"
+    require_vault: [vault_openwebui_secret_key]
+    backup_paths: [open-webui]

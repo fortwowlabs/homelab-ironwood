@@ -216,6 +216,29 @@ Any order; none depend on each other.
 | Bambuddy | bambuddy.fortwow.dev | Create admin; add your Bambu printer |
 | Syncthing | syncthing.fortwow.dev | ✅ now covered by SSO (Phase 0.2). Its GUI is still unauthenticated *underneath*, so if you reach it directly at `192.168.1.32:8384` there is no password — set one under Actions > Settings > GUI if that path matters to you |
 
+### Open WebUI 🆕 — https://chat.fortwow.dev
+
+**The first visitor becomes the administrator**, so do this early rather than
+leaving the URL sitting open on the LAN. It has its own accounts and is
+deliberately *not* behind SSO (two logins for one service would be silly), so
+this password is the only thing guarding it — put it in Vaultwarden.
+
+What works today and what does not:
+
+- **Web search works now.** Toggle it on in a conversation; results come from
+  SearXNG inside the VPN jail, so the queries go out over Mullvad. If you see
+  citations, the whole svc-infra → socket proxy → jail → Mullvad path is good.
+- **Chat and image generation do not work yet**, by design. They need the
+  Windows 11 / RTX 4090 box, which is why the model list is empty rather than
+  full of errors. See [The GPU host](gpu-host.md) — the go-live step is
+  `gpu_host_online: true` plus `make infra`.
+
+One thing that will otherwise waste your time: changing web search, image
+generation, or a backend URL **in the admin UI does not stick across a
+restart**. Those settings come from `inventory/group_vars/all/infra-apps.yml`
+on purpose, so that the repo stays the source of truth. Edit there and run
+`make infra`.
+
 ### Home Assistant 🆕
 
 Previously this returned a bare HTTP 400 through Caddy until `trusted_proxies`

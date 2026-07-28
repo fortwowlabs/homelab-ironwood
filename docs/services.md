@@ -21,8 +21,10 @@ domain is `fortwow.dev`; derive the current service VM addresses from
 | `radarr` | `svc-download` | Movie automation inside the VPN jail |
 | `lazylibrarian` | `svc-download` | Book/audiobook automation inside the VPN jail |
 | `shelfmark` | `svc-download` | Interactive book/audiobook search and requests inside the VPN jail |
+| `searxng` | `svc-download` | Metasearch inside the VPN jail; Open WebUI's search provider |
 | `cockpit-dl` | `svc-download` | Download VM host administration |
 | `auth` | `svc-infra` | Authelia SSO portal; fronts eleven services (see below) |
+| `chat` | `svc-infra` | Open WebUI; chat and image generation against the GPU host |
 
 Download UIs reach their jailed containers through generated systemd socket
 proxies. Do not publish a download container directly on the host network.
@@ -54,6 +56,50 @@ Services deliberately left open are listed with their reasons alongside the
 `sso_protected_services` definition; the short version is that native and
 mobile clients (Jellyfin, Immich, Nextcloud, Audiobookshelf, ntfy, Vaultwarden)
 cannot follow a browser redirect to a login form.
+
+## The AI stack
+
+Three pieces on three different machines:
+
+```text
+chat.fortwow.dev (Open WebUI, svc-infra)
+  |-- inference + images --> Ollama / ComfyUI on the Win11 4090 box (192.168.1.40)
+  `-- web search ---------> SearXNG in svc-download's VPN jail --> Mullvad
+```
+
+**Open WebUI keeps its own login and is deliberately not behind Authelia.** It
+has its own account system with a first-visit admin setup, so fronting it with
+the portal would mean signing in twice for one service. The first person to
+visit `https://chat.fortwow.dev` creates the administrator account — do that
+promptly.
+
+**SearXNG is jailed for its egress, not for its own protection.** Putting it in
+the VPN netns means every upstream engine query leaves via Mullvad by
+construction, because the only route out of that namespace is wg0. Open WebUI
+reaches it at `<svc-download-ip>:8888` through the generated socket proxy, the
+same mechanism every other jailed UI uses. Two consequences worth knowing:
+
+- Its listener is configured by `SEARXNG_PORT`/`GRANIAN_HOST` env in the
+  catalog, **not** by `settings.yml`. This image serves through granian, and
+  `server.port` / `server.bind_address` in the settings file are inert.
+- Port 8888 rather than the upstream default 8080, because the jail is one
+  shared network namespace and SABnzbd already holds 8080 in it.
+
+**Settings come from the catalog, not the admin UI.** Open WebUI normally
+freezes environment-supplied settings into its database on first boot and
+ignores the environment forever after, which would make later catalog edits
+silently do nothing. `ENABLE_PERSISTENT_CONFIG` is therefore `false`. The
+trade-off is real and worth remembering when something seems not to save:
+toggling web search, image generation, or a backend URL *in the admin UI* will
+not survive a restart. Change those in
+`inventory/group_vars/all/infra-apps.yml` and run `make infra`.
+
+The GPU host itself is a hand-managed Windows workstation, not infrastructure.
+Its setup, the firewall scoping, the Continue for VSCode config, and the
+go-live step are all in [The GPU host](gpu-host.md). Until
+`gpu_host_online: true`, Open WebUI deploys with its Ollama and
+image-generation backends switched off on purpose — web search still works,
+because it does not depend on the PC.
 
 ## Private DNS and HTTPS
 
