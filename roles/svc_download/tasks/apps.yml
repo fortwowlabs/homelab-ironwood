@@ -25,6 +25,15 @@
     state: "{{ 'restarted' if (download_beszel_agent_template.changed | default(false)) else 'started' }}"
   when: beszel_agent_enabled | bool
 
+- name: Restart SearXNG when its settings changed
+  # The generic catalog loop already starts dl-searxng.service and restarts it
+  # on a quadlet change; settings.yml is rendered outside that loop, so its
+  # changes need their own restart or SearXNG keeps serving the old config.
+  ansible.builtin.systemd:
+    name: dl-searxng.service
+    state: restarted
+  when: download_searxng_settings.changed | default(false) | bool
+
 - name: Ensure Recyclarr is started
   ansible.builtin.systemd:
     name: recyclarr.service

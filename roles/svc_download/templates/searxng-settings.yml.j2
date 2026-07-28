@@ -1,0 +1,24 @@
+{{ ansible_managed | comment }}
+# homelab-iac managed — rendered by roles/svc_download/tasks/files.yml.
+#
+# The image's entrypoint writes this file itself (with a self-generated
+# secret_key) ONLY when it is absent, so rendering it here wins permanently.
+# Listener settings are deliberately absent: this image serves through granian,
+# which is configured by GRANIAN_*/SEARXNG_PORT env in the catalog entry.
+# server.bind_address and server.port here would be silently ignored.
+use_default_settings: true
+
+server:
+  secret_key: "{{ vault_searxng_secret }}"
+  base_url: "https://searxng.{{ service_domain }}/"
+  # Every request reaches SearXNG from the single veth address 10.77.0.2 (the
+  # socket proxy) or from Open WebUI through it, so the per-IP limiter would
+  # class the entire estate as one abusive client and start serving 429s.
+  limiter: false
+  public_instance: false
+
+search:
+  # Open WebUI fetches /search?...&format=json. JSON is refused by default.
+  formats:
+    - html
+    - json

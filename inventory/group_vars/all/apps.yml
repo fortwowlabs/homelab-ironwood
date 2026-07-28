@@ -113,6 +113,42 @@ download_apps:
       USER_ID: "{{ svc_uid }}"
       GROUP_ID: "{{ svc_gid }}"
 
+  # Jailed purely for its egress: SearXNG is the exclusive web-search provider
+  # for Open WebUI on svc-infra, and putting it in the netns means every
+  # upstream engine query leaves via Mullvad by construction. Nothing else
+  # consumes it.
+  #
+  # Port 8888 rather than the image's 8080 because the jail is ONE shared
+  # netns and SABnzbd already holds 8080 there. The port comes from the
+  # SEARXNG_PORT env var, not settings.yml: this image runs granian, whose
+  # listener is configured entirely through GRANIAN_* (the entrypoint maps
+  # SEARXNG_PORT onto GRANIAN_PORT). server.port in settings.yml is inert.
+  # GRANIAN_HOST is pinned to 0.0.0.0 — the generated socket proxy dials
+  # 10.77.0.2:8888, so a loopback bind would be unreachable.
+  #
+  # secret_key is NOT here: this quadlet render is not no_log, so it would be
+  # echoed. It lives in settings.yml, rendered separately in files.yml the way
+  # Recyclarr's config is.
+  searxng:
+    image: "docker.io/searxng/searxng@sha256:5dd626fecd8127857437b3ba11d9e8d8380dd74d8b3773129ccf68b839eadb85"
+    ui_port: 8888
+    volumes: [/srv/appdata/searxng:/etc/searxng:Z]
+    media_mount: false
+    backup_paths: [searxng]
+    dashboard: { group: Downloads, icon: searxng }
+    proxy: true
+    # FORCE_OWNERSHIP=false stops the entrypoint chowning the whole
+    # /etc/searxng bind to its in-image searxng user (uid 977) on every start.
+    # That chown fights Ansible for settings.yml and, worse, breaks the
+    # nightly appdata backup, which tars /srv/appdata as the homelab user and
+    # cannot read a 0600 file owned by 977. Nothing here drops privileges —
+    # this image sets no USER and the entrypoint runs granian as root — so
+    # root reads the file whoever owns it, and the chown is pure loss.
+    env:
+      SEARXNG_PORT: "8888"
+      GRANIAN_HOST: "0.0.0.0"
+      FORCE_OWNERSHIP: "false"
+
 # Media/infra images remain separate because their Quadlets are intentionally
 # heterogeneous, but their references are immutable and centrally reviewed.
 media_images:

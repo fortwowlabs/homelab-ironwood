@@ -351,6 +351,30 @@
   register: download_node_exporter_template
   notify: reload systemd
 
+- name: Ensure the SearXNG appdata directory exists
+  ansible.builtin.file:
+    path: /srv/appdata/searxng
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+
+- name: Render SearXNG's settings
+  # Owned by svc_uid, not root, even though the container runs as root (this
+  # image sets no USER and its entrypoint does not drop privileges). The
+  # nightly appdata backup tars /srv/appdata as the homelab user, so a
+  # root-owned 0600 file fails the whole archive; root reads it either way.
+  ansible.builtin.template:
+    src: searxng-settings.yml.j2
+    dest: /srv/appdata/searxng/settings.yml
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    # 0600: this file carries server.secret_key.
+    mode: "0600"
+  register: download_searxng_settings
+  no_log: true
+  diff: false
+
 - name: Ensure the Recyclarr appdata directory exists
   ansible.builtin.file:
     path: /srv/appdata/recyclarr
