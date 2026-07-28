@@ -1,4 +1,20 @@
 ---
+# The media service catalog is a role default, not a runtime fact, because
+# standalone verify.yml enters tasks_from: verify without running files.yml.
+# Keep deployment, startup, and verification on this one list.
+media_quadlet_catalog:
+  - { name: jellyfin, src: jellyfin.container.j2 }
+  - { name: audiobookshelf, src: audiobookshelf.container.j2 }
+  - { name: romm-db, src: romm-db.container.j2 }
+  - { name: romm, src: romm.container.j2 }
+  - { name: seerr, src: seerr.container.j2 }
+  - { name: calibre-web-automated, src: calibre-web-automated.container.j2 }
+  - { name: ntfy, src: ntfy.container.j2 }
+  - { name: homepage, src: homepage.container.j2 }
+  # Prometheus host-metrics exporter (scraped by svc-infra). No appdata
+  # directory: it only mounts /proc, /sys, and rootfs read-only.
+  - { name: node-exporter, src: node-exporter.container.j2 }
+
 # A single manifest drives initial-backup gating and safe artifact validation.
 media_backup_artifacts:
   - name: jellyfin

@@ -265,6 +265,27 @@ def main() -> int:
     if "certificate with a Cloudflare DNS-01 challenge.\n{" not in caddyfile:
         failures.append("caddy: global block is separated from its header by a formatter diff")
 
+    media_defaults = yaml.safe_load(
+        (ROOT / "roles/svc_media/defaults/main.yml").read_text(encoding="utf-8")
+    )
+    media_catalog = media_defaults.get("media_quadlet_catalog", [])
+    media_catalog_names = [item.get("name") for item in media_catalog]
+    media_catalog_sources = [item.get("src") for item in media_catalog]
+    if len(media_catalog_names) != len(set(media_catalog_names)):
+        failures.append("media catalog: service names are not unique")
+    if not media_catalog_names or any(not source for source in media_catalog_sources):
+        failures.append("media catalog: every default entry needs a name and template source")
+    media_file_tasks = (
+        ROOT / "roles/svc_media/tasks/files.yml"
+    ).read_text(encoding="utf-8")
+    media_verify_tasks = (
+        ROOT / "roles/svc_media/tasks/verify.yml"
+    ).read_text(encoding="utf-8")
+    if "media_quadlet_catalog:" in media_file_tasks:
+        failures.append("media catalog: runtime task fact breaks standalone verification")
+    if "media_quadlet_catalog | map(attribute='name')" not in media_verify_tasks:
+        failures.append("media catalog: verification is not driven by the role default")
+
     homepage = environment.get_template(
         "roles/svc_media/templates/homepage/services.yaml.j2"
     ).render(**common)
