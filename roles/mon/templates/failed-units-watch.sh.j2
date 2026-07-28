@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# failed-units-watch.sh — notice a failed unit without waiting for Ansible.
+#
+# OnFailure= drop-ins cover units this repo knows about, but they only fire at
+# the moment of failure: a unit that failed while ntfy was down, or one that
+# failed before its drop-in existed, stays failed and silent forever. This is
+# the sweep that catches those, plus anything the OS itself broke that no
+# catalog lists. Between `make verify` runs it is the only thing looking.
+#
+# Rootless quadlets live in the homelab user's own systemd manager, which
+# `systemctl --failed` does not see — hence the second, --user pass.
+#
+# Never exits nonzero: a failing watcher would itself become a failed unit,
+# which is a confusing way to say "something else is broken".
+set -uo pipefail
+
+STATE_DIR=/var/lib/homelab
+STATE="$STATE_DIR/failed-units.state"
+REALERT_SECS=$(( {{ alert_realert_hours | default(6) }} * 3600 ))
+host=$(hostname -s)
+topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC}}"
+AUTH=()
+if [[ -n "${NTFY_TOKEN:-}" ]]; then
+    AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+fi
+
+mkdir -p "$STATE_DIR"
+
+alert() {  # $1=priority $2=title $3=body
+    curl -fsS --max-time 10 --retry 2 --retry-delay 5 -X POST \
+        "${AUTH[@]}" \
+        -H "Title: $2" -H "Priority: $1" -H "Tags: rotating_light" \
+        -d "$3" "${NTFY_URL}/${topic}" >/dev/null 2>&1 \
+        || logger -p daemon.err -t failed-units-watch "ntfy push failed: $2 — $3"
+}
+
+failed=""
+while read -r unit _rest; do
+    [[ -n "$unit" ]] && failed+="${unit}"$'\n'
+done < <(systemctl --failed --plain --no-legend 2>/dev/null)
+
+{% if 'media_vms' in group_names or 'infra_vms' in group_names %}
+# Rootless containers run under the homelab user's manager. Skip quietly when
+# that manager is not up yet (early boot) rather than reporting a false clear.
+if runuser -u homelab -- env XDG_RUNTIME_DIR=/run/user/{{ svc_uid }} \
+        systemctl --user is-system-running >/dev/null 2>&1 \
+   || [[ -S /run/user/{{ svc_uid }}/systemd/private ]]; then
+    while read -r unit _rest; do
+        [[ -n "$unit" ]] && failed+="user/${unit}"$'\n'
+    done < <(runuser -u homelab -- env XDG_RUNTIME_DIR=/run/user/{{ svc_uid }} \
+                 systemctl --user --failed --plain --no-legend 2>/dev/null)
+fi
+{% endif %}
+
+# The alerter's own instances are excluded: notify-failure@X failing means the
+# ntfy push failed, which this script cannot report over ntfy either. Those
+# land in the journal (notify-failure.sh logs before it curls).
+failed=$(printf '%s' "$failed" | grep -v '^notify-failure@' | LC_ALL=C sort || true)
+
+now=$(date +%s)
+prev_hash=""
+prev_alert=0
+if [[ -f "$STATE" ]]; then
+    read -r prev_hash prev_alert < "$STATE" || true
+    [[ "$prev_alert" =~ ^[0-9]+$ ]] || prev_alert=0
+fi
+
+if [[ -z "$failed" ]]; then
+    # Recovery is worth exactly one message: it closes the loop on an alert
+    # you already got, and it means a cleared alert cannot be mistaken for
+    # one still pending.
+    if [[ -n "$prev_hash" && "$prev_hash" != "none" ]]; then
+        alert default "recovered on ${host}" "No failed units remain."
+    fi
+    printf 'none %s\n' "$now" > "$STATE"
+    exit 0
+fi
+
+hash=$(printf '%s' "$failed" | sha256sum | cut -d' ' -f1)
+count=$(printf '%s\n' "$failed" | grep -c . || true)
+
+if [[ "$hash" != "$prev_hash" ]]; then
+    reason="new"
+elif (( now - prev_alert >= REALERT_SECS )); then
+    reason="still"
+else
+    exit 0   # same set, alerted recently — say nothing.
+fi
+
+if [[ "$reason" == "new" ]]; then
+    title="FAILED UNITS on ${host} (${count})"
+else
+    title="STILL FAILED on ${host} (${count})"
+fi
+alert urgent "$title" "$(printf '%s\n\nFix, then: systemctl reset-failed' "$failed")"
+printf '%s %s\n' "$hash" "$now" > "$STATE"
+exit 0

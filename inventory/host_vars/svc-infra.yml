@@ -36,3 +36,7 @@ service_packages:
 # --- monitoring (mon role) ---
 cockpit_origin:     cockpit-infra   # https://cockpit-infra.<domain>
 mon_open_firewalld: true            # svc-infra uses firewalld, like svc-media
+
+# Units that get an OnFailure alert, on top of onfailure_units_base.
+onfailure_units_extra:
+  - backup-infra-appdata.service

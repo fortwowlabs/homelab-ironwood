@@ -1,0 +1,9 @@
+[Unit]
+Description=Alert on failed systemd units (system + rootless)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/homelab-notify.env
+ExecStart=/usr/local/sbin/failed-units-watch.sh

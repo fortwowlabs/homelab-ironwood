@@ -28,3 +28,14 @@ service_packages:
 # --- monitoring (mon role) ---
 cockpit_origin:     cockpit-dl      # https://cockpit-dl.<domain>
 mon_open_firewalld: false           # svc-download uses the nftables backstop (:9090 opened there)
+
+# Units that get an OnFailure alert, on top of onfailure_units_base.
+# vpn-netns is the jail itself: if it fails, every download container is
+# either stopped or — the case worth paging for — not where it should be.
+# leak-canary is deliberately absent: it alerts natively with far better
+# context than a generic "unit failed" could, and it runs every 15 minutes,
+# so a drop-in would just double the noise. tests/validate_onfailure.py
+# records that exemption so it stays a decision rather than an oversight.
+onfailure_units_extra:
+  - backup-dl-appdata.service
+  - vpn-netns.service

@@ -136,6 +136,45 @@ recyclarr_image: "ghcr.io/recyclarr/recyclarr@sha256:2d6107f758d882a59fe9d646aa5
 ntfy_url:   "http://{{ hostvars[media_host].ansible_host }}:8080"
 ntfy_topic: "homelab-deploy"
 
+# Two topics, because a phone that pings for every green deploy gets muted,
+# and a muted phone is the same as no alerting at all. Subscribe to both;
+# mute homelab-deploy and leave homelab-alerts loud.
+#   homelab-deploy — informational: deploy/verify succeeded, scrub finished.
+#   homelab-alerts — actionable ONLY: a unit failed, a disk is filling, the
+#                    certificate is expiring, the canary tripped.
+# Scripts read NTFY_ALERT_TOPIC from /etc/homelab-notify.env.
+ntfy_alert_topic: "homelab-alerts"
+
+# --- unattended-operation watchers ---------------------------------------
+# Sized for "nobody looks at this for six months". The governing idea is that
+# every silent failure mode gets a loud owner, and that no alert repeats often
+# enough to train you to swipe it away.
+#
+# onfailure_units_base/_extra: systemd units that get an
+# OnFailure=notify-failure@%n.service drop-in (roles/service_vm/tasks/
+# onfailure.yml). _base applies everywhere; _extra is per-host in host_vars.
+# tests/validate_onfailure.py fails the build if a timer-triggered unit in
+# this repo is in neither the union nor the test's documented allowlist —
+# so a future timer cannot ship without a failure path.
+onfailure_units_base:
+  - homelab-diskalert.service
+  - homelab-failedunits.service
+
+# Local filesystems alert at 85%. NFS gets its own, higher threshold: the NAS
+# is an order of magnitude bigger, so 85% there is neither urgent nor rare,
+# but 90% still deserves a look before it wedges a download.
+disk_alert_threshold: 85
+disk_alert_nfs_threshold: 90
+# How long a still-unresolved disk or failed-unit condition waits before it
+# re-alerts. The old behaviour was every 15 minutes, forever, which is how an
+# alert channel becomes background noise.
+alert_realert_hours: 6
+
+# Days of remaining certificate life below which homelab-certwatch fails (and
+# therefore alerts). The wildcard renews at 30 days left, so 21 means "two
+# renewal attempts have already failed" — a real problem, not a blip.
+cert_expiry_days: 21
+
 # --- svc-media access layer -----------------------------------------------
 # caddy  = deploy the Caddy reverse proxy for *.{{ service_domain }} (publicly trusted TLS).
 # manual = role stops at "containers healthy on the LAN"; you run Caddy by hand.

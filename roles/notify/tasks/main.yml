@@ -7,9 +7,13 @@
 # (alerting must never mask the real result), but it prints a WARNING you
 # can't miss in the output. First run before ntfy exists on svc-media?
 # Point ntfy_url at https://ntfy.sh/<long-random-topic> in group_vars.
+#
+# ntfy_topic_override lets a caller route to the alerts topic instead of the
+# informational one. Failure rescues use it; the green end-of-deploy push
+# does not, which is the whole point of having two topics.
 - name: Push result to ntfy
   ansible.builtin.uri:
-    url: "{{ ntfy_url }}/{{ ntfy_topic }}"
+    url: "{{ ntfy_url }}/{{ ntfy_topic_override | default(ntfy_topic) }}"
     method: POST
     body: "{{ ntfy_result }}"
     headers: >-
@@ -31,7 +35,8 @@
 - name: WARN if the ntfy push failed
   ansible.builtin.debug:
     msg: >-
-      *** WARNING: ntfy push to {{ ntfy_url }}/{{ ntfy_topic }} FAILED
+      *** WARNING: ntfy push to
+      {{ ntfy_url }}/{{ ntfy_topic_override | default(ntfy_topic) }} FAILED
       (status={{ ntfy_push.status | default('unreachable') }}). The play
       result above is authoritative — you just won't get the phone ping.
       Fix ntfy on svc-media, or set ntfy_url to https://ntfy.sh/<topic>

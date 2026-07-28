@@ -23,6 +23,10 @@
   ansible.builtin.import_tasks: nfs.yml
   tags: [nfs]
 
+- name: Attach failure alerts to unattended units
+  ansible.builtin.import_tasks: onfailure.yml
+  tags: [onfailure]
+
 - name: Verify shared VM invariants
   ansible.builtin.import_tasks: verify.yml
   when: not ansible_check_mode

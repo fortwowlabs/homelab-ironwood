@@ -75,7 +75,37 @@
     daemon_reload: "{{ diskalert_units is changed }}"
   tags: [diskalert]
 
+# --------------------------------------------------- failed-unit watcher ---
+# The between-Ansible-runs sweep. OnFailure drop-ins catch the moment a unit
+# fails; this catches units that are already failed — including rootless
+# quadlets, which the system manager cannot see at all.
+- name: Failed-unit watch script
+  ansible.builtin.template:
+    src: failed-units-watch.sh.j2
+    dest: /usr/local/sbin/failed-units-watch.sh
+    mode: "0750"
+  tags: [failedunits]
+
+- name: Failed-unit watch units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    mode: "0644"
+  loop:
+    - homelab-failedunits.service
+    - homelab-failedunits.timer
+  register: failedunits_units
+  tags: [failedunits]
+
+- name: Enable + start the failed-unit watch timer
+  ansible.builtin.systemd:
+    name: homelab-failedunits.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ failedunits_units is changed }}"
+  tags: [failedunits]
+
 - name: Verify monitoring services after convergence
   ansible.builtin.import_tasks: verify.yml
   when: not ansible_check_mode
-  tags: [mon, cockpit, diskalert]
+  tags: [mon, cockpit, diskalert, failedunits]

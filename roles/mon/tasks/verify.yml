@@ -7,6 +7,27 @@
   ansible.builtin.command: systemctl is-active homelab-diskalert.timer
   changed_when: false
 
+- name: Verify the failed-unit watch timer is active
+  ansible.builtin.command: systemctl is-active homelab-failedunits.timer
+  changed_when: false
+
+# The alerting path is itself unattended infrastructure: if the OnFailure
+# template unit or its script goes missing, every drop-in silently points at
+# nothing and the whole scheme degrades to the pre-existing silence.
+- name: Verify the unit-failure alerter is installed
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: mon_alerter_files
+  loop:
+    - /usr/local/sbin/notify-failure.sh
+    - /etc/systemd/system/notify-failure@.service
+
+- name: Assert the unit-failure alerter is installed
+  ansible.builtin.assert:
+    that:
+      - mon_alerter_files.results | map(attribute='stat.exists') | select | list | length == 2
+    fail_msg: "notify-failure alerting is incomplete; OnFailure drop-ins would do nothing."
+
 - name: Verify notification credentials are not executable or group-readable
   ansible.builtin.stat:
     path: /etc/homelab-notify.env

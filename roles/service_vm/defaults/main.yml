@@ -3,3 +3,11 @@ service_guarded_egress: false
 service_requires_subids: false
 service_repo_packages: []
 service_packages: []
+
+# Units that get an OnFailure=notify-failure@%n.service drop-in. Ansible does
+# not merge lists across group_vars and host_vars — the later definition wins
+# outright — so the union is computed here rather than asking every host to
+# restate the shared entries.
+onfailure_units_extra: []
+service_vm_onfailure_units: >-
+  {{ (onfailure_units_base | default([])) + (onfailure_units_extra | default([])) }}

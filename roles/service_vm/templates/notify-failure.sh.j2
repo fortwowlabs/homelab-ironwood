@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# notify-failure.sh — the generic "a systemd unit failed" alert.
+#
+# Invoked as notify-failure@<unit>.service by an OnFailure= drop-in, so the
+# unit name arrives as $1. Before this existed, a failed timer was completely
+# silent between Ansible runs: `make verify` was the only thing that ever
+# looked at `systemctl --failed`, and it runs from a workstation that will be
+# switched off for the next six months.
+#
+# Contract: this script NEVER exits nonzero. It is the thing that reports
+# failures; if it failed it would trigger its own OnFailure and, worse, would
+# mark the alerting path itself as broken while telling nobody.
+set -uo pipefail
+
+unit="${1:-unknown.service}"
+host=$(hostname -s)
+topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC}}"
+AUTH=()
+if [[ -n "${NTFY_TOKEN:-}" ]]; then
+    AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+fi
+
+# The last lines of the unit's own journal, so the phone alert carries the
+# reason and not just the name. ntfy truncates long bodies server-side; keep
+# it well under that so the tail (which holds the actual error) survives.
+context=$(journalctl -u "$unit" -n 20 --no-pager -o cat 2>/dev/null | tail -c 3000)
+[[ -n "$context" ]] || context="(no journal output)"
+
+result=$(systemctl show -p Result --value "$unit" 2>/dev/null || echo unknown)
+
+# syslog first: if ntfy is unreachable this is the only record that survives,
+# and journald is where the next Ansible run will look.
+logger -p daemon.err -t notify-failure "UNIT FAILED ${unit} (result=${result}) on ${host}"
+
+curl -fsS --max-time 10 --retry 2 --retry-delay 5 -X POST \
+    "${AUTH[@]}" \
+    -H "Title: UNIT FAILED on ${host}: ${unit}" \
+    -H "Priority: urgent" \
+    -H "Tags: rotating_light" \
+    -d "result=${result}
+
+${context}" \
+    "${NTFY_URL}/${topic}" >/dev/null 2>&1 \
+    || logger -p daemon.err -t notify-failure "ALERT DELIVERY FAILED (ntfy unreachable) for ${unit}"
+
+exit 0

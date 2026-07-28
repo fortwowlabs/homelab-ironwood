@@ -240,6 +240,26 @@
   changed_when: false
   when: media_access_layer | default('manual') == 'caddy'
 
+- name: Verify the certificate expiry watcher is active and enabled
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - "{{ item }}"
+      - homelab-certwatch.timer
+  loop:
+    - is-active
+    - is-enabled
+  changed_when: false
+  when: media_access_layer | default('manual') == 'caddy'
+
+# Run the watcher itself rather than trusting that its timer exists: this is
+# the check that would actually have caught an expiring certificate, and a
+# timer being active says nothing about whether the script works.
+- name: Verify the certificate is not near expiry
+  ansible.builtin.command: /usr/local/sbin/homelab-certwatch.sh
+  changed_when: false
+  when: media_access_layer | default('manual') == 'caddy'
+
 - name: Verify node_exporter metrics
   ansible.builtin.include_role:
     name: service_vm

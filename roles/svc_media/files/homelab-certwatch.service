@@ -1,0 +1,8 @@
+[Unit]
+Description=Warn before the wildcard TLS certificate expires
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/homelab-certwatch.sh

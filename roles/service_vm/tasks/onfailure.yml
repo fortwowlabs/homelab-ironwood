@@ -1,0 +1,58 @@
+---
+# Attach a failure alert to every unit that runs unattended.
+#
+# systemd's OnFailure= is per-unit, so this is a loop over a list rather than
+# a global setting. The list is data (onfailure_units_base in group_vars plus
+# onfailure_units_extra per host), and tests/validate_onfailure.py asserts it
+# covers every timer-triggered unit in the repo — so the coverage question is
+# answered by a gate rather than by remembering.
+- name: Install the unit-failure alert script
+  ansible.builtin.template:
+    src: notify-failure.sh.j2
+    dest: /usr/local/sbin/notify-failure.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the unit-failure alert template unit
+  ansible.builtin.copy:
+    src: notify-failure@.service
+    dest: /etc/systemd/system/notify-failure@.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: service_vm_notify_failure_unit
+
+- name: Create OnFailure drop-in directories
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ service_vm_onfailure_units }}"
+
+- name: Attach the failure alert to unattended units
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item }}.d/10-onfailure.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/service_vm/tasks/onfailure.yml).
+      # %n is the FULL unit name including its .service suffix, so the alerter
+      # instantiates as notify-failure@some-unit.service.service. That reads
+      # oddly but is correct and deliberate: the script passes the name
+      # straight to journalctl and systemctl show, and the fully-qualified
+      # form cannot be mistaken for the .timer of the same stem (which every
+      # unit in this list has). %N would strip the suffix and rely on
+      # default-suffix resolution instead.
+      [Unit]
+      OnFailure=notify-failure@%n.service
+  loop: "{{ service_vm_onfailure_units }}"
+  register: service_vm_onfailure_dropins
+
+- name: Reload systemd after failure-alert changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: service_vm_notify_failure_unit is changed or service_vm_onfailure_dropins is changed

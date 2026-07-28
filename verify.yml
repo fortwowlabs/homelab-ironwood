@@ -33,6 +33,7 @@
             ntfy_title: "homelab VERIFY FAILED ({{ inventory_hostname }})"
             ntfy_result: "A safe verification gate failed on {{ inventory_hostname }}."
             ntfy_priority: urgent
+            ntfy_topic_override: "{{ ntfy_alert_topic }}"
             ntfy_tags: rotating_light
 
         - name: Abort after a failed safe verification

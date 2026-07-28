@@ -22,7 +22,10 @@ TEMPLATES = (
     "roles/svc_media/templates/backup-media.sh.j2",
     "roles/svc_infra/templates/backup-infra-appdata.sh.j2",
     "roles/mon/templates/disk-alert.sh.j2",
+    "roles/mon/templates/failed-units-watch.sh.j2",
     "roles/service_vm/templates/maintenance-egress.sh.j2",
+    "roles/service_vm/templates/notify-failure.sh.j2",
+    "roles/svc_media/templates/certwatch.sh.j2",
 )
 
 
@@ -60,8 +63,17 @@ def main() -> int:
     )
     context = {
         "ansible_managed": "fixture managed",
+        "alert_realert_hours": 6,
         "backup_retention_days": 14,
+        "cert_expiry_days": 21,
         "disk_alert_threshold": 85,
+        "disk_alert_nfs_threshold": 90,
+        # failed-units-watch.sh.j2 branches on group membership to decide
+        # whether to sweep the rootless user manager. Render the media/infra
+        # arm — it is the superset, so ShellCheck sees every line.
+        "group_names": ["service_vms", "media_vms"],
+        "service_domain": "example.test",
+        "svc_uid": 10001,
         "download_apps": apps,
         "lan_dns": "192.0.2.1",
         # backup-infra-appdata.sh.j2 iterates these; loaded from the real

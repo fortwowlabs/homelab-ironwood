@@ -211,6 +211,38 @@
         state: started
       when: not ansible_check_mode
 
+    # Renewal is automatic; noticing that it stopped working is not. The
+    # watcher reads the certificate on disk, so it catches a renewal that
+    # errored, one that silently wrote nothing, and a certbot timer that was
+    # disabled by hand — all of which look identical until HTTPS breaks.
+    - name: Install the certificate expiry watcher
+      ansible.builtin.template:
+        src: certwatch.sh.j2
+        dest: /usr/local/sbin/homelab-certwatch.sh
+        owner: root
+        group: root
+        mode: "0750"
+
+    - name: Install the certificate expiry watcher units
+      ansible.builtin.copy:
+        src: "{{ item }}"
+        dest: "/etc/systemd/system/{{ item }}"
+        owner: root
+        group: root
+        mode: "0644"
+      loop:
+        - homelab-certwatch.service
+        - homelab-certwatch.timer
+      register: media_certwatch_units
+
+    - name: Enable the certificate expiry watcher
+      ansible.builtin.systemd:
+        name: homelab-certwatch.timer
+        enabled: true
+        state: started
+        daemon_reload: "{{ media_certwatch_units is changed }}"
+      when: not ansible_check_mode
+
     - name: Render Caddy configuration from service catalogs
       ansible.builtin.template:
         src: Caddyfile.j2

@@ -1,0 +1,12 @@
+[Unit]
+Description=Check TLS certificate expiry daily
+
+[Timer]
+OnCalendar=*-*-* 09:15:00
+# Persistent so a VM that was down at 09:15 still checks on the next boot
+# rather than skipping a day.
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target

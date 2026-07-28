@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# homelab-certwatch.sh — fail loudly before the wildcard certificate expires.
+#
+# certbot-renew.timer renews at 30 days remaining and, until now, said nothing
+# when it could not: a Cloudflare token rotation or an API change would show
+# up as every single service going untrusted, three weeks later, with no
+# warning. This is the warning.
+#
+# Unlike the other alert scripts this one deliberately EXITS NONZERO on a
+# problem: the OnFailure drop-in turns that into the alert, so there is one
+# alerting path to keep working instead of two. It checks the certificate on
+# disk, not the timer's status — a renewal that "succeeded" but wrote nothing
+# is exactly the failure mode worth catching.
+set -uo pipefail
+
+CERT={{ ('/etc/letsencrypt/live/' ~ service_domain ~ '/fullchain.pem') | quote }}
+DAYS={{ cert_expiry_days | default(21) }}
+
+if [[ ! -r "$CERT" ]]; then
+    echo "certificate $CERT is missing or unreadable" >&2
+    exit 1
+fi
+
+enddate=$(openssl x509 -enddate -noout -in "$CERT" 2>/dev/null | cut -d= -f2-)
+if [[ -n "$enddate" ]]; then
+    end_epoch=$(date -d "$enddate" +%s 2>/dev/null || echo 0)
+    now=$(date +%s)
+    remaining=$(( (end_epoch - now) / 86400 ))
+    echo "certificate $CERT expires $enddate (${remaining} days remaining, threshold ${DAYS})"
+fi
+
+# -checkend is the authoritative test; the message above is just context for
+# whoever reads the journal after the alert.
+if ! openssl x509 -checkend $(( DAYS * 86400 )) -noout -in "$CERT" >/dev/null 2>&1; then
+    echo "certificate expires within ${DAYS} days and has not renewed — check certbot-renew.service and the Cloudflare API token" >&2
+    exit 1
+fi
+
+exit 0

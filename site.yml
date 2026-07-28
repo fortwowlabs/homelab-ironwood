@@ -59,6 +59,7 @@
             ntfy_title: "homelab deploy FAILED (provisioning)"
             ntfy_result: "VM provisioning failed on the PVE API step. Nothing configured yet."
             ntfy_priority: "high"
+            ntfy_topic_override: "{{ ntfy_alert_topic }}"
             ntfy_tags: "rotating_light"
         - name: Abort
           ansible.builtin.fail:
@@ -88,6 +89,7 @@
             ntfy_title: "homelab deploy FAILED ({{ inventory_hostname }})"
             ntfy_result: "Shared package, identity, or NFS preparation failed."
             ntfy_priority: high
+            ntfy_topic_override: "{{ ntfy_alert_topic }}"
             ntfy_tags: rotating_light
         - name: Abort shared guest preparation
           ansible.builtin.fail:
@@ -117,6 +119,7 @@
               {{ inventory_hostname }} configuration failed. NO real download
               traffic has flowed (gates block it). Check the failed task above.
             ntfy_priority: "high"
+            ntfy_topic_override: "{{ ntfy_alert_topic }}"
             ntfy_tags: "rotating_light"
         - ansible.builtin.fail:
             msg: "{{ inventory_hostname }} failed — see above."
@@ -146,6 +149,7 @@
             ntfy_title: "homelab deploy: {{ inventory_hostname }} FAILED"
             ntfy_result: "{{ inventory_hostname }} configuration failed."
             ntfy_priority: "high"
+            ntfy_topic_override: "{{ ntfy_alert_topic }}"
             ntfy_tags: "warning"
         - ansible.builtin.fail:
             msg: "{{ inventory_hostname }} failed — see above."
@@ -176,6 +180,7 @@
             ntfy_title: "homelab deploy FAILED (monitoring)"
             ntfy_result: "Monitoring configuration failed on {{ inventory_hostname }}."
             ntfy_priority: high
+            ntfy_topic_override: "{{ ntfy_alert_topic }}"
             ntfy_tags: rotating_light
         - name: Abort after monitoring failure
           ansible.builtin.fail:
@@ -203,6 +208,7 @@
             ntfy_title: "homelab deploy: {{ inventory_hostname }} FAILED"
             ntfy_result: "{{ inventory_hostname }} configuration failed, but the jail is up and verified."
             ntfy_priority: "high"
+            ntfy_topic_override: "{{ ntfy_alert_topic }}"
             ntfy_tags: "warning"
         - ansible.builtin.fail:
             msg: "{{ inventory_hostname }} failed — see above."

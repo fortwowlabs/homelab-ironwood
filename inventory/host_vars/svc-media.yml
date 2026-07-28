@@ -33,3 +33,11 @@ service_packages:
 # --- monitoring (mon role) ---
 cockpit_origin:     cockpit-media   # https://cockpit-media.<domain>
 mon_open_firewalld: true            # svc-media uses firewalld
+
+# Units that get an OnFailure alert, on top of onfailure_units_base.
+# certbot-renew is the important one: it is a distro unit nothing in this repo
+# writes, and its failure is otherwise invisible until HTTPS breaks.
+onfailure_units_extra:
+  - backup-media.service
+  - certbot-renew.service
+  - homelab-certwatch.service

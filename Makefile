@@ -108,6 +108,7 @@ validate-provisioning:
 
 validate-systemd:
 	$(PYTHON) tests/validate_systemd_units.py
+	$(PYTHON) tests/validate_onfailure.py
 
 validate-secrets:
 	$(PYTHON) tests/validate_secrets.py

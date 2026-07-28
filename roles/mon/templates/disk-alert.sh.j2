@@ -1,36 +1,86 @@
 #!/usr/bin/env bash
 {{ ansible_managed | comment }}
-# disk-alert.sh — ntfy alarm when any local filesystem crosses a threshold.
+# disk-alert.sh — ntfy alarm when a filesystem crosses a threshold.
 # Runs from homelab-diskalert.timer. Never exits nonzero (a failed push must
 # not mark the unit failed); it just tries the ntfy and moves on.
+#
+# Two changes for unattended operation:
+#   - NFS is included. It used to be skipped on the theory that the NAS
+#     guards itself, but nothing on the NAS pages this phone, and a full
+#     media dataset stops downloads just as dead as a full local disk. It
+#     gets a higher threshold because it is far bigger.
+#   - Alerts are deduplicated. Re-sending the same alarm every 15 minutes for
+#     a condition that takes days to resolve is how an alert channel becomes
+#     something you swipe away without reading.
 set -uo pipefail
 
 THRESH={{ disk_alert_threshold | default(85) }}
-NTFY="${NTFY_URL}/${NTFY_TOPIC}"
+NFS_THRESH={{ disk_alert_nfs_threshold | default(90) }}
+STATE_DIR=/var/lib/homelab
+STATE="$STATE_DIR/disk-alert.state"
+REALERT_SECS=$(( {{ alert_realert_hours | default(6) }} * 3600 ))
+topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC}}"
 AUTH=()
 if [[ -n "${NTFY_TOKEN:-}" ]]; then
     AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
 fi
 host=$(hostname -s)
 
+mkdir -p "$STATE_DIR"
+
 over=""
-# Real, local filesystems only — skip tmpfs/overlay/nfs (NFS free space is the
-# server's concern, and its own guard covers it).
-while read -r _fs _size _used avail pct mount; do
+# -T adds the fstype column, which is what selects the threshold. Pseudo
+# filesystems are still excluded: they are either always full (squashfs),
+# meaningless (tmpfs sized from RAM), or a few hundred bytes of firmware
+# variables whose "percent used" tells you nothing (efivarfs).
+while read -r _fs fstype _size _used avail pct mount; do
     p=${pct%\%}
     [[ "$p" =~ ^[0-9]+$ ]] || continue
-    if [ "$p" -ge "$THRESH" ]; then
-        over+=$'\n'"${mount} ${p}% used (${avail} free)"
+    case "$fstype" in
+        nfs|nfs4) limit=$NFS_THRESH ;;
+        *)        limit=$THRESH ;;
+    esac
+    if [ "$p" -ge "$limit" ]; then
+        over+=$'\n'"${mount} ${p}% used (${avail} free, ${fstype}, limit ${limit}%)"
     fi
-done < <(df -P -x tmpfs -x devtmpfs -x overlay -x squashfs -x nfs -x nfs4 | tail -n +2)
+done < <(df -P -T -x tmpfs -x devtmpfs -x overlay -x squashfs -x autofs -x efivarfs | tail -n +2)
 
-[ -z "$over" ] && exit 0
+now=$(date +%s)
+prev_hash=""
+prev_alert=0
+if [[ -f "$STATE" ]]; then
+    read -r prev_hash prev_alert < "$STATE" || true
+    [[ "$prev_alert" =~ ^[0-9]+$ ]] || prev_alert=0
+fi
 
-curl -fsS --max-time 10 "${AUTH[@]}" \
+if [ -z "$over" ]; then
+    if [[ -n "$prev_hash" && "$prev_hash" != "none" ]]; then
+        curl -fsS --max-time 10 "${AUTH[@]}" \
+            -H "Title: disk recovered on ${host}" \
+            -H "Priority: default" \
+            -H "Tags: floppy_disk" \
+            -d "All filesystems are back under their thresholds." \
+            "${NTFY_URL}/${topic}" >/dev/null 2>&1 || true
+    fi
+    printf 'none %s\n' "$now" > "$STATE"
+    exit 0
+fi
+
+# Hash the mountpoint set, not the percentages: a disk creeping 91% -> 92% is
+# the same unresolved alarm, and re-alerting on every percent would defeat
+# the whole point.
+hash=$(printf '%s' "$over" | grep -oE '^[^ ]+ ' | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
+if [[ "$hash" == "$prev_hash" ]] && (( now - prev_alert < REALERT_SECS )); then
+    exit 0
+fi
+
+curl -fsS --max-time 10 --retry 2 --retry-delay 5 "${AUTH[@]}" \
     -H "Title: DISK alarm on ${host}" \
     -H "Priority: high" \
     -H "Tags: warning,floppy_disk" \
-    -d "Filesystems at/over ${THRESH}%:${over}" \
-    "$NTFY" >/dev/null 2>&1 || \
-    logger -t disk-alert "ntfy push failed; ${host} over ${THRESH}%:${over}"
+    -d "Filesystems at/over their threshold:${over}" \
+    "${NTFY_URL}/${topic}" >/dev/null 2>&1 || \
+    logger -t disk-alert "ntfy push failed; ${host}:${over}"
+
+printf '%s %s\n' "$hash" "$now" > "$STATE"
 exit 0
