@@ -10,7 +10,6 @@
 # and the tailnet reaches the same IP via the subnet router (Tailscale
 # split-DNS). Certbot obtains and renews the publicly trusted wildcard
 # certificate with a Cloudflare DNS-01 challenge.
-
 {
 	auto_https disable_redirects
 	# No HTTP/3: SELinux labels these ports tcp-only, QUIC would EACCES.
@@ -27,6 +26,7 @@ https://*.{{ service_domain }} {
 	# --- {{ name }} ---
 	@{{ name }} host {{ name }}.{{ service_domain }}
 	handle @{{ name }} {
+{% if (svc.tls_skip_verify | default(false)) or (svc.host_header is defined) %}
 		reverse_proxy {{ svc.scheme | default('http') }}://{{ svc.backend }} {
 {% if svc.tls_skip_verify | default(false) %}
 			transport http {
@@ -37,6 +37,9 @@ https://*.{{ service_domain }} {
 			header_up Host {{ svc.host_header }}
 {% endif %}
 		}
+{% else %}
+		reverse_proxy {{ svc.scheme | default('http') }}://{{ svc.backend }}
+{% endif %}
 	}
 
 {% endfor %}

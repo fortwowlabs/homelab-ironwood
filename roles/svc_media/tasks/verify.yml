@@ -3,8 +3,7 @@
   ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item }}.service"
   loop: >-
     {{
-      ['jellyfin', 'audiobookshelf', 'romm-db', 'romm', 'seerr',
-       'calibre-web-automated', 'ntfy', 'homepage', 'node-exporter']
+      (media_quadlet_catalog | map(attribute='name') | list)
       + (['beszel-agent'] if beszel_agent_enabled | bool else [])
       + (minecraft_servers.keys() | list)
     }}
@@ -129,6 +128,16 @@
   retries: 3
   delay: 5
   until: media_caddy_gates is not failed
+  when: media_access_layer | default('manual') == 'caddy'
+
+- name: Verify the generated Caddyfile is canonically formatted
+  ansible.builtin.command:
+    argv:
+      - caddy
+      - fmt
+      - --diff
+      - /etc/caddy/Caddyfile
+  changed_when: false
   when: media_access_layer | default('manual') == 'caddy'
 
 - name: Verify the Caddy certificate issuer and wildcard SAN

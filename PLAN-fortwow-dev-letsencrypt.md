@@ -116,7 +116,7 @@ Keep the EPEL `caddy` package and existing unit untouched. Leave `/var/lib/caddy
 
 1. `USE_VAULT_FILE=1 make verify` (now `-k`-free + issuer + timer gates).
 2. Workstation: `dig @192.168.1.30 jellyfin.fortwow.dev +short` → 192.168.1.30; `dig jellyfin.fortwow.dev +short` (proves pfSense path); `curl -sI https://home.fortwow.dev` + 2-3 more **without `-k`/`--resolve`**; `openssl s_client` shows issuer Let's Encrypt (R1x/E1x), SAN `*.fortwow.dev`.
-3. On svc-media: `certbot renew --dry-run` — proves the whole renewal path (token, plugin, LE staging API) end to end; then confirm the deploy hook exists and `systemctl list-timers certbot-renew*` shows the next run.
+3. On svc-media: `certbot renew --dry-run --run-deploy-hooks` — proves the whole renewal path (token, plugin, LE staging API, certificate copy, and Caddy reload) end to end; then confirm the deploy hook exists and `systemctl list-timers certbot-renew*` shows the next run.
 4. **[MANUAL] The real test**: iPad with no custom CA → `https://home.fortwow.dev` → padlock, no warning; open Readest's service; repeat over Tailscale off-LAN.
 5. Cloudflare zone empty again (ACME TXT records are cleaned up post-issuance).
 

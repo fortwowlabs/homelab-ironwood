@@ -3,36 +3,23 @@
   ansible.builtin.meta: flush_handlers
 
 - name: Read rootless media service state
-  ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item.name }}.service"
+  ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item }}.service"
   loop: >-
-    {{ media_quadlet_catalog + ([{'name': 'beszel-agent'}] if beszel_agent_enabled | bool else []) }}
+    {{
+      (media_quadlet_catalog | map(attribute='name') | list)
+      + (['beszel-agent'] if beszel_agent_enabled | bool else [])
+      + (minecraft_servers.keys() | list)
+    }}
   loop_control:
-    label: "{{ item.name }}"
+    label: "{{ item }}"
   register: media_service_states
   failed_when: false
   changed_when: false
   check_mode: false
 
 - name: Start inactive rootless media services
-  ansible.builtin.command: "systemctl --user -M homelab@ start {{ item.item.name }}.service"
-  loop: "{{ media_service_states.results | selectattr('rc', 'ne', 0) | list }}"
-  loop_control:
-    label: "{{ item.item.name }}"
-  changed_when: true
-
-- name: Read rootless Minecraft service state
-  ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item }}.service"
-  loop: "{{ minecraft_servers.keys() | list }}"
-  loop_control:
-    label: "{{ item }}"
-  register: media_minecraft_service_states
-  failed_when: false
-  changed_when: false
-  check_mode: false
-
-- name: Start inactive Minecraft services
   ansible.builtin.command: "systemctl --user -M homelab@ start {{ item.item }}.service"
-  loop: "{{ media_minecraft_service_states.results | selectattr('rc', 'ne', 0) | list }}"
+  loop: "{{ media_service_states.results | selectattr('rc', 'ne', 0) | list }}"
   loop_control:
     label: "{{ item.item }}"
   changed_when: true

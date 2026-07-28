@@ -260,6 +260,10 @@ def main() -> int:
         failures.append("caddy: per-service TLS transport option was not preserved")
     if "header_up Host localhost:3000" not in caddyfile:
         failures.append("caddy: per-service Host header override was not preserved")
+    if re.search(r"reverse_proxy [^\n]+ \{\n\s*\}", caddyfile):
+        failures.append("caddy: simple upstreams rendered unnecessary empty blocks")
+    if "certificate with a Cloudflare DNS-01 challenge.\n{" not in caddyfile:
+        failures.append("caddy: global block is separated from its header by a formatter diff")
 
     homepage = environment.get_template(
         "roles/svc_media/templates/homepage/services.yaml.j2"

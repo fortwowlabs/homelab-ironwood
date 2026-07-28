@@ -109,7 +109,7 @@ Caddy after every successful renewal. `certbot-renew.timer` runs unattended.
 Test the complete ACME path without consuming production rate limits:
 
 ```bash
-sudo certbot renew --dry-run
+sudo certbot renew --dry-run --run-deploy-hooks
 sudo systemctl is-active certbot-renew.timer
 sudo systemctl is-enabled certbot-renew.timer
 sudo systemctl list-timers 'certbot-renew*'
