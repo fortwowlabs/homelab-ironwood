@@ -166,3 +166,37 @@ vault_vaultwarden_admin_token_plaintext: "REPLACE_openssl_rand_hex_24"  # what y
 # run locally on svc-media for the nightly world-flush-before-tar and any
 # ad-hoc admin (e.g. `whitelist add`).
 vault_minecraft_rcon_password: "REPLACE_openssl_rand_hex_24"   # openssl rand -hex 24
+
+# Authelia SSO (svc-infra). The first three are injected as Environment= lines
+# by the infra_secret_apps catalog entry, keeping the rendered configuration
+# file itself secret-free and diffable. NONE of them may be rotated casually:
+#   session_secret         — rotating it invalidates every live session
+#                            (everyone is logged out; harmless but noticed)
+#   storage_encryption_key — rotating it makes the existing SQLite store
+#                            UNREADABLE. Authelia will not start. Set once.
+#   jwt_secret             — signs identity-validation (password reset) tokens
+vault_authelia_session_secret:         "REPLACE_openssl_rand_hex_32"   # openssl rand -hex 32
+vault_authelia_storage_encryption_key: "REPLACE_openssl_rand_hex_32"   # openssl rand -hex 32
+vault_authelia_jwt_secret:             "REPLACE_openssl_rand_hex_32"   # openssl rand -hex 32
+
+# The portal login. Only the HASH is templated into users.yml; the plaintext
+# is kept beside it for the same reason as the vaultwarden pair above — it is
+# what you actually type at https://auth.<domain> and it cannot be recovered
+# from the hash. Unlike the three secrets above, the hash goes into a file
+# rather than an Environment= line, so its $ signs need no escaping —
+# single-quote it in YAML.
+#
+# Generate with Authelia's own CLI (argon2id, its defaults: t=3, m=65536,
+# p=4, 32-byte hash, 16-byte salt):
+#   podman run --rm ghcr.io/authelia/authelia@sha256:1b363e9279e742397966333f364e0876ae02bf5c876de73e83af6d48c57ff51b \
+#     authelia crypto hash generate argon2 --password '<password>'
+# or non-interactively with argon2-cffi, matching those parameters:
+#   python -c 'import secrets;from argon2 import PasswordHasher,Type;\
+#   p=secrets.token_urlsafe(24);\
+#   print(p, PasswordHasher(time_cost=3,memory_cost=65536,parallelism=4,\
+#   hash_len=32,salt_len=16,type=Type.ID).hash(p))'
+#
+# Password changes belong HERE, not in the portal UI: Authelia rewrites
+# users.yml itself on a UI change and the next deploy would revert it.
+vault_authelia_user_password_hash: "REPLACE_argon2id_phc_hash"        # the hash
+vault_authelia_user_password_plaintext: "REPLACE_openssl_rand_hex_24"  # what you type at the portal

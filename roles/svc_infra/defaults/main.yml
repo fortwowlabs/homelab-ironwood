@@ -64,3 +64,13 @@ infra_service_names: >-
   {{ (infra_apps.keys() | list)
      + ((infra_secret_apps | default({})).keys() | list)
      + infra_extra_service_names }}
+
+# The single Authelia account, used as both the login name and the local part
+# of its email address (authelia-users.yml.j2). Its password is NOT here —
+# vault_authelia_user_password_hash holds an argon2id hash of it.
+#
+# Authelia's file backend supports any number of users, but this estate has
+# one human, and a list would mean either putting several hashes in the vault
+# or accepting a shared one. Add a second entry to the template if that
+# changes; nothing else in the design assumes a single account.
+authelia_admin_user: admin

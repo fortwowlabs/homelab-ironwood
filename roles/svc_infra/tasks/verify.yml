@@ -120,6 +120,24 @@
   changed_when: false
   when: item.stdout | length > 0
 
+# "active" is a weak claim for an identity provider: Authelia stays running
+# with a users file it could not parse, and once forward-auth lands a portal
+# that is up but not serving takes eleven services down with it. Ask its own
+# health endpoint instead, which reports on the loaded configuration.
+#
+# Deliberately NOT a login check: proving the password works means POSTing a
+# credential, and verify runs routinely. The login was exercised by hand at
+# deploy time (docs/plans/authelia-sso.md); this is the standing regression
+# gate, not a replacement for that.
+- name: Verify the Authelia portal is serving
+  ansible.builtin.uri:
+    url: "http://{{ ansible_host }}:{{ infra_secret_apps.authelia.ui_port }}/api/health"
+    status_code: 200
+  register: infra_authelia_health
+  retries: 5
+  delay: 3
+  until: infra_authelia_health.status | default(0) == 200
+
 - name: Verify node_exporter metrics
   ansible.builtin.include_role:
     name: service_vm

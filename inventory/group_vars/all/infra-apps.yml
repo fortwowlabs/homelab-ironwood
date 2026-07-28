@@ -378,3 +378,48 @@ infra_secret_apps:
       _DEFAULT_PASSWORD: "{{ vault_mealie_admin_password }}"
     require_vault: [vault_mealie_admin_password]
     backup_paths: [mealie]
+
+  # Authelia — the SSO identity provider. Phase 1 deploys the portal ONLY;
+  # no Caddy vhost carries forward_auth yet (that is a second branch, so the
+  # provider can be proven working before eleven services depend on it).
+  # See docs/plans/authelia-sso.md for the full design.
+  #
+  # Its two config files are NOT rendered by this catalog entry — the generic
+  # infra-app.container.j2 only handles env — but by supplementary template
+  # tasks in roles/svc_infra/tasks/files.yml, the same split Prometheus and
+  # Grafana already use. The container reads /config/configuration.yml (the
+  # image bakes X_AUTHELIA_CONFIG to exactly that path, so the filename is
+  # not ours to choose) and, per that config, /config/users.yml.
+  #
+  # ui_port 9092 → container 9091: Authelia's own default 9091 is already
+  # Prometheus on this host.
+  #
+  # No PUID/PGID or user: override, unlike most entries here. The image sets
+  # no USER and already defaults PUID=0/PGID=0 (confirmed from the image
+  # config), so it runs as container-root, which rootless podman maps to the
+  # host homelab user — /config lands writable and backup-readable with no
+  # intervention. Authelia rewrites users.yml itself on a password change,
+  # which is precisely why that ownership has to be right.
+  #
+  # All three secrets go through env DELIBERATELY, rather than into the
+  # config file. That keeps authelia-configuration.yml.j2 free of any vault_
+  # reference, so it renders as an ordinary readable 0644 template with a
+  # real diff; only the users file, which carries the password hash, needs
+  # the 0600 + no_log treatment. Rotating the storage encryption key or the
+  # session secret invalidates the SQLite store / every live session
+  # respectively — set them once and leave them.
+  authelia:
+    image: "ghcr.io/authelia/authelia@sha256:1b363e9279e742397966333f364e0876ae02bf5c876de73e83af6d48c57ff51b"
+    ui_port: 9092
+    container_port: 9091
+    volumes:
+      - /opt/homelab/appdata/authelia:/config:Z
+    env:
+      AUTHELIA_SESSION_SECRET: "{{ vault_authelia_session_secret }}"
+      AUTHELIA_STORAGE_ENCRYPTION_KEY: "{{ vault_authelia_storage_encryption_key }}"
+      AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET: "{{ vault_authelia_jwt_secret }}"
+    require_vault:
+      - vault_authelia_session_secret
+      - vault_authelia_storage_encryption_key
+      - vault_authelia_jwt_secret
+    backup_paths: [authelia]

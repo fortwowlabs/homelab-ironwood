@@ -1,0 +1,32 @@
+{{ ansible_managed | comment }}
+# /opt/homelab/appdata/authelia/users.yml  ->  /config/users.yml
+# RENDERED from roles/svc_infra/templates/authelia-users.yml.j2.
+#
+# This file carries the account's argon2id password hash, so unlike
+# authelia-configuration.yml.j2 its render task is no_log/diff:false and the
+# file is written 0600 — tests/validate_secret_tasks.py keys off the vault_
+# reference below and will fail the build if that task loses either.
+#
+# vault_authelia_user_password_hash holds a PHC string
+# ("$argon2id$v=19$m=65536,t=3,p=4$..."), NOT the plaintext. Generate it with:
+#
+#   podman run --rm ghcr.io/authelia/authelia@sha256:1b363e9279e742397966333f\
+# 364e0876ae02bf5c876de73e83af6d48c57ff51b \
+#     authelia crypto hash generate argon2 --password '<password>'
+#
+# It lives in a YAML value rather than a systemd Environment= line, so the $
+# signs need no escaping. The plaintext cannot be recovered from the hash, so
+# it is kept beside it in the vault as vault_authelia_user_password_plaintext
+# (the same pairing as vault_vaultwarden_admin_token_plaintext).
+#
+# Authelia REWRITES this file itself when a password is changed through the
+# UI, which would then be reverted by the next deploy. Change the password by
+# regenerating the hash into the vault instead.
+users:
+  {{ authelia_admin_user }}:
+    disabled: false
+    displayname: '{{ authelia_admin_user }}'
+    password: '{{ vault_authelia_user_password_hash }}'
+    email: '{{ authelia_admin_user }}@{{ service_domain }}'
+    groups:
+      - 'admins'

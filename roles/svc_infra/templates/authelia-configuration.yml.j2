@@ -1,0 +1,77 @@
+{{ ansible_managed | comment }}
+# /opt/homelab/appdata/authelia/configuration.yml  ->  /config/configuration.yml
+# RENDERED from roles/svc_infra/templates/authelia-configuration.yml.j2.
+#
+# The filename is fixed by the image, which bakes X_AUTHELIA_CONFIG=
+# /config/configuration.yml; renaming it here silently starts Authelia on its
+# built-in defaults instead.
+#
+# This file deliberately contains NO vault_ reference. Every secret (session
+# secret, storage encryption key, reset-password JWT secret) is injected as an
+# Environment= line from the infra_secret_apps catalog entry, which is what
+# lets this render at 0644 with a readable diff rather than under no_log.
+# Keep it that way: adding a vault_ ref here would flip the whole file to
+# suppressed output (tests/validate_secret_tasks.py enforces this).
+#
+# Schema is Authelia 4.39. Two keys moved in 4.38 and the old spellings now
+# fail validation outright: server.host/server.port became server.address, and
+# the flat session.domain became the session.cookies list.
+theme: 'auto'
+
+server:
+  address: 'tcp://:9091/'
+
+log:
+  level: 'info'
+  format: 'text'
+
+# File-based users, not LDAP: the whole point of choosing Authelia here was
+# that its configuration stays in version-controlled templates instead of
+# inside a database behind a web UI. See authelia-users.yml.j2.
+authentication_backend:
+  password_reset:
+    disable: true
+  file:
+    path: '/config/users.yml'
+    password:
+      algorithm: 'argon2'
+
+# Phase 1: the portal is deployed but nothing is protected — no Caddy vhost
+# carries forward_auth yet. default_policy therefore has no effect on any
+# request today; it becomes live the moment sso_protected_services lands.
+# one_factor = password only. There is no second factor configured because
+# there is no SMTP in this estate to enrol one over.
+access_control:
+  default_policy: 'one_factor'
+
+session:
+  name: 'authelia_session'
+  same_site: 'lax'
+  expiration: '12h'
+  inactivity: '2h'
+  remember_me: '1M'
+  # The cookie domain is the PARENT domain, not the portal's own hostname —
+  # that is what makes this single sign-on across sibling subdomains instead
+  # of a separate login per service. authelia_url must be a subdomain of it.
+  cookies:
+    - domain: '{{ service_domain }}'
+      authelia_url: 'https://auth.{{ service_domain }}'
+      default_redirection_url: 'https://home.{{ service_domain }}'
+
+storage:
+  local:
+    path: '/config/db.sqlite3'
+
+# No SMTP anywhere in this estate, so notifications (password reset, 2FA
+# enrolment) are written to a file inside the container instead of mailed.
+# Reachable with: podman exec authelia cat /config/notification.txt
+notifier:
+  filesystem:
+    filename: '/config/notification.txt'
+
+# Brute-force throttle. This portal is reachable from the LAN and the tailnet,
+# and it fronts a single account, so the lockout is deliberately not generous.
+regulation:
+  max_retries: 5
+  find_time: '2m'
+  ban_time: '10m'

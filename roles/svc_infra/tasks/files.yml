@@ -699,6 +699,39 @@
   with_fileglob: "grafana-dashboards/*.json"
   register: infra_grafana_dashboards
 
+# --- Authelia: the supplementary config renders for its catalog entry, the
+# same split Prometheus and Grafana use above (the generic
+# infra-app.container.j2 handles env, not config files). Both land in the
+# /config bind mount created from the catalog's `volumes` by the appdata loop
+# near the top of this file, so no explicit directory task is needed.
+#
+# The two files are split by sensitivity, not by topic: the configuration
+# carries no secret and renders readable at 0644, while the users file holds
+# the argon2id password hash and needs the 0600 + no_log treatment below.
+- name: Render the Authelia configuration
+  ansible.builtin.template:
+    src: authelia-configuration.yml.j2
+    # The image bakes X_AUTHELIA_CONFIG=/config/configuration.yml; this
+    # filename is fixed by that, not chosen here.
+    dest: /opt/homelab/appdata/authelia/configuration.yml
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+  register: infra_authelia_config
+
+# no_log/diff:false + 0600: this template embeds the account's password hash.
+# tests/validate_secret_tasks.py fails the build if either is dropped.
+- name: Render the Authelia users file
+  ansible.builtin.template:
+    src: authelia-users.yml.j2
+    dest: /opt/homelab/appdata/authelia/users.yml
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0600"
+  register: infra_authelia_users
+  no_log: true
+  diff: false
+
 # Home Assistant refuses proxied requests with a bare "400: Bad Request" until
 # it is told which proxy to trust — so https://home-assistant.<domain> is dead
 # on arrival even though DNS, TLS and Caddy are all correct. This was a manual
@@ -868,6 +901,8 @@
         + (['beszel-agent'] if (infra_beszel_agent_template.changed | default(false)) else [])
         + (['node-exporter'] if (infra_node_exporter_template.changed | default(false)) else [])
         + (['prometheus'] if (infra_prometheus_config.changed | default(false)) else [])
+        + (['authelia'] if (infra_authelia_config.changed | default(false)
+                            or infra_authelia_users.changed | default(false)) else [])
         + (['grafana'] if (infra_grafana_datasource.changed | default(false)
                            or infra_grafana_dashboard_provider.changed | default(false)
                            or infra_grafana_dashboards.changed | default(false)) else [])

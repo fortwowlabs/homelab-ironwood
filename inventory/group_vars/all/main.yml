@@ -196,3 +196,12 @@ caddy_services:
   # reverse_proxy passes Upgrade/Connection through automatically — no
   # host_header or extra directive needed here.
   vaultwarden: { backend: "{{ hostvars[infra_host].ansible_host }}:8222", group: Infra, icon: vaultwarden }
+  # Authelia's login portal. Session cookies are issued for the whole
+  # {{ service_domain }} parent domain, which is what will make this single
+  # sign-on across sibling subdomains once forward_auth lands — so this
+  # hostname must stay under the same domain as the services it fronts.
+  #
+  # When the forward-auth phase adds sso_protected_services, `auth` must
+  # NEVER appear in that list: protecting the portal with itself is an
+  # infinite redirect. See docs/plans/authelia-sso.md.
+  auth:        { backend: "{{ hostvars[infra_host].ansible_host }}:9092", group: Infra, icon: authelia }
