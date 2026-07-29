@@ -27,6 +27,10 @@ TEMPLATES = (
     "roles/service_vm/templates/notify-failure.sh.j2",
     "roles/service_vm/templates/hc-ping.sh.j2",
     "roles/svc_infra/templates/backups-fresh.sh.j2",
+    "roles/pve_mon/templates/diskguard.sh.j2",
+    "roles/pve_mon/templates/pve-health.sh.j2",
+    "roles/pve_mon/templates/smartd-ntfy.sh.j2",
+    "roles/pve_mon/templates/zed-ntfy.sh.j2",
     "roles/svc_media/templates/certwatch.sh.j2",
     "roles/svc_media/templates/heartbeat.sh.j2",
 )
@@ -78,6 +82,8 @@ def main() -> int:
         # backups-fresh.sh.j2 bakes the host list in at render time.
         "groups": {"service_vms": ["svc-media", "svc-download", "svc-infra"]},
         "backup_max_age_hours": 26,
+        "pve_disk_threshold": 80,
+        "pve_scrub_max_age_days": 45,
         "service_domain": "example.test",
         "svc_uid": 10001,
         "download_apps": apps,

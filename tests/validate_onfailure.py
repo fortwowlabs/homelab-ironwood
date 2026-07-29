@@ -51,7 +51,7 @@ def triggered_service(timer: Path) -> str:
 
 
 def covered_units() -> set[str]:
-    """Union of onfailure_units_base and every host's onfailure_units_extra."""
+    """Every unit that gets an OnFailure drop-in, across all three sources."""
     units: set[str] = set()
     main = yaml.safe_load(
         (ROOT / "inventory/group_vars/all/main.yml").read_text(encoding="utf-8")
@@ -60,13 +60,40 @@ def covered_units() -> set[str]:
     for host_vars in sorted((ROOT / "inventory/host_vars").glob("*.yml")):
         document = yaml.safe_load(host_vars.read_text(encoding="utf-8")) or {}
         units.update(document.get("onfailure_units_extra") or [])
+    # The hypervisor is not a service_vm and keeps its own list in the role.
+    pve_defaults = yaml.safe_load(
+        (ROOT / "roles/pve_mon/defaults/main.yml").read_text(encoding="utf-8")
+    )
+    units.update(pve_defaults.get("pve_onfailure_units") or [])
     return units
+
+
+def alerter_copies_match() -> str | None:
+    """The PVE host runs Debian and none of service_vm, so its copy of the
+    alerter unit is duplicated. Duplicated files drift; this notices."""
+    paths = [
+        ROOT / "roles/service_vm/files/notify-failure@.service",
+        ROOT / "roles/pve_mon/files/notify-failure@.service",
+    ]
+    contents = {path: path.read_text(encoding="utf-8") for path in paths}
+    if len(set(contents.values())) != 1:
+        return (
+            "roles/service_vm/files/notify-failure@.service and "
+            "roles/pve_mon/files/notify-failure@.service have diverged; they "
+            "are the same unit deployed to two OS families and must stay "
+            "byte-identical"
+        )
+    return None
 
 
 def main() -> int:
     covered = covered_units()
     failures: list[str] = []
     checked = 0
+
+    drift = alerter_copies_match()
+    if drift:
+        failures.append(drift)
 
     for timer in unit_files():
         service = triggered_service(timer)

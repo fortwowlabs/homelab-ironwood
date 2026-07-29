@@ -1,0 +1,57 @@
+---
+- name: Verify the PVE monitoring timers are active and enabled
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - "{{ item.1 }}"
+      - "{{ item.0 }}"
+  loop: "{{ ['homelab-diskguard.timer', 'homelab-pve-health.timer'] | product(['is-active', 'is-enabled']) | list }}"
+  loop_control:
+    label: "{{ item.1 }} {{ item.0 }}"
+  changed_when: false
+
+- name: Verify the event-delivery daemons are running
+  ansible.builtin.command: "systemctl is-active {{ item }}"
+  loop:
+    - zfs-zed
+    - smartmontools
+  changed_when: false
+
+# Reading zed.rc back is the point: a stock PVE upgrade rewrites files under
+# /etc/zfs/zed.d, and a reverted ZED_EMAIL_PROG would silently send pool
+# alerts to unread local mail again — the exact state this role replaced.
+- name: Read the zed configuration
+  ansible.builtin.slurp:
+    src: /etc/zfs/zed.d/zed.rc
+  register: pve_zed_config
+
+- name: Assert zed still points at the ntfy hook
+  ansible.builtin.assert:
+    that:
+      - "'ZED_EMAIL_PROG=\"/usr/local/sbin/zed-ntfy.sh\"' in (pve_zed_config.content | b64decode)"
+    fail_msg: >-
+      zed is no longer configured to use the ntfy hook; ZFS pool events would
+      go to unread local root mail.
+
+- name: Read the smartd configuration
+  ansible.builtin.slurp:
+    src: /etc/smartd.conf
+  register: pve_smartd_config
+
+- name: Assert smartd still points at the ntfy hook
+  ansible.builtin.assert:
+    that:
+      - "'/usr/local/sbin/smartd-ntfy.sh' in (pve_smartd_config.content | b64decode)"
+    fail_msg: >-
+      smartd is no longer configured to use the ntfy hook; disk warnings would
+      go to unread local root mail.
+
+# Run the health check rather than trusting that its timer exists — this is
+# the assertion that pools are actually healthy and scrubs are still running.
+- name: Verify the PVE host reports healthy
+  ansible.builtin.command: /usr/local/sbin/pve-health.sh
+  changed_when: false
+
+- name: Mark PVE monitoring verification complete
+  ansible.builtin.set_fact:
+    pve_mon_verified: true

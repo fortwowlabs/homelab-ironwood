@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# smartd-ntfy.sh — deliver smartd's disk-health warnings to ntfy.
+#
+# smartd was already running and already configured to mail root, which on
+# this host meant /var/mail — unread. A failing drive is the one fault where
+# warning time is the whole value: SMART usually complains for days or weeks
+# before a disk actually goes, and none of that was reaching anyone.
+#
+# smartd runs this with the message in SMARTD_MESSAGE and details in
+# SMARTD_DEVICE / SMARTD_FAILTYPE, plus the full mail body on stdin.
+set -uo pipefail
+
+# Sourced here rather than supplied by an EnvironmentFile: smartd is a
+# long-running daemon and runs this hook from ITS environment, which has none
+# of the notify credentials in it.
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-notify.env ]] && . /etc/homelab-notify.env
+
+host=$(hostname -s)
+topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC:-homelab-alerts}}"
+: "${NTFY_URL:?/etc/homelab-notify.env is missing or unreadable}"
+AUTH=()
+if [[ -n "${NTFY_TOKEN:-}" ]]; then
+    AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+fi
+
+device="${SMARTD_DEVICE:-unknown device}"
+message="${SMARTD_MESSAGE:-SMART warning}"
+body=$(cat 2>/dev/null | tail -c 3000)
+[[ -n "$body" ]] || body="${SMARTD_FAILTYPE:-}"
+
+logger -p daemon.err -t smartd-ntfy "${device}: ${message}"
+
+curl -fsS --max-time 15 --retry 3 --retry-delay 5 -X POST \
+    "${AUTH[@]}" \
+    -H "Title: SMART warning on ${host}: ${device}" \
+    -H "Priority: urgent" \
+    -H "Tags: rotating_light,floppy_disk" \
+    -d "${message}
+
+${body}" \
+    "${NTFY_URL}/${topic}" >/dev/null 2>&1 \
+    || logger -p daemon.err -t smartd-ntfy "ntfy push FAILED for ${device}: ${message}"
+
+exit 0

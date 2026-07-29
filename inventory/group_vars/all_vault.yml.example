@@ -239,9 +239,12 @@ vault_authelia_user_password_plaintext: "REPLACE_openssl_rand_hex_24"  # what yo
 #   homelab-backups     1 day  / 6 h     backups-fresh check on svc-infra
 #   homelab-pve         1 day  / 6 h     daily health check on the PVE host
 #   homelab-heartbeat   1 day  / 3 h     svc-media (proves the ntfy host lives)
-#   homelab-scrub      32 day  / 3 d     monthly ZFS scrub on the PVE host
+#
+# There is deliberately no separate scrub check: PVE already scrubs monthly
+# from /etc/cron.d/zfsutils-linux, and homelab-pve-health fails if the last
+# completed scrub is older than 45 days. A second scrub timer would double
+# the I/O to learn the same thing.
 vault_hc_ping_verify:    ""   # UUID only, e.g. 1a2b3c4d-....  Empty = disabled.
 vault_hc_ping_backups:   ""
 vault_hc_ping_pve:       ""
 vault_hc_ping_heartbeat: ""
-vault_hc_ping_scrub:     ""

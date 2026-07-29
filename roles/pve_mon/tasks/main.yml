@@ -1,0 +1,219 @@
+---
+# Monitoring for the hypervisor itself.
+#
+# Everything else in this repo runs in a guest. This role is the exception,
+# and its scope is deliberately narrow: capacity, disk health, ZFS events,
+# and a daily liveness report. PVE's own configuration — storage, networking,
+# clustering, updates — stays hand-managed, because modelling a hypervisor as
+# converged infrastructure invites a failed play to take the whole house down.
+#
+# The machine already detected almost all of this. zed was watching pools and
+# smartd was watching disks; both delivered to local root mail on a box where
+# nothing reads mail. The gap being closed is delivery, not detection.
+
+- name: Install monitoring packages
+  ansible.builtin.apt:
+    name:
+      - smartmontools
+      - zfs-zed
+      - curl
+    state: present
+    update_cache: false
+
+- name: Create the monitoring state directory
+  ansible.builtin.file:
+    path: /var/lib/homelab
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+# --------------------------------------------------------------- delivery ---
+- name: Render host notification credentials
+  ansible.builtin.template:
+    src: "{{ role_path }}/../service_vm/templates/notify.env.j2"
+    dest: /etc/homelab-notify.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Render healthchecks.io ping credentials
+  ansible.builtin.template:
+    src: healthchecks.env.j2
+    dest: /etc/homelab-healthchecks.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+
+- name: Install the healthchecks.io ping helper
+  ansible.builtin.template:
+    src: "{{ role_path }}/../service_vm/templates/hc-ping.sh.j2"
+    dest: /usr/local/sbin/hc-ping.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+# The script is shared with the service VMs; only the unit is duplicated,
+# because PVE is Debian and runs none of the service_vm role.
+- name: Install the unit-failure alert script
+  ansible.builtin.template:
+    src: "{{ role_path }}/../service_vm/templates/notify-failure.sh.j2"
+    dest: /usr/local/sbin/notify-failure.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the unit-failure alert template unit
+  ansible.builtin.copy:
+    src: notify-failure@.service
+    dest: /etc/systemd/system/notify-failure@.service
+    owner: root
+    group: root
+    mode: "0644"
+  register: pve_notify_failure_unit
+
+- name: Create OnFailure drop-in directories
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop: "{{ pve_onfailure_units }}"
+
+- name: Attach the failure alert to PVE monitoring units
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/{{ item }}.d/10-onfailure.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/pve_mon/tasks/main.yml).
+      [Unit]
+      OnFailure=notify-failure@%n.service
+  loop: "{{ pve_onfailure_units }}"
+  register: pve_onfailure_dropins
+
+# -------------------------------------------------------------- diskguard ---
+- name: Install the PVE capacity guard
+  ansible.builtin.template:
+    src: diskguard.sh.j2
+    dest: /usr/local/sbin/pve-diskguard.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the PVE monitoring units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - homelab-diskguard.service
+    - homelab-diskguard.timer
+    - homelab-pve-health.service
+    - homelab-pve-health.timer
+  register: pve_mon_units
+
+- name: Install the daily PVE health check
+  ansible.builtin.template:
+    src: pve-health.sh.j2
+    dest: /usr/local/sbin/pve-health.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Reload systemd after unit changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: >-
+    pve_mon_units is changed or pve_notify_failure_unit is changed
+    or pve_onfailure_dropins is changed
+
+- name: Arm the PVE monitoring timers
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - homelab-diskguard.timer
+    - homelab-pve-health.timer
+
+# --------------------------------------------------------------------- zed ---
+- name: Install the ZFS event ntfy hook
+  ansible.builtin.template:
+    src: zed-ntfy.sh.j2
+    dest: /usr/local/sbin/zed-ntfy.sh
+    owner: root
+    group: root
+    mode: "0755"
+  register: pve_zed_hook
+
+# zed calls ZED_EMAIL_PROG through `eval` with the subject substituted into
+# ZED_EMAIL_OPTS. Both are pinned explicitly rather than left to the default:
+# the default OPTS happens to contain @SUBJECT@, and if that ever changed the
+# subject would silently arrive on stdin instead of as an argument.
+- name: Point zed at the ntfy hook
+  ansible.builtin.lineinfile:
+    path: /etc/zfs/zed.d/zed.rc
+    regexp: "{{ item.regexp }}"
+    line: "{{ item.line }}"
+    owner: root
+    group: root
+    mode: "0600"
+  loop:
+    - regexp: '^#?ZED_EMAIL_ADDR='
+      line: 'ZED_EMAIL_ADDR="root"'
+    - regexp: '^#?ZED_EMAIL_PROG='
+      line: 'ZED_EMAIL_PROG="/usr/local/sbin/zed-ntfy.sh"'
+    - regexp: '^#?ZED_EMAIL_OPTS='
+      line: "ZED_EMAIL_OPTS=\"-s '@SUBJECT@' @ADDRESS@\""
+  register: pve_zed_rc
+
+- name: Restart zed after configuration changes
+  ansible.builtin.systemd:
+    name: zfs-zed
+    state: restarted
+  when: pve_zed_rc is changed or pve_zed_hook is changed
+
+# ------------------------------------------------------------------ smartd ---
+# The real unit is smartmontools.service; `smartd` is only an alias, so every
+# systemd call here uses the real name.
+- name: Install the SMART warning ntfy hook
+  ansible.builtin.template:
+    src: smartd-ntfy.sh.j2
+    dest: /usr/local/sbin/smartd-ntfy.sh
+    owner: root
+    group: root
+    mode: "0755"
+  register: pve_smartd_hook
+
+# -a monitors every attribute rather than the default subset; -M daily repeats
+# the warning every day it persists, which matters when the reader is away for
+# months and a single missed notification would be the end of it.
+- name: Point smartd at the ntfy hook
+  ansible.builtin.lineinfile:
+    path: /etc/smartd.conf
+    regexp: '^DEVICESCAN'
+    line: "DEVICESCAN -d removable -a -n standby,q -m root -M exec /usr/local/sbin/smartd-ntfy.sh -M daily"
+    owner: root
+    group: root
+    mode: "0644"
+  register: pve_smartd_conf
+
+- name: Restart smartd after configuration changes
+  ansible.builtin.systemd:
+    name: smartmontools
+    enabled: true
+    state: restarted
+  when: pve_smartd_conf is changed or pve_smartd_hook is changed
+
+- name: Verify PVE monitoring after convergence
+  ansible.builtin.import_tasks: verify.yml
+  when: not ansible_check_mode

@@ -40,6 +40,35 @@
           ansible.builtin.fail:
             msg: "Safe verification failed on {{ inventory_hostname }}."
 
+# The hypervisor is verified in its own play so it can be excluded by
+# --limit. The nightly runner on svc-infra does exactly that: it has no SSH
+# key for root@PVE and should not have one.
+- name: Verify hypervisor monitoring
+  hosts: pve_mon_hosts
+  gather_facts: false
+  any_errors_fatal: true
+  tasks:
+    - name: Run PVE monitoring verification with failure notification
+      block:
+        - name: Verify PVE monitoring
+          ansible.builtin.include_role:
+            name: pve_mon
+            tasks_from: verify
+      rescue:
+        - name: Notify PVE verification failure
+          ansible.builtin.include_role:
+            name: notify
+          vars:
+            ntfy_title: "homelab VERIFY FAILED ({{ inventory_hostname }})"
+            ntfy_result: "A hypervisor verification gate failed on {{ inventory_hostname }}."
+            ntfy_priority: urgent
+            ntfy_topic_override: "{{ ntfy_alert_topic }}"
+            ntfy_tags: rotating_light
+
+        - name: Abort after a failed hypervisor verification
+          ansible.builtin.fail:
+            msg: "Hypervisor verification failed on {{ inventory_hostname }}."
+
 - name: Announce safe verification success only after every host is green
   hosts: localhost
   gather_facts: false

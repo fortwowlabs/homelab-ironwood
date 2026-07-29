@@ -107,28 +107,63 @@ other emergency, use [Incidents](incidents.md).
 ## Monitoring and alerting
 
 Homepage, Cockpit, and ntfy are deployed with the service VMs. Subscribe the
-operator devices to the configured ntfy topic and test both authenticated and
-anonymous behavior as applicable. VM filesystem alarms are managed by
-`homelab-diskalert.timer`; the Proxmox host itself needs the manual ZFS/root
-capacity guard from `contrib/`. Transfer those four files to a temporary
-directory on PVE through an authenticated administrative path, then run:
+operator devices to **both** ntfy topics and mute the informational one:
 
-```bash
-# on the Proxmox host
-sudo install -m 0750 contrib/bin/pve-diskguard.sh /usr/local/sbin/pve-diskguard.sh
-sudo install -m 0644 contrib/systemd/homelab-diskguard.service /etc/systemd/system/
-sudo install -m 0644 contrib/systemd/homelab-diskguard.timer /etc/systemd/system/
-sudo install -m 0600 contrib/systemd/homelab-diskguard.env.example /etc/homelab-diskguard.env
-sudo ${EDITOR:-vi} /etc/homelab-diskguard.env
-sudo systemctl daemon-reload
-sudo systemctl enable --now homelab-diskguard.timer
-sudo systemctl start homelab-diskguard.service
-```
+| Topic | Contents | Phone setting |
+|---|---|---|
+| `homelab-deploy` | deploy/verify succeeded — routine confirmations | muted |
+| `homelab-alerts` | anything actionable: failed units, disk, certificate, ZFS, SMART | loud; urgent bypasses Do Not Disturb |
 
-Set the direct LAN ntfy URL, topic, threshold, and optional token in the root-
-owned environment file; derive the media address from inventory. Confirm the
-test in `journalctl -u homelab-diskguard.service -e` and on the subscribed
-device. A failed ntfy push is not permission to ignore a failed unit or disk
+The split exists because a channel that pings for every green deploy gets
+muted, and a muted channel is the same as no alerting at all.
+
+### What watches what
+
+| Watcher | Where | Cadence | Raises |
+|---|---|---|---|
+| `notify-failure@.service` | all VMs + PVE | on failure | any unit in `onfailure_units_*` failing |
+| `homelab-failedunits.timer` | all VMs | 15 min | units already failed, system and rootless |
+| `homelab-diskalert.timer` | all VMs | 15 min | local FS ≥85%, NFS ≥90% |
+| `homelab-certwatch.timer` | svc-media | daily | wildcard certificate under 21 days |
+| `homelab-heartbeat.timer` | svc-media | daily | pings healthchecks.io; fails if ntfy is down |
+| `homelab-backups-fresh.timer` | svc-infra | daily 04:40 | any VM's newest backup older than 26h |
+| `homelab-diskguard.timer` | PVE | 15 min | pool or root/vz ≥80% |
+| `homelab-pve-health.timer` | PVE | daily | pool not healthy, scrub older than 45d, failed units |
+| zed + smartd hooks | PVE | on event | ZFS pool events and SMART warnings |
+
+Alerts deduplicate: a condition that persists re-alerts every 6 hours rather
+than every run, and clearing one sends a single all-clear.
+
+### The Proxmox host
+
+It is now managed — `make pve` installs the capacity guard, the ZFS event
+hook, the SMART hook, and the daily health check over SSH as root. The old
+manual `contrib/` installation is gone; `contrib/bin/pve-diskguard.sh` and
+`contrib/systemd/homelab-diskguard.*` were promoted into `roles/pve_mon/`.
+
+Its scope is deliberately narrow. PVE's storage, networking, and updates stay
+hand-managed; only the watchers are converged, because a failed play against a
+hypervisor takes every guest with it.
+
+zed and smartd were both already running and already detecting these faults —
+they delivered to local root mail, on a box where nothing reads mail. What
+changed is delivery, not detection.
+
+### The dead-man's switch
+
+Every alert above travels through ntfy on svc-media, which cannot report that
+svc-media, the network, or the power is gone — silence and health look
+identical from a phone. Four healthchecks.io checks close that: jobs ping out
+on success and healthchecks.io alerts on the ping that never arrives.
+
+Setup is one-time and manual (see the `vault_hc_ping_*` block in
+`inventory/group_vars/all_vault.yml.example`): create the account, **configure
+its notification channels first**, create the four checks, then paste the ping
+UUIDs with `make vault-edit`. Until then the UUIDs are empty, every ping is
+skipped with a journal line, and nothing fails — but there is no external
+safety net either.
+
+A failed ntfy push is not permission to ignore a failed unit or disk
 threshold.
 
 ## Backups

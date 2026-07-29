@@ -53,7 +53,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 
 .PHONY: help deps deps-dev validate validate-tools validate-syntax \
 	validate-ansible validate-yaml validate-shell validate-links \
-	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra \
+	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
 	check check-diff verify verify-disruptive drift reconcile access ping lint \
 	vault-edit clean
 
@@ -135,6 +135,9 @@ media: ## Configure and verify the media VM
 
 infra: ## Configure and verify the infra VM
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit infra_vms $(ARGS)
+
+pve: ## Configure and verify hypervisor monitoring (disk, SMART, ZFS events)
+	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit pve_mon_hosts $(ARGS)
 
 check: ## Safe check mode without displaying file diffs
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --check $(ARGS)

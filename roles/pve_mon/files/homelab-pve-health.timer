@@ -1,0 +1,11 @@
+[Unit]
+Description=Report PVE health to healthchecks.io daily
+
+[Timer]
+OnCalendar=*-*-* 06:30:00
+OnBootSec=15min
+Persistent=true
+RandomizedDelaySec=600
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,11 @@
+[Unit]
+Description=Alert that %i failed
+# No OnFailure= here, deliberately: the alerter must not be able to trigger
+# itself. notify-failure.sh always exits 0 for the same reason.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/homelab-notify.env
+ExecStart=/usr/local/sbin/notify-failure.sh %i

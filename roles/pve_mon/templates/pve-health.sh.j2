@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# pve-health.sh — the hypervisor's daily "I am alive and my disks are fine"
+# report, and the outbound half of its healthchecks.io check.
+#
+# Every service VM is a guest on this machine. If it dies, all three VMs die
+# with it and nothing on the LAN is left to say so — which is why liveness
+# here is reported OUT to healthchecks.io rather than in to ntfy.
+#
+# Checks, in the order that matters:
+#   1. Pool health. zed alerts on the transition; this catches a pool that
+#      was already degraded before any of this was installed.
+#   2. Scrub age. A scrub that silently stopped running means undetected bit
+#      rot, and nothing else in this repo would ever notice.
+#   3. Failed units, since PVE has no failed-unit watcher of its own.
+#
+# Exits nonzero on a problem so the OnFailure drop-in raises the ntfy alert;
+# it owns the healthchecks side only.
+set -uo pipefail
+
+SCRUB_MAX_DAYS={{ pve_scrub_max_age_days | default(45) }}
+
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-healthchecks.env ]] && . /etc/homelab-healthchecks.env
+
+problems=""
+
+status=$(zpool status -x 2>&1)
+if [[ "$status" != "all pools are healthy" ]]; then
+    problems+=$'\n'"zpool status -x: ${status}"
+fi
+
+# `zpool status` prints scrub state per pool. "scrub repaired ... on <date>"
+# for a completed one, "scrub in progress" while running.
+now=$(date +%s)
+while read -r pool; do
+    [[ -n "$pool" ]] || continue
+    line=$(zpool status "$pool" 2>/dev/null | grep -E '^\s*scan:' || true)
+    if [[ "$line" == *"in progress"* ]]; then
+        continue
+    fi
+    if [[ "$line" != *"scrub repaired"* ]]; then
+        problems+=$'\n'"${pool}: no completed scrub on record (${line:-no scan line})"
+        continue
+    fi
+    # Trailing date, e.g. "... on Sun Jul 12 00:24:11 2026"
+    when=${line#*" on "}
+    epoch=$(date -d "$when" +%s 2>/dev/null || echo 0)
+    if [[ "$epoch" == 0 ]]; then
+        problems+=$'\n'"${pool}: could not parse scrub date from: ${line}"
+        continue
+    fi
+    age_d=$(( (now - epoch) / 86400 ))
+    if (( age_d > SCRUB_MAX_DAYS )); then
+        problems+=$'\n'"${pool}: last scrub was ${age_d} days ago (limit ${SCRUB_MAX_DAYS}); check /etc/cron.d/zfsutils-linux"
+    else
+        echo "${pool}: scrub ${age_d}d ago, pool healthy"
+    fi
+done < <(zpool list -H -o name 2>/dev/null)
+
+failed=$(systemctl --failed --plain --no-legend 2>/dev/null | grep -v '^notify-failure@' || true)
+if [[ -n "$failed" ]]; then
+    problems+=$'\n'"failed units:"$'\n'"${failed}"
+fi
+
+if [[ -n "$problems" ]]; then
+    echo "PVE health problems:${problems}" >&2
+    /usr/local/sbin/hc-ping.sh "${HC_PING_PVE:-}" fail
+    exit 1
+fi
+
+/usr/local/sbin/hc-ping.sh "${HC_PING_PVE:-}"
+echo "PVE healthy"
+exit 0

@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# pve-diskguard.sh — ntfy alarm when a ZFS pool or the PVE root/vz filesystem
+# crosses a capacity threshold. This is the guard that would have caught the
+# 2026-07-20 rpool-full outage BEFORE svc-download froze.
+#
+# Promoted out of contrib/ and into this role: as a hand-installed script it
+# could stop running and nobody would know, which is a poor property for the
+# thing whose entire job is to notice a slow problem early.
+#
+# Never exits nonzero for a push failure, but missing configuration fails.
+set -uo pipefail
+
+THRESH="${THRESH:-{{ pve_disk_threshold | default(80) }}}"
+: "${NTFY_URL:?set NTFY_URL in /etc/homelab-notify.env}"
+: "${NTFY_TOPIC:?set NTFY_TOPIC in /etc/homelab-notify.env}"
+topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC}}"
+host=$(hostname -s)
+
+STATE_DIR=/var/lib/homelab
+STATE="$STATE_DIR/diskguard.state"
+REALERT_SECS=$(( {{ alert_realert_hours | default(6) }} * 3600 ))
+mkdir -p "$STATE_DIR"
+
+over=""
+# ZFS pools first: thin zvols on a full pool freeze the guests writing to
+# them, which is the failure that actually happened.
+while read -r name cap; do
+    c=${cap%\%}
+    [[ "$c" =~ ^[0-9]+$ ]] || continue
+    [ "$c" -ge "$THRESH" ] && over+=$'\n'"zpool ${name} ${c}%"
+done < <(zpool list -H -o name,capacity 2>/dev/null)
+
+while read -r pct mount; do
+    p=${pct%\%}
+    [[ "$p" =~ ^[0-9]+$ ]] || continue
+    [ "$p" -ge "$THRESH" ] && over+=$'\n'"${mount} ${p}%"
+done < <(df -P / /var/lib/vz 2>/dev/null | tail -n +2 | awk '{print $5, $6}')
+
+auth=()
+[ -n "${NTFY_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+
+now=$(date +%s)
+prev_hash=""
+prev_alert=0
+if [[ -f "$STATE" ]]; then
+    read -r prev_hash prev_alert < "$STATE" || true
+    [[ "$prev_alert" =~ ^[0-9]+$ ]] || prev_alert=0
+fi
+
+if [ -z "$over" ]; then
+    if [[ -n "$prev_hash" && "$prev_hash" != "none" ]]; then
+        curl -fsS --max-time 10 "${auth[@]}" \
+            -H "Title: PVE disk recovered on ${host}" \
+            -H "Priority: default" -H "Tags: floppy_disk" \
+            -d "All pools and filesystems are back under ${THRESH}%." \
+            "${NTFY_URL}/${topic}" >/dev/null 2>&1 || true
+    fi
+    printf 'none %s\n' "$now" > "$STATE"
+    exit 0
+fi
+
+# Same dedupe contract as the VMs' disk-alert: a pool filling over days must
+# not produce 96 identical alerts per day.
+hash=$(printf '%s' "$over" | grep -oE '^[^ ]+ [^ ]+' | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
+if [[ "$hash" == "$prev_hash" ]] && (( now - prev_alert < REALERT_SECS )); then
+    exit 0
+fi
+
+curl -fsS --max-time 10 --retry 2 --retry-delay 5 "${auth[@]}" \
+    -H "Title: PVE disk alarm on ${host}" \
+    -H "Priority: urgent" \
+    -H "Tags: rotating_light,floppy_disk" \
+    -d "At/over ${THRESH}%:${over}" \
+    "${NTFY_URL}/${topic}" >/dev/null 2>&1 || \
+    logger -t pve-diskguard "ntfy push failed; over ${THRESH}%:${over}"
+
+printf '%s %s\n' "$hash" "$now" > "$STATE"
+exit 0

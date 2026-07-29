@@ -66,6 +66,39 @@
             msg: "Provisioning failed — see above."
           tags: [always]
 
+# ---------- Hypervisor monitoring ----------
+# Runs early and is allowed to fail without stopping the deploy: this play
+# only installs watchers. A hypervisor whose monitoring did not converge is
+# worth an alert, but it is not a reason to refuse to configure the guests
+# that are otherwise working.
+- name: Monitor the PVE host
+  hosts: pve_mon_hosts
+  gather_facts: true
+  any_errors_fatal: false
+  tasks:
+    - name: PVE monitoring block
+      block:
+        - name: Run PVE monitoring role
+          ansible.builtin.include_role:
+            name: pve_mon
+          tags: [always]
+      rescue:
+        - name: Notify PVE monitoring failure
+          ansible.builtin.include_role:
+            name: notify
+            apply:
+              tags: [always]
+          tags: [always]
+          vars:
+            ntfy_title: "homelab deploy FAILED (PVE monitoring)"
+            ntfy_result: >-
+              PVE monitoring did not converge on {{ inventory_hostname }}.
+              Guests are unaffected, but hypervisor disk/SMART/ZFS alerting
+              may be stale.
+            ntfy_priority: high
+            ntfy_topic_override: "{{ ntfy_alert_topic }}"
+            ntfy_tags: rotating_light
+
 # ---------- Shared guest bootstrap, packages and NFS ----------
 - name: Prepare service VMs
   hosts: service_vms

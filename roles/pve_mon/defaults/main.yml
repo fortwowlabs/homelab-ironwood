@@ -1,0 +1,14 @@
+---
+# Capacity threshold for the PVE guard. Lower than the VMs' 85% because a
+# full ZFS pool does not degrade gracefully: thin zvols on a full pool freeze
+# the guests writing to them, which is exactly how the 2026-07-20 outage went.
+pve_disk_threshold: 80
+# Days since the last completed scrub before the daily health check fails.
+# PVE scrubs on the second Sunday of each month via /etc/cron.d/zfsutils-linux,
+# so 45 days means a scrub has been skipped entirely rather than merely run
+# late.
+pve_scrub_max_age_days: 45
+# Units on the PVE host that get an OnFailure alert.
+pve_onfailure_units:
+  - homelab-diskguard.service
+  - homelab-pve-health.service

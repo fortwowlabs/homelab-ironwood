@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# zed-ntfy.sh — deliver ZFS event daemon notifications to ntfy.
+#
+# zed already watches for pool degradation, checksum errors, device removal
+# and scrub results. On a stock PVE it sends them to local root mail, which
+# on this box goes into /var/mail and is read by nobody, ever. That is the
+# entire gap this closes: the detection already worked, the delivery did not.
+#
+# zed invokes ZED_EMAIL_PROG through `eval` as:
+#     zed-ntfy.sh -s '<subject>' <address>
+# with the event body on stdin (zfs 2.2.x, zed-functions.sh:zed_notify_email).
+# zed redirects both stdout and stderr to /dev/null and records only the exit
+# code, so there is nothing to debug here but the return value — hence the
+# logger calls, which land in the journal where they can actually be read.
+set -uo pipefail
+
+subject="ZFS event"
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        -s) subject="${2:-ZFS event}"; shift 2 ;;
+        *)  shift ;;                 # the address argument; ntfy is the target
+    esac
+done
+
+body=$(cat)
+[[ -n "$body" ]] || body="(no event detail)"
+
+# Sourced here, not supplied by an EnvironmentFile: zed is a long-running
+# daemon and invokes this hook from ITS environment, which knows nothing
+# about the notify credentials. Relying on the unit's EnvironmentFile is the
+# subtle way to build a disk-fault alert that has never once fired.
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-notify.env ]] && . /etc/homelab-notify.env
+
+host=$(hostname -s)
+topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC:-homelab-alerts}}"
+: "${NTFY_URL:?/etc/homelab-notify.env is missing or unreadable}"
+AUTH=()
+if [[ -n "${NTFY_TOKEN:-}" ]]; then
+    AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+fi
+
+logger -p daemon.err -t zed-ntfy "${subject}"
+
+# A pool event is the most expensive thing on this host to ignore, so it goes
+# out at urgent even when it turns out to be a completed scrub: zed's own
+# ZED_NOTIFY_INTERVAL_SECS already suppresses repeats.
+curl -fsS --max-time 15 --retry 3 --retry-delay 5 -X POST \
+    "${AUTH[@]}" \
+    -H "Title: ZFS on ${host}: ${subject}" \
+    -H "Priority: urgent" \
+    -H "Tags: rotating_light,floppy_disk" \
+    -d "$(printf '%s' "$body" | tail -c 3000)" \
+    "${NTFY_URL}/${topic}" >/dev/null 2>&1 \
+    || logger -p daemon.err -t zed-ntfy "ntfy push FAILED for: ${subject}"
+
+exit 0

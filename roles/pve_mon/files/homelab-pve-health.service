@@ -1,0 +1,9 @@
+[Unit]
+Description=Daily PVE health report (pools, scrub age, failed units)
+After=network-online.target zfs.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+EnvironmentFile=/etc/homelab-healthchecks.env
+ExecStart=/usr/local/sbin/pve-health.sh
