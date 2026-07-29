@@ -336,3 +336,15 @@ sso_protected_services:
   # GUI has been an open item for exactly this; Prometheus has no auth at all.
   - syncthing
   - prometheus
+  # SearXNG has no auth of its own and its settings deliberately disable the
+  # per-IP limiter and bot detection — correct for the socket-proxy path,
+  # where every request arrives from 10.77.0.2 and the limiter would class the
+  # whole estate as one abusive client, but the Caddy vhost is a second path
+  # that reasoning never covered. Unprotected, it is an open search relay
+  # whose queries egress on the Mullvad subscription, so the exit IP earns the
+  # bans and searches start returning nothing.
+  #
+  # Open WebUI is unaffected: it dials svc-download's IP:port directly
+  # (SEARXNG_QUERY_URL in infra-apps.yml), not the proxied hostname, so this
+  # gates browser use without touching the machine-to-machine path.
+  - searxng

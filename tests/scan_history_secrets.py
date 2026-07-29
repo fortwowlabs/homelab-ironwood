@@ -24,6 +24,11 @@ NON_SECRET_VAULT_KEYS = {
     "vault_re",
     "vault_ref_re",
     "vault_refs",
+    # tests/validate_sso.py's regex for "a Jinja expression that really renders
+    # a vault_ variable", as opposed to prose mentioning one. Same story as the
+    # three above: the rename was tried first and does not help, because the
+    # blob committed under the old name stays reachable from this branch.
+    "vault_expression_re",
 }
 SECRET_KEY_PATTERN = (
     r"(?:vault_[a-z0-9_]+|[a-z0-9_.-]*(?:password|passwd|token_secret|"

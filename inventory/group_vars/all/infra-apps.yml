@@ -461,6 +461,19 @@ infra_secret_apps:
       # Signs session JWTs. Must stay stable: rotating it logs everyone out.
       WEBUI_SECRET_KEY: "{{ vault_openwebui_secret_key }}"
       ENABLE_PERSISTENT_CONFIG: "false"
+      # Open WebUI keeps its own accounts rather than sitting behind Authelia
+      # (see the `chat` entry in main.yml), so these two are the whole of its
+      # front door and they must be declared here rather than clicked in the
+      # admin UI. ENABLE_PERSISTENT_CONFIG=false above means the environment
+      # is re-read as authoritative on every container start: a signup toggle
+      # set in the UI is silently discarded on the next restart, and upstream
+      # defaults ENABLE_SIGNUP to true. Omitting it therefore reopens public
+      # registration on a podman auto-update or a reboot, on a host that will
+      # be wired to the GPU box.
+      ENABLE_SIGNUP: "false"
+      # Belt and braces: if signup is ever turned back on deliberately, a new
+      # account lands inert instead of usable until an admin promotes it.
+      DEFAULT_USER_ROLE: pending
       ENABLE_OPENAI_API: "false"
       ENABLE_OLLAMA_API: "{{ 'true' if gpu_host_online | bool else 'false' }}"
       OLLAMA_BASE_URL: "http://{{ gpu_host_ip }}:11434"
