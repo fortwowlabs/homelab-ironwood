@@ -92,4 +92,8 @@ podman exec {{ name | quote }} rcon-cli save-on >/dev/null 2>&1 || true
 
 # 4. Retention
 find "$DB_DEST" "$APP_DEST" -type f -mtime +{{ backup_retention_days | default(14) }} -delete
+# Completion marker — see backup-infra-appdata.sh.j2. `set -e` means this line
+# is unreachable unless every dump and archive above succeeded, so its mtime is
+# the only thing here that actually says "the backup finished".
+date -u +%s > "/srv/backups/{{ inventory_hostname }}/.backup-complete"
 logger -t backup-media "backup OK ($STAMP)"

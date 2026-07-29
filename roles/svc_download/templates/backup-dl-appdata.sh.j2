@@ -59,4 +59,9 @@ for app in{% for backup_path in download_backup_paths | unique %} {{ backup_path
         runuser -u homelab -- tar -C /srv/appdata -czf "$DEST/${app}-${STAMP}.tar.gz" "$app"
 done
 runuser -u homelab -- find "$DEST" -name '*.tar.gz' -mtime +{{ backup_retention_days | default(14) }} -delete
+# Completion marker — see backup-infra-appdata.sh.j2 for why artifact mtimes
+# are not enough. Written through runuser|tee because every other write in this
+# script goes out as homelab: the NFS export is root-squashed, so a root
+# redirect here would fail where the tars above succeed.
+date -u +%s | runuser -u homelab -- tee "$DEST/.backup-complete" >/dev/null
 logger -t backup-dl "appdata backup OK ($STAMP)"

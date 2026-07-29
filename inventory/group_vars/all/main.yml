@@ -178,11 +178,19 @@ alert_realert_hours: 6
 # vault_hc_ping_* block in inventory/group_vars/all_vault.yml.example for the
 # one-time account setup. Empty UUIDs are safe — the ping is skipped.
 healthchecks_base_url: "https://hc-ping.com"
-# How stale the newest backup artifact may be before homelab-backups-fresh
-# treats a host as failed. The three backup timers run 03:09–03:40 and the
+# How stale a host's last COMPLETED backup may be before homelab-backups-fresh
+# treats it as failed. The three backup timers run 03:09–03:40 and the
 # checker runs at 04:40, so 26h tolerates one missed night's window without
 # tolerating a silently-stopped backup.
 backup_max_age_hours: 26
+
+# Smallest a host's largest backup artifact may be before it is treated as
+# junk. A failed `pg_dumpall | gzip` writes a structurally valid gzip of about
+# twenty bytes that passes `gzip -t`, so "non-empty" is not a strong enough
+# test on its own. Any real archive in this estate is orders of magnitude
+# larger than this, so the floor is deliberately low: it exists to catch
+# degenerate output, not to assert a plausible size.
+backup_min_artifact_bytes: 1024
 
 # Days of remaining certificate life below which homelab-certwatch fails (and
 # therefore alerts). The wildcard renews at 30 days left, so 21 means "two

@@ -87,4 +87,10 @@ podman exec {{ db | quote }} sh -c \
 # 3. Retention (tars and dumps; find recurses into db/).
 find "$DEST" \( -name '*.tar.gz' -o -name '*.sql.gz' \) \
     -mtime +{{ backup_retention_days | default(14) }} -delete
+# Completion marker. Reached only if every tar and every dump above succeeded,
+# because `set -e` aborts before this line otherwise. backups-fresh.sh reads
+# its mtime rather than guessing from artifact ages: the newest .tar.gz being
+# recent proves something was written, not that the run finished, so a backup
+# that died partway still left a fresh file and reported success.
+date -u +%s > "$DEST/.backup-complete"
 logger -t backup-infra "backup OK ($STAMP)"

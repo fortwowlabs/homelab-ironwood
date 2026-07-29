@@ -20,6 +20,7 @@ set -uo pipefail
 
 BACKUP_ROOT=/srv/backups
 MAX_AGE_HOURS={{ backup_max_age_hours | default(26) }}
+MIN_ARTIFACT_BYTES={{ backup_min_artifact_bytes | default(1024) }}
 HOSTS=({% for h in groups['service_vms'] | sort %}{{ h | quote }} {% endfor %})
 
 # shellcheck source=/dev/null
@@ -47,23 +48,46 @@ for host in "${HOSTS[@]}"; do
         stale+=$'\n'"${host}: no backup directory at ${dir}"
         continue
     fi
-    # Recursive on purpose: svc-media files live under appdata/ and romm-db/
-    # rather than at the top level, so a depth-1 glob would call it stale
-    # every single night.
-    newest=$(find "$dir" -type f -name '*.gz' -printf '%T@ %p\n' 2>/dev/null \
-                 | sort -rn | head -1)
-    if [[ -z "$newest" ]]; then
-        stale+=$'\n'"${host}: no backup artifacts under ${dir}"
+    # Recency comes from the completion marker, not from artifact mtimes. Each
+    # backup script writes it as its last action under `set -e`, so it is
+    # reachable only when every archive and dump in that run succeeded. The
+    # newest .gz being recent proves only that something was written: a run
+    # that tarred four of twenty apps and then hit ENOSPC still leaves a fresh
+    # file, and this check used to call that OK every night indefinitely.
+    marker="${dir}/.backup-complete"
+    if [[ ! -f "$marker" ]]; then
+        stale+=$'\n'"${host}: no completion marker at ${marker} — no backup run has finished successfully"
         continue
     fi
-    epoch=${newest%% *}
-    path=${newest#* }
-    age_h=$(( ( $(date +%s) - ${epoch%.*} ) / 3600 ))
-    if (( age_h > MAX_AGE_HOURS )); then
-        stale+=$'\n'"${host}: newest backup is ${age_h}h old (limit ${MAX_AGE_HOURS}h): ${path}"
-    else
-        echo "${host}: OK, newest backup ${age_h}h old"
+    marker_epoch=$(stat -c %Y "$marker" 2>/dev/null || echo 0)
+    marker_age_h=$(( ( $(date +%s) - marker_epoch ) / 3600 ))
+    if (( marker_age_h > MAX_AGE_HOURS )); then
+        stale+=$'\n'"${host}: last completed backup was ${marker_age_h}h ago (limit ${MAX_AGE_HOURS}h)"
+        continue
     fi
+
+    # The marker says the run finished; this says it produced something worth
+    # keeping. -size +0c excludes zero-byte files, and the byte floor catches
+    # the case a size test alone misses: a failed `pg_dumpall | gzip` still
+    # writes a structurally valid ~20-byte gzip that `gzip -t` accepts.
+    #
+    # Deliberately no `gzip -t`/`tar -tzf` here. Archive integrity is already
+    # gated per host in each role's verify.yml, and decompressing multi-gigabyte
+    # media archives over NFS every night would risk exceeding this unit's
+    # start timeout — turning a working check into a nightly false alarm.
+    newest=$(find "$dir" -type f -name '*.gz' -size +0c -printf '%s %p\n' 2>/dev/null \
+                 | sort -rn | head -1)
+    if [[ -z "$newest" ]]; then
+        stale+=$'\n'"${host}: no non-empty backup artifacts under ${dir}"
+        continue
+    fi
+    bytes=${newest%% *}
+    path=${newest#* }
+    if (( bytes < MIN_ARTIFACT_BYTES )); then
+        stale+=$'\n'"${host}: largest artifact is only ${bytes} bytes (floor ${MIN_ARTIFACT_BYTES}): ${path}"
+        continue
+    fi
+    echo "${host}: OK, last completed ${marker_age_h}h ago, largest artifact ${bytes} bytes"
 done
 
 if [[ -n "$stale" ]]; then
