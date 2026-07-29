@@ -42,6 +42,15 @@ The protected set is `sso_protected_services` in
 Caddy vhost, because that would leave the service unprotected while looking
 configured.
 
+Who may reach them is a separate question from which are protected. The
+accounts are `authelia_users` in `roles/svc_infra/defaults/main.yml` — names
+and groups in the clear, hashes in the vault — and `access_control` in
+`authelia-configuration.yml.j2` denies by default, granting only
+`group:admins`. An account in any other group authenticates and then gets a
+403. Opening a service to a group is a rule with a `domain:` list; the same
+test fails the build if a rule names a group nobody is in, or if no rule
+grants `admins` (which would lock everyone out of everything at once).
+
 Two things worth knowing before debugging anything here:
 
 - **Auth is applied at the Caddy vhost only.** Every protected service is still

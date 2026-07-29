@@ -13,11 +13,21 @@
 # secret. This template only joins that list to the hashes.
 #
 # vault_authelia_password_hashes maps each name to a PHC string
-# ("$argon2id$v=19$m=65536,t=3,p=4$..."), NOT the plaintext. Generate one with:
+# ("$argon2id$v=19$m=65536,t=3,p=4$..."), NOT the plaintext. Generate one on
+# svc-infra, which is where podman and this exact image already are — the
+# workstation has neither a container runtime nor argon2-cffi in its venv, so
+# the bare `podman run` spelling in the docs cannot be run there:
 #
-#   podman run --rm ghcr.io/authelia/authelia@sha256:1b363e9279e742397966333f\
-# 364e0876ae02bf5c876de73e83af6d48c57ff51b \
-#     authelia crypto hash generate argon2 --password '<password>'
+#   ssh -t straderb@<svc-infra> 'cd /tmp && sudo runuser -u homelab -- \
+#     env XDG_RUNTIME_DIR=/run/user/10001 podman run --rm -it \
+#     ghcr.io/authelia/authelia@sha256:1b363e9279e742397966333f364e0876ae02\
+# bf5c876de73e83af6d48c57ff51b authelia crypto hash generate argon2'
+#
+# It prompts for the password. Prefer that over `--password '<pw>'`: on these
+# hosts every rootless container runs as the same uid, so a plaintext in argv
+# is readable from /proc by any sibling container for as long as it runs (the
+# same exposure that ruled out --pid=host for Glances), and it lands in shell
+# history besides.
 #
 # The hashes live in YAML values rather than systemd Environment= lines, so
 # the $ signs need no escaping. A plaintext cannot be recovered from its hash;

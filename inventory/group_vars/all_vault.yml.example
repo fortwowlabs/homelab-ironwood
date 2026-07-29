@@ -206,10 +206,22 @@ vault_authelia_jwt_secret:             "REPLACE_openssl_rand_hex_32"   # openssl
 # Environment= line, so their $ signs need no escaping — single-quote them.
 #
 # Generate with Authelia's own CLI (argon2id, its defaults: t=3, m=65536,
-# p=4, 32-byte hash, 16-byte salt):
-#   podman run --rm ghcr.io/authelia/authelia@sha256:1b363e9279e742397966333f364e0876ae02bf5c876de73e83af6d48c57ff51b \
-#     authelia crypto hash generate argon2 --password '<password>'
-# or non-interactively with argon2-cffi, matching those parameters:
+# p=4, 32-byte hash, 16-byte salt). Run it ON svc-infra — the workstation has
+# no container runtime and no argon2-cffi in its venv, so neither spelling
+# that used to be documented here actually runs from the repo root:
+#
+#   ssh -t straderb@192.168.1.32 'cd /tmp && sudo runuser -u homelab -- \
+#     env XDG_RUNTIME_DIR=/run/user/10001 podman run --rm -it \
+#     ghcr.io/authelia/authelia@sha256:1b363e9279e742397966333f364e0876ae02bf5c876de73e83af6d48c57ff51b \
+#     authelia crypto hash generate argon2'
+#
+# It prompts for the password rather than taking it as an argument, which is
+# the point: every rootless container on that host runs as the same uid, so a
+# plaintext in argv is readable from /proc by any sibling container while it
+# runs, and it lands in shell history too. Verified working 2026-07-29.
+#
+# The alternative, if you would rather not send the password over SSH at all,
+# is a throwaway venv with argon2-cffi matching those same parameters:
 #   python -c 'import secrets;from argon2 import PasswordHasher,Type;\
 #   p=secrets.token_urlsafe(24);\
 #   print(p, PasswordHasher(time_cost=3,memory_cost=65536,parallelism=4,\
