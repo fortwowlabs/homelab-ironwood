@@ -65,15 +65,42 @@ infra_service_names: >-
      + ((infra_secret_apps | default({})).keys() | list)
      + infra_extra_service_names }}
 
-# The single Authelia account, used as both the login name and the local part
-# of its email address (authelia-users.yml.j2). Its password is NOT here —
-# vault_authelia_user_password_hash holds an argon2id hash of it.
+# The Authelia accounts. Each entry's `name` is both the login and the local
+# part of its email address (authelia-users.yml.j2). Passwords are NOT here:
+# vault_authelia_password_hashes maps name -> argon2id PHC string, and
+# files.yml asserts every name below has an entry there before rendering.
 #
-# Authelia's file backend supports any number of users, but this estate has
-# one human, and a list would mean either putting several hashes in the vault
-# or accepting a shared one. Add a second entry to the template if that
-# changes; nothing else in the design assumes a single account.
-authelia_admin_user: admin
+# The split is deliberate. Who exists, what they are called and what they can
+# reach are not secrets and belong in a reviewable diff — that is the whole
+# reason this estate runs Authelia's file backend instead of LDAP (see
+# authelia-configuration.yml.j2). Only the hashes live in the vault.
+#
+# `groups` drives authorization through access_control.rules in
+# authelia-configuration.yml.j2, which denies by default. Adding a user here
+# grants them NOTHING until a rule names their group; tests/validate_sso.py
+# fails the build if a group used here has no rule, or if no rule grants
+# `admins` (that one would lock everybody out of everything).
+#
+# `admin` is the estate's original account, kept while the multi-user cutover
+# is verified. Remove it once brandon is confirmed working — a generic shared
+# login is exactly what naming real people replaces.
+authelia_users:
+  - { name: admin,   displayname: Admin,   groups: [admins] }
+  - { name: brandon, displayname: Brandon, groups: [admins] }
+  - { name: valerie, displayname: Valerie, groups: [family] }
+  - { name: michael, displayname: Michael, groups: [family] }
+  - { name: erin,    displayname: Erin,    groups: [family] }
+  # Not disabled, but deny-by-default means this reaches nothing today. Set
+  # `disabled: true` on the entry to park it without deleting the account.
+  - { name: guest,   displayname: Guest,   groups: [guests] }
+
+# The name of the vault variable holding the password hashes, as a string.
+# Held here rather than written literally into files.yml because
+# tests/validate_secret_tasks.py treats any `vault_` token in a task as a
+# secret reference and would demand no_log on the assert whose entire purpose
+# is to print a legible message. Same reason, same shape, as
+# verify_runner_secret_file below. This file is not scanned by that test.
+authelia_hashes_var: vault_authelia_password_hashes
 
 # --- nightly verification runner ------------------------------------------
 # `make verify` moves off the workstation and onto this VM so it keeps

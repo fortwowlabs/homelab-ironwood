@@ -36,13 +36,36 @@ authentication_backend:
     password:
       algorithm: 'argon2'
 
-# Phase 1: the portal is deployed but nothing is protected — no Caddy vhost
-# carries forward_auth yet. default_policy therefore has no effect on any
-# request today; it becomes live the moment sso_protected_services lands.
+# Authorization. This is what makes an Authelia account mean something
+# narrower than "everything" — authentication alone would not.
+#
+# default_policy is 'deny', so a rule is required to reach anything. That is
+# the fail-closed direction: a group with no rule, or a typo in one, denies
+# access rather than silently granting it. The cost is that adding a user
+# grants them nothing until a rule names their group, which is the intended
+# trade — the previous 'one_factor' default handed every new account the full
+# set of protected services, including two remote shells.
+#
 # one_factor = password only. There is no second factor configured because
 # there is no SMTP in this estate to enrol one over.
+#
+# `family` and `guests` deliberately have no rule yet. Their members
+# authenticate successfully and then get a 403 on every protected vhost. The
+# services those accounts would actually want (Jellyfin, Immich, Seerr,
+# Nextcloud, Audiobookshelf) are not behind forward-auth at all — native and
+# mobile clients cannot follow a redirect to a login form, see
+# sso_protected_services in inventory/group_vars/all/main.yml. Opening a
+# service to them is a rule with a `domain:` list here, not a redesign.
+#
+# tests/validate_sso.py requires that some rule grants `admins`: without one
+# this file locks every account out of every protected service, and the only
+# way back in is the direct IP:port path.
 access_control:
-  default_policy: 'one_factor'
+  default_policy: 'deny'
+  rules:
+    - domain: '*.{{ service_domain }}'
+      subject: ['group:admins']
+      policy: 'one_factor'
 
 session:
   name: 'authelia_session'

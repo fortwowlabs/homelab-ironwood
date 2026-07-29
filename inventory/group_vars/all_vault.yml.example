@@ -191,12 +191,19 @@ vault_authelia_session_secret:         "REPLACE_openssl_rand_hex_32"   # openssl
 vault_authelia_storage_encryption_key: "REPLACE_openssl_rand_hex_32"   # openssl rand -hex 32
 vault_authelia_jwt_secret:             "REPLACE_openssl_rand_hex_32"   # openssl rand -hex 32
 
-# The portal login. Only the HASH is templated into users.yml; the plaintext
-# is kept beside it for the same reason as the vaultwarden pair above — it is
-# what you actually type at https://auth.<domain> and it cannot be recovered
-# from the hash. Unlike the three secrets above, the hash goes into a file
-# rather than an Environment= line, so its $ signs need no escaping —
-# single-quote it in YAML.
+# The portal logins — one hash per account, keyed by the account's `name` in
+# authelia_users (roles/svc_infra/defaults/main.yml). ONLY the hashes are
+# secret: who exists and what group they are in is reviewable configuration
+# and lives in git, not here.
+#
+# Every name in authelia_users needs a key in this dict. files.yml asserts
+# that before rendering and names the ones it cannot find, because a missing
+# key would otherwise produce an account that cannot log in on a deploy that
+# reported success. A value that is not an argon2 PHC string — a plaintext
+# password pasted in by mistake — counts as missing for the same reason.
+#
+# Unlike the three secrets above, these go into a file rather than an
+# Environment= line, so their $ signs need no escaping — single-quote them.
 #
 # Generate with Authelia's own CLI (argon2id, its defaults: t=3, m=65536,
 # p=4, 32-byte hash, 16-byte salt):
@@ -209,9 +216,29 @@ vault_authelia_jwt_secret:             "REPLACE_openssl_rand_hex_32"   # openssl
 #   hash_len=32,salt_len=16,type=Type.ID).hash(p))'
 #
 # Password changes belong HERE, not in the portal UI: Authelia rewrites
-# users.yml itself on a UI change and the next deploy would revert it.
-vault_authelia_user_password_hash: "REPLACE_argon2id_phc_hash"        # the hash
-vault_authelia_user_password_plaintext: "REPLACE_openssl_rand_hex_24"  # what you type at the portal
+# users.yml itself on a UI change and the next deploy would revert it. There
+# is no SMTP in this estate and password_reset is disabled, so there is no
+# self-service path either — every change is a vault edit plus a deploy.
+vault_authelia_password_hashes:
+  admin:   "REPLACE_argon2id_phc_hash"
+  brandon: "REPLACE_argon2id_phc_hash"
+  valerie: "REPLACE_argon2id_phc_hash"
+  michael: "REPLACE_argon2id_phc_hash"
+  erin:    "REPLACE_argon2id_phc_hash"
+  guest:   "REPLACE_argon2id_phc_hash"
+
+# The plaintexts, kept beside the hashes for the same reason as the
+# vaultwarden pair above: they are what gets typed at https://auth.<domain>
+# and cannot be recovered from a hash. Nothing templates these — they exist so
+# handing someone their password later does not mean resetting it. Vaultwarden
+# is the better place to share them from once the account is handed over.
+vault_authelia_password_plaintexts:
+  admin:   "REPLACE_openssl_rand_hex_24"
+  brandon: "REPLACE_openssl_rand_hex_24"
+  valerie: "REPLACE_openssl_rand_hex_24"
+  michael: "REPLACE_openssl_rand_hex_24"
+  erin:    "REPLACE_openssl_rand_hex_24"
+  guest:   "REPLACE_openssl_rand_hex_24"
 
 # --- healthchecks.io: the dead-man's switch ------------------------------
 # Everything else in this repo alerts by pushing to ntfy. That cannot tell

@@ -2,31 +2,47 @@
 # /opt/homelab/appdata/authelia/users.yml  ->  /config/users.yml
 # RENDERED from roles/svc_infra/templates/authelia-users.yml.j2.
 #
-# This file carries the account's argon2id password hash, so unlike
+# This file carries every account's argon2id password hash, so unlike
 # authelia-configuration.yml.j2 its render task is no_log/diff:false and the
 # file is written 0600 — tests/validate_secret_tasks.py keys off the vault_
 # reference below and will fail the build if that task loses either.
 #
-# vault_authelia_user_password_hash holds a PHC string
-# ("$argon2id$v=19$m=65536,t=3,p=4$..."), NOT the plaintext. Generate it with:
+# The roster (names, display names, groups) is NOT here — it lives in
+# authelia_users in roles/svc_infra/defaults/main.yml, in the clear, because
+# who exists and what they can reach is reviewable configuration rather than a
+# secret. This template only joins that list to the hashes.
+#
+# vault_authelia_password_hashes maps each name to a PHC string
+# ("$argon2id$v=19$m=65536,t=3,p=4$..."), NOT the plaintext. Generate one with:
 #
 #   podman run --rm ghcr.io/authelia/authelia@sha256:1b363e9279e742397966333f\
 # 364e0876ae02bf5c876de73e83af6d48c57ff51b \
 #     authelia crypto hash generate argon2 --password '<password>'
 #
-# It lives in a YAML value rather than a systemd Environment= line, so the $
-# signs need no escaping. The plaintext cannot be recovered from the hash, so
-# it is kept beside it in the vault as vault_authelia_user_password_plaintext
-# (the same pairing as vault_vaultwarden_admin_token_plaintext).
+# The hashes live in YAML values rather than systemd Environment= lines, so
+# the $ signs need no escaping. A plaintext cannot be recovered from its hash;
+# there is no SMTP here and password_reset is disabled, so changing anyone's
+# password means editing the vault and re-deploying, not a self-service reset.
+#
+# files.yml asserts every authelia_users name has a hash BEFORE this renders.
+# Without that guard a missing key yields an empty password field, which
+# produces an account that cannot be logged into while the deploy reports
+# success — the fail-open direction.
 #
 # Authelia REWRITES this file itself when a password is changed through the
-# UI, which would then be reverted by the next deploy. Change the password by
+# UI, which would then be reverted by the next deploy. Change a password by
 # regenerating the hash into the vault instead.
 users:
-  {{ authelia_admin_user }}:
-    disabled: false
-    displayname: '{{ authelia_admin_user }}'
-    password: '{{ vault_authelia_user_password_hash }}'
-    email: '{{ authelia_admin_user }}@{{ service_domain }}'
+{% for user in authelia_users %}
+  {{ user.name }}:
+{# Plain Jinja rather than `| bool | lower`: the Ansible-only filters make
+   this template impossible to render in an offline test. #}
+    disabled: {{ 'true' if user.disabled | default(false) else 'false' }}
+    displayname: '{{ user.displayname | default(user.name) }}'
+    password: '{{ vault_authelia_password_hashes[user.name] }}'
+    email: '{{ user.name }}@{{ service_domain }}'
     groups:
-      - 'admins'
+{% for group in user.groups %}
+      - '{{ group }}'
+{% endfor %}
+{% endfor %}

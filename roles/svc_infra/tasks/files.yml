@@ -719,8 +719,50 @@
     mode: "0644"
   register: infra_authelia_config
 
-# no_log/diff:false + 0600: this template embeds the account's password hash.
-# tests/validate_secret_tasks.py fails the build if either is dropped.
+# The roster lives in git (authelia_users) and the hashes live in the vault,
+# so the two can drift: adding a person without adding their hash renders an
+# empty password field, which Authelia accepts. The result is an account that
+# can never log in, on a deploy that reported success — fail-open.
+#
+# Split across two tasks on purpose. The fact touches
+# vault_authelia_password_hashes and so must be no_log, which would also
+# suppress the failure message; the assert below reads only the NAME list the
+# fact produced, carries no vault_ reference, and therefore prints. This is
+# the same reason verify_runner_secret_file is held in a variable rather than
+# written literally (see roles/svc_infra/defaults/main.yml).
+#
+# A hash that is present but is not an argon2 PHC string counts as missing:
+# pasting a plaintext password into the vault is an easy mistake and the
+# failure it causes at login is far less legible than this one.
+- name: Determine which Authelia accounts have no usable password hash
+  ansible.builtin.set_fact:
+    infra_authelia_users_without_hash: >-
+      {{ (authelia_users | map(attribute='name') | list)
+         | difference((vault_authelia_password_hashes | default({}))
+                      | dict2items
+                      | selectattr('value', 'string')
+                      | selectattr('value', 'match', '\$argon2')
+                      | map(attribute='key') | list)
+         | sort }}
+  no_log: true
+  diff: false
+
+- name: Require an argon2 password hash for every Authelia account
+  ansible.builtin.assert:
+    that:
+      - infra_authelia_users_without_hash | length == 0
+    fail_msg: >-
+      No usable argon2 hash in {{ authelia_hashes_var }} for:
+      {{ infra_authelia_users_without_hash | join(', ') }}.
+      Add one per name with `make vault-edit` — the generating command is in
+      roles/svc_infra/templates/authelia-users.yml.j2. Rendering without them
+      would create accounts that cannot log in.
+    success_msg: >-
+      All {{ authelia_users | length }} Authelia accounts have a password hash.
+    quiet: true
+
+# no_log/diff:false + 0600: this template embeds every account's password
+# hash. tests/validate_secret_tasks.py fails the build if either is dropped.
 - name: Render the Authelia users file
   ansible.builtin.template:
     src: authelia-users.yml.j2

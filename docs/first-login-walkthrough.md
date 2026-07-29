@@ -43,11 +43,17 @@ Do this before anything else. Eleven services sit behind a single sign-on
 gate, and logging in here once means none of them prompt again for the next
 12 hours — otherwise you get bounced to the portal partway through Phase 4.
 
-**https://auth.fortwow.dev** — user `admin`, password in the vault as
-`vault_authelia_user_password_plaintext`.
+**https://auth.fortwow.dev** — user `brandon`, password in the vault under
+`vault_authelia_password_plaintexts`.
 
 One login covers all of them: the session cookie is issued for the whole
 `fortwow.dev` domain rather than per host.
+
+Six accounts exist (`authelia_users` in `roles/svc_infra/defaults/main.yml`)
+but authorization is deny-by-default, and only the `admins` group has a rule.
+`brandon` and the legacy `admin` are in it; `valerie`, `michael`, `erin` and
+`guest` authenticate successfully and then get a **403** on every service in
+the table below. That is deliberate, not a bug — see §0.3.
 
 | Behind SSO | Why |
 |---|---|
@@ -60,10 +66,28 @@ ntfy and Vaultwarden, because their native and mobile apps cannot follow a
 browser redirect to a login form; plus Homepage, IT Tools, Glances, Bambuddy,
 Shelfmark and the Cockpit vhosts.
 
-Changing the password: regenerate the hash into the vault
-(`vault_authelia_user_password_hash`) and redeploy. Changing it in the portal
-UI works until the next deploy reverts it — Authelia rewrites its own users
-file, and this repo rewrites it back.
+Changing a password: regenerate that account's hash into
+`vault_authelia_password_hashes` and redeploy. Changing it in the portal UI
+works until the next deploy reverts it — Authelia rewrites its own users file,
+and this repo rewrites it back. There is no self-service reset: no SMTP here,
+and `password_reset` is disabled.
+
+### 0.3 The family and guest accounts reach nothing yet ⚠️
+
+`valerie`, `michael`, `erin` and `guest` can log in and are then denied
+everything. Worth being precise about why, because it looks broken:
+
+Nothing in the SSO set is something they would want. The eleven protected
+services are the download stack, two remote shells, Syncthing and Prometheus.
+The services a household actually uses — Jellyfin, Immich, Seerr, Nextcloud,
+Audiobookshelf — are deliberately *outside* SSO because native and mobile
+clients cannot follow a redirect to a login form, so those accounts are not
+what gates them; each of those apps has its own users.
+
+So these four accounts are scaffolding: they exist, they are named, and their
+passwords are managed the same way as yours. Granting one of them something
+is a rule in `access_control` naming `group:family`, and
+`tests/validate_sso.py` will fail the build if that group is misspelled.
 
 If SSO ever misbehaves, every protected service is still reachable directly at
 its `IP:port` (listed in Phase 4 and Phase 6) — only the Caddy hostname is

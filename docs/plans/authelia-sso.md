@@ -31,6 +31,23 @@
 > secrets live in the vault as five vars, not four — the plaintext password is
 > stored beside its hash, following the `vault_vaultwarden_admin_token`
 > precedent, because it cannot be recovered from the hash.
+>
+> **SUPERSEDED IN PART, 2026-07-29 — the single-account design is gone.**
+> The "Authentication" and `users.yml.j2` sections below describe one hardcoded
+> account (`authelia_admin_user` + `vault_authelia_user_password_hash`). That
+> shape has been replaced by six named accounts:
+>
+> - `authelia_users` in `roles/svc_infra/defaults/main.yml` holds the roster —
+>   names, display names, groups — in the clear, because who exists and what
+>   they can reach is reviewable configuration. Only the hashes are secret, in
+>   `vault_authelia_password_hashes` keyed by name.
+> - `access_control` moved from `default_policy: 'one_factor'` with no rules to
+>   `default_policy: 'deny'` plus a rule granting `group:admins`. The old
+>   default handed **every** account the full set of protected services,
+>   including both remote shells, the moment it was created. Deny-by-default
+>   makes a new account inert until a rule names its group.
+> - This document's premise that "this estate has one human" no longer holds,
+>   which is the whole reason the change was needed.
 
 ## Context
 
