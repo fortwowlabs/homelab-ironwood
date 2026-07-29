@@ -103,8 +103,10 @@ symptoms.
 5. Run `make preflight`, `make verify`, the affected backup unit, and then the
    disruptive drill.
 
-The VM disk-alert timer is managed by Ansible. The PVE disk guard is installed
-manually from `contrib/`; test both alert paths after recovery.
+Both disk guards are managed by Ansible now — `homelab-diskalert.timer` on the
+VMs, `homelab-diskguard.timer` on the hypervisor (`make pve`). The PVE guard
+trips at 80%, lower than the VMs' 85%, because a full pool freezes every guest
+writing to it. Test both alert paths after recovery.
 
 ## NFS or backup failure
 

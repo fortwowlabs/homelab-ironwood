@@ -77,6 +77,35 @@ broker that blocked Django migrations for a day, and a service still accepting
 its upstream default credentials. When a change is supposed to make something
 work, check that specific thing, by using it.
 
+### Alerting counts as an application
+
+The same rule applies to the alert paths themselves, and it is easier to get
+wrong here than anywhere else, because a broken alerter looks exactly like a
+healthy estate. Do not conclude that a watcher works because its timer is
+active or its script exits 0 — publish an alert and read it back out of ntfy:
+
+```bash
+curl -s "http://<svc-media>:8080/homelab-alerts/json?poll=1&since=10m"
+```
+
+(`since` accepts `24h`/`168h`/`all`, not `7d`. Retention is ~12h and in
+memory, so poll promptly; the journals are the durable record.)
+
+Three real bugs from the unattended-alerting work, all of which passed every
+offline gate and every liveness check:
+
+- The zed and smartd hooks read `NTFY_*` from their unit's `EnvironmentFile`.
+  Those daemons are long-lived and exec hooks from *their own* environment, so
+  the variables were unset and the hook died on `set -u`. Every disk-fault
+  alert would have produced nothing. Daemon-invoked hooks must source
+  `/etc/homelab-notify.env` themselves.
+- `hc-ping.sh` was 0750 root-owned while the nightly verify unit runs as
+  `svcops`; the ping was silently permission-denied, which would have made
+  healthchecks.io report a daily false alarm.
+- Ansible's `copy` under `become_user` needs `setfacl`, absent on these hosts.
+  Drop to an unprivileged user for `command` tasks only; write files as root
+  with `owner:` set.
+
 ## Rootless podman on svc-media and svc-infra
 
 Only container-uid-0 maps to the host `homelab` user. Any non-root process

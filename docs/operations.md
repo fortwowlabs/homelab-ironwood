@@ -45,26 +45,9 @@ journalctl -p warning --since today
 
 ## Nightly verification
 
-Nightly verification is supported only on a Linux control node with systemd,
-the repository at `/opt/homelab-iac`, its project `.venv`, SSH credentials, and
-a mode-`0600` `.vault_pass`. It runs the safe `verify.yml`, suppresses success
-notifications, and never invokes the disruptive drill.
-
-```bash
-sudo install -m 0644 contrib/systemd/homelab-verify@.service /etc/systemd/system/
-sudo install -m 0644 contrib/systemd/homelab-verify@.timer /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now homelab-verify@<user>.timer
-sudo systemctl start homelab-verify@<user>.service
-journalctl -u homelab-verify@<user>.service -e
-```
-
-The instance name is the unprivileged account that owns the checkout, SSH key,
-and vault password file. The service calls
-`/opt/homelab-iac/.venv/bin/ansible-playbook` explicitly; it does not depend on
-a login shell or system Ansible. Confirm the next run with
-`systemctl list-timers homelab-verify@<user>.timer` and investigate any
-non-zero unit result even if ntfy did not arrive.
+Nightly verification now deploys with svc-infra — it is no longer a manual
+installation on a Linux control node. See "The nightly verification runner"
+below for how it works and the one manual step it needs.
 
 ## Download maintenance and leak-canary recovery
 
@@ -150,6 +133,9 @@ they delivered to local root mail, on a box where nothing reads mail. What
 changed is delivery, not detection.
 
 ### The dead-man's switch
+
+The departure checklist and a field guide to every alert live in
+[Unattended operation](unattended.md).
 
 Every alert above travels through ntfy on svc-media, which cannot report that
 svc-media, the network, or the power is gone — silence and health look

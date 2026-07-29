@@ -70,6 +70,7 @@ control node, create a mode-`0600` `.vault_pass` and set
 | `make deploy` | Provision, converge, verify, and notify |
 | `make dl` | Converge `svc-download` only |
 | `make media` | Converge `svc-media` only |
+| `make pve` | Converge hypervisor monitoring (disk, SMART, ZFS events) |
 | `make access` | Reconcile the Caddy/DNS access layer |
 | `make check` | Check mode without diff |
 | `make check-diff` | Check mode with secret-bearing diffs suppressed |
@@ -90,6 +91,7 @@ tags.
 - [Services](docs/services.md) — URLs, application wiring, DNS, and catalog changes
 - [Security](docs/security.md) — secrets, Proxmox trust, image policy, and the VPN backstop
 - [Incidents](docs/incidents.md) — symptom-led recovery runbooks
+- [Unattended operation](docs/unattended.md) — the six-month departure checklist, what each alert means, and what is deliberately not covered
 
 TrueNAS creation, Proxmox host preparation, application UI setup, LAN/tailnet
 DNS forwarding, Cloudflare token provisioning, and destructive restore
