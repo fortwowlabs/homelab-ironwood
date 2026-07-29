@@ -1,0 +1,229 @@
+---
+# The nightly verification runner.
+#
+# `make verify` is the only thing in this repo that checks whether the
+# applications actually work rather than merely whether their containers are
+# up. It has always run from the workstation, which is exactly the machine
+# that will be asleep for the next six months. This moves it onto svc-infra.
+#
+# The checkout is PUSHED from the workstation at deploy time rather than
+# pulled from GitHub. That keeps repository credentials off the VM entirely,
+# and it makes the property being verified the right one: what runs nightly
+# is the code that performed the last successful deploy, not whatever main
+# has drifted to since.
+#
+# The vault password is NOT installed here. It is the one secret this repo
+# will not copy for you; see docs/operations.md. Verification below fails
+# loudly if it is missing, so the gap cannot go unnoticed until you have left.
+
+- name: Create the verification runner account
+  ansible.builtin.user:
+    name: "{{ verify_runner_user }}"
+    system: true
+    shell: /bin/bash
+    home: "/home/{{ verify_runner_user }}"
+    create_home: true
+
+- name: Create the runner checkout directory
+  ansible.builtin.file:
+    path: "{{ verify_runner_root }}"
+    state: directory
+    owner: "{{ verify_runner_user }}"
+    group: "{{ verify_runner_user }}"
+    mode: "0750"
+
+# --------------------------------------------------------------- checkout ---
+- name: Read the workstation's committed revision
+  ansible.builtin.command: git rev-parse HEAD
+  delegate_to: localhost
+  become: false
+  register: verify_runner_local_rev
+  changed_when: false
+
+- name: Read the revision already on the runner
+  ansible.builtin.slurp:
+    src: "{{ verify_runner_root }}/.deployed-rev"
+  register: verify_runner_remote_rev
+  failed_when: false
+
+- name: Synchronise the runner checkout
+  when: >-
+    (verify_runner_remote_rev.content | default('') | b64decode | trim)
+    != verify_runner_local_rev.stdout
+  block:
+    # git archive carries only tracked files, so the runner cannot pick up a
+    # stray working-tree edit — and .vault_pass and .venv, which live inside
+    # the checkout but are not tracked, survive because nothing is deleted.
+    - name: Build a tracked-files archive of the committed tree
+      ansible.builtin.command:
+        cmd: "git archive --format=tar --output={{ verify_runner_archive }} HEAD"
+      delegate_to: localhost
+      become: false
+      changed_when: true
+
+    - name: Unpack the archive onto the runner
+      ansible.builtin.unarchive:
+        src: "{{ verify_runner_archive }}"
+        dest: "{{ verify_runner_root }}"
+        owner: "{{ verify_runner_user }}"
+        group: "{{ verify_runner_user }}"
+
+    - name: Record the deployed revision
+      ansible.builtin.copy:
+        dest: "{{ verify_runner_root }}/.deployed-rev"
+        content: "{{ verify_runner_local_rev.stdout }}\n"
+        owner: "{{ verify_runner_user }}"
+        group: "{{ verify_runner_user }}"
+        mode: "0644"
+  always:
+    - name: Remove the local archive
+      ansible.builtin.file:
+        path: "{{ verify_runner_archive }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      changed_when: false
+
+# ------------------------------------------------------------------- venv ---
+# Keyed on the requirements files rather than rebuilt every run: a pip install
+# on every deploy would be slow, would need egress every time, and would make
+# changed=0 impossible.
+- name: Read the runner environment stamp
+  ansible.builtin.slurp:
+    src: "{{ verify_runner_root }}/.venv-stamp"
+  register: verify_runner_venv_stamp
+  failed_when: false
+
+- name: Compute the expected environment stamp
+  ansible.builtin.set_fact:
+    verify_runner_wanted_stamp: >-
+      {{ (lookup('file', 'requirements.txt') ~ lookup('file', 'requirements.yml'))
+         | hash('sha256') }}
+
+- name: Build the runner Python environment
+  when: >-
+    (verify_runner_venv_stamp.content | default('') | b64decode | trim)
+    != verify_runner_wanted_stamp
+  block:
+    # Only the commands drop to the runner account, so that everything it
+    # builds belongs to it. Tasks that transfer a file stay as root: becoming
+    # an unprivileged user makes Ansible hand off its temp files by ACL, and
+    # this host has no setfacl, so `copy` under become_user fails outright.
+    - name: Create the virtualenv
+      ansible.builtin.command:
+        cmd: "python3 -m venv {{ verify_runner_root }}/.venv"
+        creates: "{{ verify_runner_root }}/.venv/bin/python"
+      become: true
+      become_user: "{{ verify_runner_user }}"
+
+    - name: Install the pinned controller runtime
+      ansible.builtin.command:
+        cmd: >-
+          {{ verify_runner_root }}/.venv/bin/python -m pip install --quiet
+          --requirement {{ verify_runner_root }}/requirements.txt
+      become: true
+      become_user: "{{ verify_runner_user }}"
+      changed_when: true
+
+    - name: Install the pinned collections
+      ansible.builtin.command:
+        cmd: >-
+          {{ verify_runner_root }}/.venv/bin/ansible-galaxy collection install --force
+          --collections-path {{ verify_runner_root }}/collections
+          --requirements-file {{ verify_runner_root }}/requirements.yml
+        chdir: "{{ verify_runner_root }}"
+      become: true
+      become_user: "{{ verify_runner_user }}"
+      changed_when: true
+
+    - name: Record the environment stamp
+      ansible.builtin.copy:
+        dest: "{{ verify_runner_root }}/.venv-stamp"
+        content: "{{ verify_runner_wanted_stamp }}\n"
+        owner: "{{ verify_runner_user }}"
+        group: "{{ verify_runner_user }}"
+        mode: "0644"
+
+# -------------------------------------------------------------------- ssh ---
+- name: Create the runner SSH directory
+  ansible.builtin.file:
+    path: "/home/{{ verify_runner_user }}/.ssh"
+    state: directory
+    owner: "{{ verify_runner_user }}"
+    group: "{{ verify_runner_user }}"
+    mode: "0700"
+
+# ssh-keygen rather than community.crypto.openssh_keypair: only ansible.posix
+# and community.proxmox are vendored in collections/, and adding a collection
+# to the pinned runtime is a much bigger change than one idempotent command.
+- name: Generate the runner SSH key
+  ansible.builtin.command:
+    cmd: >-
+      ssh-keygen -t ed25519 -N '' -C 'verify-runner@{{ inventory_hostname }}'
+      -f /home/{{ verify_runner_user }}/.ssh/id_ed25519
+    creates: "/home/{{ verify_runner_user }}/.ssh/id_ed25519"
+  become: true
+  become_user: "{{ verify_runner_user }}"
+
+- name: Read the runner public key
+  ansible.builtin.slurp:
+    src: "/home/{{ verify_runner_user }}/.ssh/id_ed25519.pub"
+  register: verify_runner_pubkey
+
+# Host keys are learned on first connection rather than pre-seeded. These are
+# three LAN addresses this host already talks to constantly; the alternative
+# is a keyscan that would itself trust whatever answered.
+- name: Configure the runner SSH client
+  ansible.builtin.copy:
+    dest: "/home/{{ verify_runner_user }}/.ssh/config"
+    owner: "{{ verify_runner_user }}"
+    group: "{{ verify_runner_user }}"
+    mode: "0600"
+    content: |
+      # Managed by Ansible (roles/svc_infra/tasks/verify-runner.yml).
+      Host *
+          StrictHostKeyChecking accept-new
+          UserKnownHostsFile /home/{{ verify_runner_user }}/.ssh/known_hosts
+
+- name: Authorise the runner key on every service VM
+  ansible.posix.authorized_key:
+    user: "{{ ansible_user }}"
+    key: "{{ verify_runner_pubkey.content | b64decode | trim }}"
+    comment: "verify-runner@{{ inventory_hostname }}"
+    # Scoped to svc-infra's address: this key exists to run read-only
+    # verification from one known host, and nothing else should be able to
+    # present it.
+    key_options: 'from="{{ ansible_host }}"'
+    state: present
+  delegate_to: "{{ item }}"
+  loop: "{{ groups['service_vms'] }}"
+  loop_control:
+    label: "{{ item }}"
+
+# ----------------------------------------------------------------- runtime ---
+- name: Install the verification wrapper
+  ansible.builtin.template:
+    src: verify-run.sh.j2
+    dest: /usr/local/sbin/homelab-verify-run.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the nightly verification units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - homelab-verify@.service
+    - homelab-verify@.timer
+  register: verify_runner_units
+
+- name: Arm the nightly verification timer
+  ansible.builtin.systemd:
+    name: "homelab-verify@{{ verify_runner_user }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: "{{ verify_runner_units is changed }}"

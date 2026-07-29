@@ -81,5 +81,10 @@
     dest: /usr/local/sbin/hc-ping.sh
     owner: root
     group: root
-    mode: "0750"
+    # 0755, not 0750: the nightly verification unit runs as the unprivileged
+    # svcops account and must be able to ping. The script holds no secret —
+    # the UUID arrives as an argument, and the file it comes from stays
+    # 0600 root, injected by systemd's EnvironmentFile before the drop to
+    # svcops.
+    mode: "0755"
   when: not (service_guarded_egress | bool)

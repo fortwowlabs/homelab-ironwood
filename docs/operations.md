@@ -166,6 +166,40 @@ safety net either.
 A failed ntfy push is not permission to ignore a failed unit or disk
 threshold.
 
+### The nightly verification runner
+
+`make verify` is the only thing here that checks whether the applications
+actually work rather than whether their containers are up. It used to run only
+from the workstation. It now also runs nightly at 04:00 on svc-infra, as the
+unprivileged `svcops` account, from `/opt/homelab-iac`.
+
+That checkout is **pushed from the workstation on every deploy** (`git archive`
+of the committed tree), not pulled from GitHub. No repository credentials live
+on the VM, and what runs nightly is the code that performed the last
+successful deploy rather than whatever `main` has drifted to. The revision in
+use is recorded in `/opt/homelab-iac/.deployed-rev`.
+
+It excludes the hypervisor (`--limit 'service_vms:localhost'`). The runner has
+no SSH key for `root@thurgadin` and should not have one; PVE reports its own
+health to healthchecks.io instead.
+
+**One manual step, and it is deliberate.** The vault password is the single
+secret this repo will not copy for you, so after a rebuild it must be
+installed by hand:
+
+```bash
+# from the workstation, once per rebuild of svc-infra
+ansible svc-infra -b -m copy \
+  -a "src=.vault_pass dest=/opt/homelab-iac/.vault_pass owner=svcops group=svcops mode=0600"
+```
+
+`make verify` asserts that file exists with the right owner and mode, so a
+forgotten step fails loudly while somebody is still around to fix it — rather
+than becoming six months of silence.
+
+To run it on demand: `systemctl start homelab-verify@svcops.service` on
+svc-infra, then read `journalctl -u homelab-verify@svcops.service`.
+
 ## Backups
 
 Backups land on the TrueNAS NFS backup export and retain the configured number

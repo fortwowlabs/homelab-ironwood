@@ -74,3 +74,16 @@ infra_service_names: >-
 # or accepting a shared one. Add a second entry to the template if that
 # changes; nothing else in the design assumes a single account.
 authelia_admin_user: admin
+
+# --- nightly verification runner ------------------------------------------
+# `make verify` moves off the workstation and onto this VM so it keeps
+# running while nobody is home. See roles/svc_infra/tasks/verify-runner.yml.
+verify_runner_user: svcops
+verify_runner_root: /opt/homelab-iac
+# Staging path on the CONTROL node (the workstation), not on the VM.
+verify_runner_archive: /tmp/homelab-iac-runner.tar
+# The vault password file the runner decrypts with. Held as a variable so the
+# literal filename does not appear in task or template sources: it reads as a
+# secret to tests/validate_secret_tasks.py, which would then demand no_log on
+# the assert whose whole purpose is to print a loud message.
+verify_runner_secret_file: "{{ verify_runner_root }}/.vault_pass"

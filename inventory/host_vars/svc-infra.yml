@@ -41,3 +41,7 @@ mon_open_firewalld: true            # svc-infra uses firewalld, like svc-media
 onfailure_units_extra:
   - backup-infra-appdata.service
   - homelab-backups-fresh.service
+  # Template unit: the drop-in covers every instance. verify.yml's own
+  # rescue already alerts when a GATE fails; this covers the wrapper
+  # failing before Ansible ever starts (no vault password, no venv).
+  - homelab-verify@.service

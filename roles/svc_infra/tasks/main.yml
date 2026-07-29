@@ -11,6 +11,10 @@
   ansible.builtin.import_tasks: backup.yml
   tags: [backup]
 
+- name: Install the nightly verification runner
+  ansible.builtin.import_tasks: verify-runner.yml
+  tags: [verifyrunner]
+
 - name: Verify infra services
   ansible.builtin.import_tasks: verify.yml
   when: not ansible_check_mode

@@ -45,9 +45,15 @@ def triggered_service(timer: Path) -> str:
     """The service a timer starts: an explicit Unit=, else the timer's own stem."""
     text = timer.read_text(encoding="utf-8")
     match = re.search(r"^\s*Unit\s*=\s*(\S+)\s*$", text, re.MULTILINE)
-    if match:
-        return match.group(1)
-    return timer.name.removesuffix(".j2").removesuffix(".timer") + ".service"
+    name = (
+        match.group(1)
+        if match
+        else timer.name.removesuffix(".j2").removesuffix(".timer") + ".service"
+    )
+    # A template unit's drop-in directory is named for the template, not for
+    # any one instance: homelab-verify@%i.service is configured through
+    # homelab-verify@.service.d/, and the drop-in applies to every instance.
+    return re.sub(r"@[^.]*\.", "@.", name)
 
 
 def covered_units() -> set[str]:

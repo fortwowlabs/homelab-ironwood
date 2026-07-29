@@ -11,8 +11,8 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SERVICE = ROOT / "contrib/systemd/homelab-verify@.service"
-TIMER = ROOT / "contrib/systemd/homelab-verify@.timer"
+SERVICE = ROOT / "roles/svc_infra/files/homelab-verify@.service"
+TIMER = ROOT / "roles/svc_infra/files/homelab-verify@.timer"
 
 
 def main() -> int:
@@ -23,7 +23,7 @@ def main() -> int:
     required_service = (
         "User=%i",
         "WorkingDirectory=/opt/homelab-iac",
-        "ExecStart=/opt/homelab-iac/.venv/bin/ansible-playbook verify.yml",
+        "ExecStart=/usr/local/sbin/homelab-verify-run.sh",
         "ConditionPathIsDirectory=/opt/homelab-iac/.venv",
     )
     required_timer = (
@@ -54,9 +54,12 @@ def main() -> int:
                     "ConditionPathIsDirectory=/",
                 )
                 .replace(
-                    "ExecStart=/opt/homelab-iac/.venv/bin/ansible-playbook verify.yml "
-                    "--vault-password-file .vault_pass --extra-vars notify_on_success=false",
+                    "ExecStart=/usr/local/sbin/homelab-verify-run.sh",
                     "ExecStart=/bin/true",
+                )
+                .replace(
+                    "EnvironmentFile=/etc/homelab-healthchecks.env",
+                    "",
                 ),
                 encoding="utf-8",
             )

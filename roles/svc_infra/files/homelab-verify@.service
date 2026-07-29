@@ -1,6 +1,6 @@
 # Instantiated nightly verification unit. The instance is the unprivileged
 # Linux account that owns the checkout and its SSH credentials:
-#   systemctl start homelab-verify@alice.service
+#   systemctl start homelab-verify@svcops.service
 [Unit]
 Description=homelab-iac non-disruptive verification for %i
 Wants=network-online.target
@@ -11,6 +11,7 @@ ConditionPathIsDirectory=/opt/homelab-iac/.venv
 Type=oneshot
 User=%i
 WorkingDirectory=/opt/homelab-iac
-ExecStart=/opt/homelab-iac/.venv/bin/ansible-playbook verify.yml --vault-password-file .vault_pass --extra-vars notify_on_success=false
-TimeoutStartSec=600
+EnvironmentFile=/etc/homelab-healthchecks.env
+ExecStart=/usr/local/sbin/homelab-verify-run.sh
+TimeoutStartSec=1800
 UMask=0077
