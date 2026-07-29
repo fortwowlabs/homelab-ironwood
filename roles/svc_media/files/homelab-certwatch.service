@@ -5,4 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Type=oneshot disables the start timeout by default; see
+# homelab-diskalert.service. A unit wedged in `activating` is not `failed`,
+# so it alerts nobody.
+TimeoutStartSec=300
 ExecStart=/usr/local/sbin/homelab-certwatch.sh

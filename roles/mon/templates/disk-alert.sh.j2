@@ -26,7 +26,45 @@ if [[ -n "${NTFY_TOKEN:-}" ]]; then
 fi
 host=$(hostname -s)
 
-mkdir -p "$STATE_DIR"
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+# Returns nonzero when delivery failed, so the caller can decline to record a
+# dedupe entry for an alert nobody received.
+alert() {  # $1=priority $2=tags $3=title $4=body
+    if curl -fsS --max-time 10 --retry 2 --retry-delay 5 "${AUTH[@]}" \
+        -H "Title: $3" -H "Priority: $1" -H "Tags: $2" \
+        -d "$4" "${NTFY_URL}/${topic}" >/dev/null 2>&1; then
+        return 0
+    fi
+    logger -t disk-alert "ntfy push failed: $3"
+    return 1
+}
+
+# `>` truncates before it fails, so writing the state directly meant that a
+# full root filesystem — the exact condition this script exists to report —
+# left an empty state file, and the next run re-alerted because it read no
+# previous hash. 96 urgent pushes a day is how an alert channel becomes
+# something you swipe away. Temp file plus rename keeps the state either old
+# or new, never empty.
+write_state() {  # $1=hash $2=timestamp
+    if printf '%s %s\n' "$1" "$2" > "${STATE}.tmp" 2>/dev/null \
+       && mv -f "${STATE}.tmp" "$STATE" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "${STATE}.tmp" 2>/dev/null || true
+    logger -t disk-alert "could not write ${STATE}; alert dedupe is running blind"
+    return 1
+}
+
+# Capture df separately so its exit status is visible. Piping it straight into
+# the loop hid failures: a df that errored produced no rows, `over` stayed
+# empty, and the script went on to announce that every filesystem had
+# recovered. "Could not measure" must not read as "nothing is full".
+df_ok=1
+if ! df_out=$(df -P -T -x tmpfs -x devtmpfs -x overlay -x squashfs -x autofs -x efivarfs 2>/dev/null); then
+    df_ok=0
+    logger -t disk-alert "df failed; this run cannot confirm filesystem usage"
+fi
 
 over=""
 # -T adds the fstype column, which is what selects the threshold. Pseudo
@@ -43,7 +81,7 @@ while read -r _fs fstype _size _used avail pct mount; do
     if [ "$p" -ge "$limit" ]; then
         over+=$'\n'"${mount} ${p}% used (${avail} free, ${fstype}, limit ${limit}%)"
     fi
-done < <(df -P -T -x tmpfs -x devtmpfs -x overlay -x squashfs -x autofs -x efivarfs | tail -n +2)
+done < <(printf '%s\n' "$df_out" | tail -n +2)
 
 now=$(date +%s)
 prev_hash=""
@@ -54,15 +92,18 @@ if [[ -f "$STATE" ]]; then
 fi
 
 if [ -z "$over" ]; then
-    if [[ -n "$prev_hash" && "$prev_hash" != "none" ]]; then
-        curl -fsS --max-time 10 "${AUTH[@]}" \
-            -H "Title: disk recovered on ${host}" \
-            -H "Priority: default" \
-            -H "Tags: floppy_disk" \
-            -d "All filesystems are back under their thresholds." \
-            "${NTFY_URL}/${topic}" >/dev/null 2>&1 || true
+    # An empty result from a df that failed is not an all-clear. Leave the
+    # dedupe state untouched so a pending alarm stays pending.
+    if (( df_ok == 0 )); then
+        exit 0
     fi
-    printf 'none %s\n' "$now" > "$STATE"
+    if [[ -n "$prev_hash" && "$prev_hash" != "none" ]]; then
+        # Keep the old state if the all-clear did not land, so the next run
+        # retries rather than dropping the recovery notice.
+        alert default floppy_disk "disk recovered on ${host}" \
+            "All filesystems are back under their thresholds." || exit 0
+    fi
+    write_state none "$now" || true
     exit 0
 fi
 
@@ -74,13 +115,10 @@ if [[ "$hash" == "$prev_hash" ]] && (( now - prev_alert < REALERT_SECS )); then
     exit 0
 fi
 
-curl -fsS --max-time 10 --retry 2 --retry-delay 5 "${AUTH[@]}" \
-    -H "Title: DISK alarm on ${host}" \
-    -H "Priority: high" \
-    -H "Tags: warning,floppy_disk" \
-    -d "Filesystems at/over their threshold:${over}" \
-    "${NTFY_URL}/${topic}" >/dev/null 2>&1 || \
-    logger -t disk-alert "ntfy push failed; ${host}:${over}"
-
-printf '%s %s\n' "$hash" "$now" > "$STATE"
+# Record the dedupe entry only if the push landed. Recording it regardless
+# turned a failed delivery into six hours of silence about a filling disk.
+if alert high warning,floppy_disk "DISK alarm on ${host}" \
+       "Filesystems at/over their threshold:${over}"; then
+    write_state "$hash" "$now" || true
+fi
 exit 0

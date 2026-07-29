@@ -5,5 +5,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# See homelab-diskalert.service for the reasoning: Type=oneshot disables the
+# start timeout by default, and a unit stuck in `activating` is not `failed`,
+# so nothing alerts on it. This sweep shells out to systemctl and runuser,
+# either of which can block indefinitely on a wedged dbus or user manager.
+TimeoutStartSec=300
 EnvironmentFile=/etc/homelab-notify.env
 ExecStart=/usr/local/sbin/failed-units-watch.sh

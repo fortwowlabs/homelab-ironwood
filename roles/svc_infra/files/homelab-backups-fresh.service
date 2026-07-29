@@ -5,5 +5,12 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Type=oneshot disables the start timeout by default. This script walks
+# /srv/backups, which is a `hard` NFS mount: if the NAS reboots mid-walk the
+# client retries forever and find enters uninterruptible sleep. The unit would
+# sit in `activating` — not `failed` — so no OnFailure fires and the sweep
+# never sees it. Longer than the other watchers because it really does walk a
+# large tree over the network.
+TimeoutStartSec=600
 EnvironmentFile=/etc/homelab-healthchecks.env
 ExecStart=/usr/local/sbin/backups-fresh.sh

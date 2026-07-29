@@ -5,6 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# Type=oneshot disables the start timeout by default; see
+# homelab-diskalert.service. This one matters more than most: a heartbeat
+# stuck in `activating` never pings, and healthchecks.io reads a missing ping
+# as the estate being dead. Better to fail fast and let the next run recover.
+TimeoutStartSec=300
 EnvironmentFile=/etc/homelab-healthchecks.env
 EnvironmentFile=/etc/homelab-notify.env
 ExecStart=/usr/local/sbin/homelab-heartbeat.sh

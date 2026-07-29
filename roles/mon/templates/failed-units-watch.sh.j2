@@ -25,31 +25,79 @@ if [[ -n "${NTFY_TOKEN:-}" ]]; then
     AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
 fi
 
-mkdir -p "$STATE_DIR"
+mkdir -p "$STATE_DIR" 2>/dev/null || true
 
+# Returns nonzero when delivery failed, so the caller can decline to record a
+# dedupe entry for an alert that nobody received.
 alert() {  # $1=priority $2=title $3=body
-    curl -fsS --max-time 10 --retry 2 --retry-delay 5 -X POST \
+    if curl -fsS --max-time 10 --retry 2 --retry-delay 5 -X POST \
         "${AUTH[@]}" \
         -H "Title: $2" -H "Priority: $1" -H "Tags: rotating_light" \
-        -d "$3" "${NTFY_URL}/${topic}" >/dev/null 2>&1 \
-        || logger -p daemon.err -t failed-units-watch "ntfy push failed: $2 — $3"
+        -d "$3" "${NTFY_URL}/${topic}" >/dev/null 2>&1; then
+        return 0
+    fi
+    logger -p daemon.err -t failed-units-watch "ntfy push failed: $2 — $3"
+    return 1
 }
 
+# The state file is what suppresses the next REALERT_SECS of alerts, so a
+# silent write failure is not cosmetic. `>` truncates before it fails, so on a
+# full root filesystem — which this estate has actually seen — the old
+# behaviour left an empty file, the next run read no previous hash, and the
+# alarm re-fired every 15 minutes. That is precisely the noise the dedupe
+# exists to prevent. Write to a temp file and rename, so the state is either
+# the old value or the new one, never empty.
+write_state() {  # $1=hash $2=timestamp
+    if printf '%s %s\n' "$1" "$2" > "${STATE}.tmp" 2>/dev/null \
+       && mv -f "${STATE}.tmp" "$STATE" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "${STATE}.tmp" 2>/dev/null || true
+    logger -p daemon.err -t failed-units-watch \
+        "could not write ${STATE}; alert dedupe is running blind"
+    return 1
+}
+
+# `sweep_ok` tracks whether this run actually managed to look. An empty result
+# from a command that errored is not the same as a clean host, and treating it
+# as one is how a monitor reports all-clear while everything is down.
+sweep_ok=1
 failed=""
-while read -r unit _rest; do
-    [[ -n "$unit" ]] && failed+="${unit}"$'\n'
-done < <(systemctl --failed --plain --no-legend 2>/dev/null)
+if system_failed=$(systemctl --failed --plain --no-legend 2>/dev/null); then
+    while read -r unit _rest; do
+        [[ -n "$unit" ]] && failed+="${unit}"$'\n'
+    done <<< "$system_failed"
+else
+    sweep_ok=0
+    logger -p daemon.err -t failed-units-watch \
+        "systemctl --failed errored; this run cannot confirm the host is clean"
+fi
 
 {% if 'media_vms' in group_names or 'infra_vms' in group_names %}
-# Rootless containers run under the homelab user's manager. Skip quietly when
-# that manager is not up yet (early boot) rather than reporting a false clear.
+# Rootless containers run under the homelab user's manager, which
+# `systemctl --failed` above does not see. Skipping this pass is not the same
+# as finding nothing: every container on this host lives here, so a run that
+# could not read the user manager must not go on to announce an all-clear.
+# Note the first guard is deliberately not sufficient on its own —
+# is-system-running exits nonzero for `degraded`, which is exactly the state a
+# failed user unit produces — so the socket test is what rescues the normal
+# case.
+user_sweep_ok=0
 if runuser -u homelab -- env XDG_RUNTIME_DIR=/run/user/{{ svc_uid }} \
         systemctl --user is-system-running >/dev/null 2>&1 \
    || [[ -S /run/user/{{ svc_uid }}/systemd/private ]]; then
-    while read -r unit _rest; do
-        [[ -n "$unit" ]] && failed+="user/${unit}"$'\n'
-    done < <(runuser -u homelab -- env XDG_RUNTIME_DIR=/run/user/{{ svc_uid }} \
-                 systemctl --user --failed --plain --no-legend 2>/dev/null)
+    if user_failed=$(runuser -u homelab -- env XDG_RUNTIME_DIR=/run/user/{{ svc_uid }} \
+                         systemctl --user --failed --plain --no-legend 2>/dev/null); then
+        user_sweep_ok=1
+        while read -r unit _rest; do
+            [[ -n "$unit" ]] && failed+="user/${unit}"$'\n'
+        done <<< "$user_failed"
+    fi
+fi
+if (( user_sweep_ok == 0 )); then
+    sweep_ok=0
+    logger -p daemon.err -t failed-units-watch \
+        "could not read the homelab user manager; rootless units unverified"
 fi
 {% endif %}
 
@@ -67,13 +115,21 @@ if [[ -f "$STATE" ]]; then
 fi
 
 if [[ -z "$failed" ]]; then
+    # "Found nothing" and "could not look" produce the same empty string, and
+    # only one of them is good news. Say nothing and leave the dedupe state
+    # alone, so a pending alert stays pending and the next run re-reports it.
+    if (( sweep_ok == 0 )); then
+        exit 0
+    fi
     # Recovery is worth exactly one message: it closes the loop on an alert
     # you already got, and it means a cleared alert cannot be mistaken for
     # one still pending.
     if [[ -n "$prev_hash" && "$prev_hash" != "none" ]]; then
-        alert default "recovered on ${host}" "No failed units remain."
+        # If the all-clear did not land, keep the old state so the next run
+        # tries again rather than silently dropping the recovery notice.
+        alert default "recovered on ${host}" "No failed units remain." || exit 0
     fi
-    printf 'none %s\n' "$now" > "$STATE"
+    write_state none "$now" || true
     exit 0
 fi
 
@@ -93,6 +149,11 @@ if [[ "$reason" == "new" ]]; then
 else
     title="STILL FAILED on ${host} (${count})"
 fi
-alert urgent "$title" "$(printf '%s\n\nFix, then: systemctl reset-failed' "$failed")"
-printf '%s %s\n' "$hash" "$now" > "$STATE"
+# Record the dedupe entry only if the push actually landed. Writing it
+# regardless downgraded a failed delivery into REALERT_SECS of silence: the
+# operator's first notice of a broken service would have been a "STILL FAILED"
+# six hours later, with nothing saying the original alert was never sent.
+if alert urgent "$title" "$(printf '%s\n\nFix, then: systemctl reset-failed' "$failed")"; then
+    write_state "$hash" "$now" || true
+fi
 exit 0

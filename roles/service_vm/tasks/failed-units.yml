@@ -8,7 +8,14 @@
       - --plain
   register: service_vm_failed_units
   changed_when: false
-  failed_when: service_vm_failed_units.stdout | trim | length > 0
+  # The rc test is not redundant. Defining failed_when REPLACES the module's
+  # own success check, so without it any error that leaves stdout empty reads
+  # as a clean host — the command not existing, a wedged dbus, a systemctl
+  # that wrote its complaint to stderr. The check would pass at the exact
+  # moment it should fire.
+  failed_when: >-
+    service_vm_failed_units.rc != 0
+    or (service_vm_failed_units.stdout | trim | length > 0)
 
 - name: Check for failed rootless user services
   ansible.builtin.command:
@@ -26,5 +33,12 @@
       - --plain
   register: service_vm_failed_user_units
   changed_when: false
-  failed_when: service_vm_failed_user_units.stdout | trim | length > 0
+  # Same reasoning as the system check above, and it matters more here: when
+  # the homelab user's manager is not running, this command exits nonzero with
+  # "Failed to connect to bus" on stderr and nothing on stdout. That is the
+  # single most likely six-month unattended failure on these two hosts — every
+  # rootless container down — and the stdout-only test called it green.
+  failed_when: >-
+    service_vm_failed_user_units.rc != 0
+    or (service_vm_failed_user_units.stdout | trim | length > 0)
   when: "'media_vms' in group_names or 'infra_vms' in group_names"

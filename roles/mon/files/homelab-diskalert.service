@@ -5,5 +5,13 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# systemd disables the start timeout for Type=oneshot by default, and this
+# script calls df across NFS mounts. A hung NAS blocks df in uninterruptible
+# sleep, the unit sits in `activating` forever, and OnUnitActiveSec= cannot
+# retrigger a unit that has not finished. `activating` is not `failed`, so
+# OnFailure= never fires and the failed-unit sweep never lists it: the disk
+# alarm would be dead while every check still reported healthy. The timeout
+# converts that silent hang into a failure, which is what alerts.
+TimeoutStartSec=300
 EnvironmentFile=/etc/homelab-notify.env
 ExecStart=/usr/local/sbin/disk-alert.sh
