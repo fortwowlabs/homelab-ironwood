@@ -155,8 +155,16 @@
 # TARGET is what distinguishes an Authelia challenge from an application's own
 # redirect, so that is what is asserted. Observed live: Authelia answers a
 # browser-ish request with 302 to the portal (carrying ?rd=<original url>) and
-# an API-ish one with 401, keyed off the Accept header — curl here sends
-# neither header explicitly, so both shapes are accepted.
+# an API-ish one with 401, keyed off the Accept header.
+#
+# The request therefore pins `Accept: text/html` and only the 302-to-portal
+# shape is accepted. Both shapes used to be allowed, and the bare 401 arm was
+# the weak one: it asserted a status code without checking who produced it, so
+# any backend that natively answers / with 401 satisfied "is it protected?"
+# whether or not forward_auth was still in front of it. webtop and code-server
+# both keep their own auth underneath and are one config change from being
+# exactly that. Pinning Accept removes the ambiguous branch rather than trying
+# to tell two 401s apart after the fact.
 #
 # Note the coupling this creates: if Authelia is down, Caddy's forward_auth
 # emits 502 and the existing 5xx rule fails every protected service at once.
@@ -165,6 +173,7 @@
 - name: Smoke-test every configured Caddy backend
   ansible.builtin.command: >-
     curl -s --max-time 15 -o /dev/null -w '%{http_code} %{redirect_url}'
+    -H 'Accept: text/html'
     --resolve {{ item }}.{{ service_domain }}:443:{{ ansible_host }}
     https://{{ item }}.{{ service_domain }}
   loop: >-
@@ -187,11 +196,8 @@
     or (
       item in (sso_protected_services | default([]))
       and not (
-        media_gate_code == '401'
-        or (
-          media_gate_code == '302'
-          and media_gate_portal in media_caddy_gates.stdout
-        )
+        media_gate_code == '302'
+        and media_gate_portal in media_caddy_gates.stdout
       )
     )
     or (
@@ -252,13 +258,42 @@
   changed_when: false
   when: media_access_layer | default('manual') == 'caddy'
 
+# The healthchecks heartbeat is the only signal that leaves the house on a
+# schedule from this host, so a timer that stopped firing is indistinguishable
+# from the house losing power — which is precisely the thing it exists to
+# report. It had no gate at all.
+- name: Verify the healthchecks heartbeat timer is active and enabled
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - "{{ item }}"
+      - homelab-heartbeat.timer
+  loop:
+    - is-active
+    - is-enabled
+  changed_when: false
+
 # Run the watcher itself rather than trusting that its timer exists: this is
 # the check that would actually have caught an expiring certificate, and a
 # timer being active says nothing about whether the script works.
-- name: Verify the certificate is not near expiry
+#
+# The failure is deferred rather than raised here. This play carries
+# any_errors_fatal, so a cert inside the warning window used to abort the entire
+# run at this point — taking with it node_exporter, the failed-unit sweep and
+# the whole hypervisor play that follows. A certificate with three weeks left is
+# a real problem but not a reason to stop checking the disks, so the result is
+# carried to the final play and asserted there, which still ends the run red.
+- name: Check whether the certificate is near expiry
   ansible.builtin.command: /usr/local/sbin/homelab-certwatch.sh
+  register: media_certwatch_gate
   changed_when: false
+  failed_when: false
   when: media_access_layer | default('manual') == 'caddy'
+
+- name: Record the certificate expiry result for the final gate
+  ansible.builtin.set_fact:
+    media_cert_ok: "{{ media_certwatch_gate.rc | default(0) == 0 }}"
+    media_cert_detail: "{{ media_certwatch_gate.stderr | default('') | trim }}"
 
 - name: Verify node_exporter metrics
   ansible.builtin.include_role:

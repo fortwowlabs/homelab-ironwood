@@ -9,11 +9,20 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+# Every verify entry point reachable from verify.yml belongs here. svc_infra and
+# pve_mon were missing, which left the gate one file short of its own premise:
+# site.yml's comment argues that a failed play against the hypervisor takes every
+# guest with it, and the hypervisor's verify path was the one not checked for
+# restarts. A `state: restarted` added there would have sailed through
+# `make validate` and then bounced a service on the machine hosting all three VMs
+# during a routine `make verify`.
 SAFE_TASKS = [
     ROOT / "roles/service_vm/tasks/verify.yml",
     ROOT / "roles/svc_download/tasks/verify.yml",
     ROOT / "roles/svc_media/tasks/verify.yml",
+    ROOT / "roles/svc_infra/tasks/verify.yml",
     ROOT / "roles/mon/tasks/verify.yml",
+    ROOT / "roles/pve_mon/tasks/verify.yml",
 ]
 RESTART_RE = re.compile(r"\bsystemctl\s+(?:start|restart|try-restart)\b|\bstate:\s*restarted\b")
 

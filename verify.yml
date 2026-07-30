@@ -87,6 +87,17 @@
           - hostvars[infra_host].mon_verified | default(false) | bool
         fail_msg: "Refusing success: not every safe verification phase completed."
 
+    # Deferred from svc_media's certwatch gate so that a certificate inside its
+    # warning window does not abort the run before the hypervisor play. The run
+    # still ends red — just after everything else has been checked.
+    - name: Assert the TLS certificate is not near expiry
+      ansible.builtin.assert:
+        that:
+          - hostvars[media_host].media_cert_ok | default(false) | bool
+        fail_msg: >-
+          The wildcard certificate is inside its expiry warning window:
+          {{ hostvars[media_host].media_cert_detail | default('see homelab-certwatch.sh') }}
+
     - name: Send safe verification success notification
       ansible.builtin.include_role:
         name: notify

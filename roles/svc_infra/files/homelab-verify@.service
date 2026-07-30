@@ -5,13 +5,23 @@
 Description=homelab-iac non-disruptive verification for %i
 Wants=network-online.target
 After=network-online.target
-ConditionPathIsDirectory=/opt/homelab-iac/.venv
 
 [Service]
 Type=oneshot
 User=%i
 WorkingDirectory=/opt/homelab-iac
 EnvironmentFile=/etc/homelab-healthchecks.env
+# This was ConditionPathIsDirectory=/opt/homelab-iac/.venv, which made a runner
+# that CANNOT run indistinguishable from one that ran and passed. systemd treats
+# an unmet condition as success: Result=success, ExecStart never runs, so
+# OnFailure= does not fire, hc-ping.sh never sends its fail, and is-active /
+# is-enabled on the timer both still pass. A missing or half-built virtualenv —
+# an interrupted `make infra`, a failed pip install, a full /opt — would have
+# silently ended nightly verification with every indicator green.
+#
+# ExecStartPre fails instead, which is a real failure and alerts through both
+# paths.
+ExecStartPre=/usr/bin/test -d /opt/homelab-iac/.venv
 ExecStart=/usr/local/sbin/homelab-verify-run.sh
 TimeoutStartSec=1800
 UMask=0077

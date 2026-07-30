@@ -14,26 +14,47 @@
 # is exactly the failure mode worth catching.
 set -uo pipefail
 
-CERT={{ ('/etc/letsencrypt/live/' ~ service_domain ~ '/fullchain.pem') | quote }}
+# BOTH copies are checked, and the second one is the point.
+#
+# certbot writes to /etc/letsencrypt/live, but Caddy serves
+# /etc/caddy/certs/fullchain.pem — a copy placed there by the deploy hook at
+# /etc/letsencrypt/renewal-hooks/deploy/caddy.sh. Watching only the certbot side
+# misses the failure where the hook is gone (a certbot package transaction, a
+# restored /etc/letsencrypt, a hooks directory wiped): renewal then succeeds and
+# exits 0, certbot-renew.service never fails, the live cert looks perfect every
+# single day, and the certificate Caddy is actually serving quietly expires and
+# breaks HTTPS for every service. `make verify`'s cert gate would not catch it
+# either — it asserts issuer and SAN, both of which an expired cert still has.
+CERTS=(
+    {{ ('/etc/letsencrypt/live/' ~ service_domain ~ '/fullchain.pem') | quote }}
+    /etc/caddy/certs/fullchain.pem
+)
 DAYS={{ cert_expiry_days | default(21) }}
 
-if [[ ! -r "$CERT" ]]; then
-    echo "certificate $CERT is missing or unreadable" >&2
-    exit 1
-fi
+problems=""
+for cert in "${CERTS[@]}"; do
+    if [[ ! -r "$cert" ]]; then
+        problems+=$'\n'"certificate ${cert} is missing or unreadable"
+        continue
+    fi
 
-enddate=$(openssl x509 -enddate -noout -in "$CERT" 2>/dev/null | cut -d= -f2-)
-if [[ -n "$enddate" ]]; then
-    end_epoch=$(date -d "$enddate" +%s 2>/dev/null || echo 0)
-    now=$(date +%s)
-    remaining=$(( (end_epoch - now) / 86400 ))
-    echo "certificate $CERT expires $enddate (${remaining} days remaining, threshold ${DAYS})"
-fi
+    enddate=$(openssl x509 -enddate -noout -in "$cert" 2>/dev/null | cut -d= -f2-)
+    if [[ -n "$enddate" ]]; then
+        end_epoch=$(date -d "$enddate" +%s 2>/dev/null || echo 0)
+        now=$(date +%s)
+        remaining=$(( (end_epoch - now) / 86400 ))
+        echo "certificate ${cert} expires ${enddate} (${remaining} days remaining, threshold ${DAYS})"
+    fi
 
-# -checkend is the authoritative test; the message above is just context for
-# whoever reads the journal after the alert.
-if ! openssl x509 -checkend $(( DAYS * 86400 )) -noout -in "$CERT" >/dev/null 2>&1; then
-    echo "certificate expires within ${DAYS} days and has not renewed — check certbot-renew.service and the Cloudflare API token" >&2
+    # -checkend is the authoritative test; the message above is just context for
+    # whoever reads the journal after the alert.
+    if ! openssl x509 -checkend $(( DAYS * 86400 )) -noout -in "$cert" >/dev/null 2>&1; then
+        problems+=$'\n'"${cert} expires within ${DAYS} days and has not renewed — check certbot-renew.service, the Cloudflare API token, and the Caddy deploy hook"
+    fi
+done
+
+if [[ -n "$problems" ]]; then
+    echo "certificate problems:${problems}" >&2
     exit 1
 fi
 

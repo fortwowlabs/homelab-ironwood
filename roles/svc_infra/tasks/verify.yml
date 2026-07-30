@@ -152,6 +152,36 @@
     - is-enabled
   changed_when: false
 
+# The backup freshness check is what reports to healthchecks.io, so a timer that
+# stopped firing costs the estate its only outside-the-house view of whether
+# backups are still happening. It had no gate at all.
+- name: Verify the backup freshness timer is active and enabled
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - "{{ item }}"
+      - homelab-backups-fresh.timer
+  loop:
+    - is-active
+    - is-enabled
+  changed_when: false
+
+# And run the script, rather than trusting that its timer exists — the same
+# reasoning applied to certwatch on svc-media. A timer being active says
+# nothing about whether the thing it runs still works.
+#
+# HC_PING_BACKUPS is deliberately blanked (hc-ping.sh treats an empty UUID as
+# "skip"). healthchecks.io detects a dead timer by the ABSENCE of pings, so if
+# this run pinged too, a homelab-backups-fresh.timer that had stopped firing
+# would still look alive from verify's pings alone — which would quietly convert
+# the dead-man's switch back into a liveness check for `make verify`. The timer
+# is gated above; this task is only asserting that the logic still works.
+- name: Verify the backup freshness check passes
+  ansible.builtin.command: /usr/local/sbin/backups-fresh.sh
+  environment:
+    HC_PING_BACKUPS: ""
+  changed_when: false
+
 - name: Check the runner's vault password file
   ansible.builtin.stat:
     path: "{{ verify_runner_secret_file }}"
@@ -170,6 +200,31 @@
       {{ verify_runner_secret_file }} is missing or has the wrong
       ownership/permissions, so nightly verification cannot run. Install it
       as described in docs/operations.md ("The nightly verification runner").
+
+# Same reasoning as the assert above, applied to the other thing that is
+# configured by hand and silently optional. hc-ping.sh treats an empty UUID as
+# "skip and exit 0", which is the right behaviour for a fresh checkout and the
+# wrong behaviour for this estate: healthchecks.io is the only alerting layer
+# that survives the house losing power or network, so an unset UUID disarms the
+# backstop while every local check stays green and every deploy reports
+# changed=0. All four are set today; this exists so that a vault edit, a
+# rebuild from a bare clone, or a paste under the wrong name cannot quietly
+# undo that. Checked on one host because the vault is global.
+- name: Assert the healthchecks.io ping UUIDs are configured
+  ansible.builtin.assert:
+    that:
+      - (lookup('vars', item, default='')) | string | trim | length > 0
+    fail_msg: >-
+      {{ item }} is empty, so that healthchecks.io check will never be pinged
+      and its silence cannot be distinguished from the estate being dead.
+      See the vault_hc_ping_* block in inventory/group_vars/all_vault.yml.example.
+  loop:
+    - vault_hc_ping_verify
+    - vault_hc_ping_backups
+    - vault_hc_ping_pve
+    - vault_hc_ping_heartbeat
+  no_log: true
+  diff: false
 
 - name: Verify node_exporter metrics
   ansible.builtin.include_role:

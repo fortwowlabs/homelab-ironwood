@@ -3,12 +3,23 @@
   ansible.builtin.command: systemctl is-active cockpit.socket
   changed_when: false
 
-- name: Verify the disk alert timer is active
-  ansible.builtin.command: systemctl is-active homelab-diskalert.timer
-  changed_when: false
-
-- name: Verify the failed-unit watch timer is active
-  ansible.builtin.command: systemctl is-active homelab-failedunits.timer
+# is-enabled as well as is-active. `systemctl --failed` never reports a unit
+# that is merely not enabled — it is inactive (dead), not failed — so a timer
+# started by hand during troubleshooting passes every liveness check, keeps
+# working until the next reboot, and is then gone with nothing complaining.
+# For watchers that exist to notice problems while nobody is home, "will it
+# come back" is the property that matters.
+- name: Verify the monitoring timers are active and enabled
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - "{{ item.1 }}"
+      - "{{ item.0 }}"
+  loop: >-
+    {{ ['homelab-diskalert.timer', 'homelab-failedunits.timer']
+       | product(['is-active', 'is-enabled']) | list }}
+  loop_control:
+    label: "{{ item.1 }} {{ item.0 }}"
   changed_when: false
 
 # The alerting path is itself unattended infrastructure: if the OnFailure

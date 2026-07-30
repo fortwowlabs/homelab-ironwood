@@ -359,6 +359,29 @@
     group: "{{ svc_gid }}"
     mode: "0755"
 
+# roles/svc_infra has this guard driven by each catalog entry's require_vault
+# list (see the assert in its files.yml); download_apps has no such field, so
+# the one secret in this role gets the bespoke form the repo already uses for
+# the Minecraft RCON password in roles/svc_media/tasks/files.yml.
+#
+# The REPLACE_ half is the part that matters. A var still holding its
+# all_vault.yml.example placeholder is non-empty, so a length test alone lets it
+# through and deploys a secret_key that is published in this repository. That is
+# a rebuild-from-bare-clone failure: the vault is gitignored, so anyone
+# reconstructing the estate fills in the vars the deploy complains about, and
+# silently keeps the placeholder for every var it does not.
+- name: Require the SearXNG secret key
+  ansible.builtin.assert:
+    that:
+      - (vault_searxng_secret | default('')) | string | length > 0
+      - not ((vault_searxng_secret | default('')) | string is match('REPLACE_'))
+    fail_msg: >-
+      vault_searxng_secret is empty or still set to its all_vault.yml.example
+      REPLACE_* placeholder. Generate one with `openssl rand -hex 32` and put it
+      in the vault; a known secret_key lets anyone forge SearXNG session state.
+  no_log: true
+  diff: false
+
 - name: Render SearXNG's settings
   # Owned by svc_uid, not root, even though the container runs as root (this
   # image sets no USER and its entrypoint does not drop privileges). The

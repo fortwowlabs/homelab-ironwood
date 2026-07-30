@@ -56,22 +56,54 @@ def triggered_service(timer: Path) -> str:
     return re.sub(r"@[^.]*\.", "@.", name)
 
 
-def covered_units() -> set[str]:
-    """Every unit that gets an OnFailure drop-in, across all three sources."""
-    units: set[str] = set()
+# Which hosts actually run each role, and therefore which host's
+# onfailure_units_extra can legitimately cover a timer shipped by that role.
+# roles/service_vm and roles/mon run on every service VM; the svc_* roles run on
+# exactly one; pve_mon runs on the hypervisor, which is not a service VM at all
+# and keeps its list in the role rather than in host_vars.
+PVE = "__pve__"
+SERVICE_HOSTS = frozenset({"svc-download", "svc-media", "svc-infra"})
+ROLE_HOSTS: dict[str, frozenset[str]] = {
+    "service_vm": SERVICE_HOSTS,
+    "mon": SERVICE_HOSTS,
+    "svc_download": frozenset({"svc-download"}),
+    "svc_media": frozenset({"svc-media"}),
+    "svc_infra": frozenset({"svc-infra"}),
+    "pve_mon": frozenset({PVE}),
+}
+
+
+def role_of(unit: Path) -> str:
+    """roles/<role>/files/x.timer -> <role>."""
+    return unit.relative_to(ROOT).parts[1]
+
+
+def coverage_by_host() -> tuple[set[str], dict[str, set[str]]]:
+    """Units alerted everywhere, and the per-host additions kept separate.
+
+    Keeping these apart is the whole point. Flattening every host's
+    onfailure_units_extra into one set meant the gate could not tell whether a
+    unit was listed on the host that actually runs it: moving
+    homelab-certwatch.service from svc-media.yml to svc-infra.yml — a plausible
+    edit when reorganising host_vars — still reported OK, while the drop-in was
+    created on a host where the unit does not exist and svc-media's certwatch
+    silently lost its alert entirely.
+    """
     main = yaml.safe_load(
         (ROOT / "inventory/group_vars/all/main.yml").read_text(encoding="utf-8")
     )
-    units.update(main.get("onfailure_units_base") or [])
+    base: set[str] = set(main.get("onfailure_units_base") or [])
+
+    per_host: dict[str, set[str]] = {}
     for host_vars in sorted((ROOT / "inventory/host_vars").glob("*.yml")):
         document = yaml.safe_load(host_vars.read_text(encoding="utf-8")) or {}
-        units.update(document.get("onfailure_units_extra") or [])
-    # The hypervisor is not a service_vm and keeps its own list in the role.
+        per_host[host_vars.stem] = set(document.get("onfailure_units_extra") or [])
+
     pve_defaults = yaml.safe_load(
         (ROOT / "roles/pve_mon/defaults/main.yml").read_text(encoding="utf-8")
     )
-    units.update(pve_defaults.get("pve_onfailure_units") or [])
-    return units
+    per_host[PVE] = set(pve_defaults.get("pve_onfailure_units") or [])
+    return base, per_host
 
 
 def alerter_copies_match() -> str | None:
@@ -93,7 +125,7 @@ def alerter_copies_match() -> str | None:
 
 
 def main() -> int:
-    covered = covered_units()
+    base, per_host = coverage_by_host()
     failures: list[str] = []
     checked = 0
 
@@ -101,45 +133,75 @@ def main() -> int:
     if drift:
         failures.append(drift)
 
+    # Forward direction: every timer must be covered on a host that runs it.
     for timer in unit_files():
         service = triggered_service(timer)
         checked += 1
-        if service in EXEMPT or service in covered:
+        if service in EXEMPT:
             continue
-        failures.append(
-            f"{timer.relative_to(ROOT)} triggers {service}, which has no "
-            f"OnFailure alert: add it to onfailure_units_base "
-            f"(inventory/group_vars/all/main.yml) or onfailure_units_extra "
-            f"(inventory/host_vars/<host>.yml), or exempt it in {Path(__file__).name} "
-            f"with a reason."
-        )
+        role = role_of(timer)
+        hosts = ROLE_HOSTS.get(role)
+        if hosts is None:
+            failures.append(
+                f"{timer.relative_to(ROOT)} lives in roles/{role}, which is not "
+                f"in ROLE_HOSTS in {Path(__file__).name} — add it so coverage "
+                f"can be checked against the hosts that actually run it."
+            )
+            continue
+        uncovered = sorted(h for h in hosts if service not in base | per_host.get(h, set()))
+        if uncovered:
+            failures.append(
+                f"{timer.relative_to(ROOT)} triggers {service}, which has no "
+                f"OnFailure alert on {', '.join(uncovered)}: add it to "
+                f"onfailure_units_base (inventory/group_vars/all/main.yml) or to "
+                f"onfailure_units_extra on that host, or exempt it in "
+                f"{Path(__file__).name} with a reason."
+            )
 
-    # A stale entry is its own bug: it renders a drop-in for a unit that does
-    # not exist, which looks like coverage and is not.
-    known = {triggered_service(timer) for timer in unit_files()}
+    # Reverse direction: an entry that names a unit the host does not run
+    # renders a drop-in for a unit that does not exist, which looks like
+    # coverage and is not.
+    triggered_on: dict[str, set[str]] = {}
+    for timer in unit_files():
+        for host in ROLE_HOSTS.get(role_of(timer), frozenset()):
+            triggered_on.setdefault(host, set()).add(triggered_service(timer))
+
     # Units not driven by a timer in this repo but legitimately covered:
     # distro-provided units and units started by other units.
     external = {
         "certbot-renew.service",   # distro timer, not a file in this repo
         "vpn-netns.service",       # oneshot, pulled in by the download stack
     }
-    for unit in sorted(covered):
-        if unit not in known and unit not in external:
+    all_triggered = set().union(*triggered_on.values()) if triggered_on else set()
+    for unit in sorted(base):
+        if unit not in all_triggered and unit not in external:
             failures.append(
-                f"onfailure list names {unit}, but no timer in this repo "
+                f"onfailure_units_base names {unit}, but no timer in this repo "
                 f"triggers it and it is not listed as external in "
                 f"{Path(__file__).name} — a drop-in for a unit that does not "
                 f"exist looks like coverage without being coverage."
             )
+    for host, units in sorted(per_host.items()):
+        for unit in sorted(units):
+            if unit in external:
+                continue
+            if unit not in triggered_on.get(host, set()):
+                failures.append(
+                    f"{host} lists {unit} in its onfailure units, but nothing "
+                    f"that host runs triggers it. The drop-in would be created "
+                    f"where the unit does not exist, while the host that does "
+                    f"run it goes unalerted."
+                )
 
     if failures:
         print("OnFailure coverage validation failed:", file=sys.stderr)
         for failure in failures:
             print(f"  {failure}", file=sys.stderr)
         return 1
+    alerted = len(base | set().union(*per_host.values()) if per_host else base)
     print(
-        f"OnFailure coverage: OK ({checked} timers, {len(covered)} units alerted, "
-        f"{len(EXEMPT)} exempt)"
+        f"OnFailure coverage: OK ({checked} timers, {alerted} units alerted, "
+        f"{len(EXEMPT)} exempt, host-keyed)"
     )
     return 0
 
