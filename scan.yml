@@ -146,6 +146,14 @@
         group: "{{ svc_gid }}"
         mode: "0644"
 
+    - name: Write the browsable scan report
+      ansible.builtin.template:
+        src: roles/svc_infra/templates/scan-report.html.j2
+        dest: "{{ scan_report_dir }}/index.html"
+        owner: "{{ svc_uid }}"
+        group: "{{ svc_gid }}"
+        mode: "0644"
+
     - name: Record this run's totals as the baseline for the next
       ansible.builtin.copy:
         content: |

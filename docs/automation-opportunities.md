@@ -248,7 +248,7 @@ Each of these was found, understood and deliberately left alone. They are here
 so that "we decided" does not decay into "nobody noticed". None is a live
 compromise; all are things that make a future mistake more expensive.
 
-- **Direct `IP:port` bypasses SSO.** The twelve protected services are still
+- **Direct `IP:port` bypasses SSO.** The thirteen protected services are still
   reachable unauthenticated from the whole flat LAN and the tailnet, because
   firewalld and the nftables backstop open every catalog `ui_port` to
   `lan_cidr`. Kept as the recovery path if Authelia breaks. Closing it means
@@ -256,6 +256,20 @@ compromise; all are things that make a future mistake more expensive.
   `searxng` (Open WebUI dials it cross-VM), `shelfmark` and Cockpit left open,
   an update to the rendered-nft assertion in `validate_generated_catalog.py`,
   and a check of every hand-made Uptime Kuma monitor.
+  - **The scan report page is the sharpest case of this, and was accepted
+    knowingly on 2026-07-30.** `scan.<domain>` is behind Authelia, but the same
+    content is served with no authentication at all on svc-infra:8085, because
+    the `scan-reports` catalog entry gets the same `lan_cidr` firewalld rule as
+    every other app. Unlike the other twelve, what leaks here is not a service
+    someone could already reach — it is the *index*: every unpatched CVE by
+    host and severity, and once later branches land, every open port, every
+    failed benchmark rule, and every service still on a default credential.
+    That is a target list, and it is one an attacker on the LAN would otherwise
+    have to spend time and noise assembling. It was accepted for consistency
+    with the other entries rather than because the content is comparable; if
+    exactly one port in this estate is ever scoped to svc-media, it should be
+    this one, via a `firewall_source` field on the catalog entry plus the
+    corresponding update to the rendered-nft assertion.
 - **The Authelia session cookie is scoped to the parent domain**, so Caddy
   forwards it to the ~20 vhosts *outside* forward_auth as well. Any of those
   backends can read a logged-in user's `authelia_session` and replay it against

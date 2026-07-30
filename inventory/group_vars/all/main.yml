@@ -279,6 +279,9 @@ caddy_services:
   prometheus:  { backend: "{{ hostvars[infra_host].ansible_host }}:9091", group: Infra, icon: prometheus }
   grafana:     { backend: "{{ hostvars[infra_host].ansible_host }}:3005", group: Infra, icon: grafana }
   mealie:      { backend: "{{ hostvars[infra_host].ansible_host }}:9925", group: Infra, icon: mealie }
+  # Nightly security scan output. See the exposure note on the scan-reports
+  # catalog entry: forward-auth gates this hostname, not the port behind it.
+  scan:        { backend: "{{ hostvars[infra_host].ansible_host }}:8085", group: Infra, icon: security }
   # Open WebUI. Deliberately NOT in sso_protected_services: it has its own
   # account system and its own first-visit admin setup, and fronting that with
   # Authelia would mean two logins for one service. Its native apps and the
@@ -355,6 +358,16 @@ sso_protected_services:
   # GUI has been an open item for exactly this; Prometheus has no auth at all.
   - syncthing
   - prometheus
+  # The scan report page. A static file server has no login of its own, and its
+  # content — every unpatched CVE and open port in the estate — is the least
+  # appropriate thing here to serve unauthenticated. Note this only protects
+  # https://scan.<domain>; the direct IP:port remains open to the LAN, which is
+  # recorded as an accepted risk in docs/automation-opportunities.md.
+  #
+  # `scan`, not `scan-reports`: this list is keyed by Caddy vhost name, while
+  # the container is the `scan-reports` entry in infra_apps. The two namespaces
+  # differ elsewhere too (beszel-hub is served at beszel).
+  - scan
   # SearXNG has no auth of its own and its settings deliberately disable the
   # per-IP limiter and bot detection — correct for the socket-proxy path,
   # where every request arrives from 10.77.0.2 and the limiter would class the

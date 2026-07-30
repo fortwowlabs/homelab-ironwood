@@ -129,6 +129,7 @@ validate-secrets:
 validate-ci:
 	$(PYTHON) tests/validate_ci_safety.py
 	$(PYTHON) tests/validate_verify_safety.py
+	$(PYTHON) tests/validate_scan_readonly.py
 
 preflight: ## Authenticate, show the safe inventory graph, and require VM connectivity
 	$(INVENTORY_CMD) --graph $(VAULT)

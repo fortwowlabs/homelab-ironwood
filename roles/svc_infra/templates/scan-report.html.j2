@@ -1,0 +1,109 @@
+{#- Browser view of the same data as scan-report.txt.j2. Deliberately one
+    self-contained file with no external CSS, JS, font or image: this page is
+    served by a static file server with no network access of its own, and it
+    is read exactly when something is wrong, which is the worst time to depend
+    on a CDN. -#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>homelab security scan</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+         margin: 0 auto; max-width: 62rem; padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+  .sub { opacity: .7; margin: 0 0 1.75rem; font-size: .9rem; }
+  .cards { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: 1.75rem; }
+  .card { border: 1px solid currentColor; border-radius: .5rem; padding: .7rem 1rem;
+          min-width: 8rem; opacity: .95; }
+  .card .n { font-size: 1.8rem; font-weight: 700; display: block; line-height: 1.1; }
+  .card .l { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; opacity: .75; }
+  .crit .n { color: #c0392b; }
+  .imp .n  { color: #b9770e; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0 2rem; }
+  th, td { text-align: right; padding: .4rem .6rem; border-bottom: 1px solid rgba(128,128,128,.35); }
+  th:first-child, td:first-child { text-align: left; }
+  th { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; opacity: .75; }
+  .bad { color: #c0392b; font-weight: 700; }
+  .note { border-left: 3px solid rgba(128,128,128,.5); padding: .1rem 0 .1rem 1rem;
+          margin: 1.5rem 0; opacity: .85; font-size: .9rem; }
+  .banner { border: 1px solid #c0392b; border-radius: .5rem; padding: .75rem 1rem;
+            margin-bottom: 1.5rem; }
+  a { color: inherit; }
+</style>
+</head>
+<body>
+
+<h1>homelab security scan</h1>
+<p class="sub">{{ ansible_date_time.iso8601 }} &middot; report-only &mdash; this run installed, upgraded and restarted nothing</p>
+
+{% if scan_broken | length > 0 %}
+<div class="banner">
+  <strong>{{ scan_broken | join(', ') }} could not be scanned.</strong><br>
+  A host that could not be asked is not a host with nothing pending. Treat the
+  numbers below as a floor, not a total.
+</div>
+{% endif %}
+
+<div class="cards">
+  <div class="card"><span class="n">{{ scan_total }}</span><span class="l">pending errata</span></div>
+  <div class="card crit"><span class="n">{{ scan_critical }}</span><span class="l">critical</span></div>
+  <div class="card imp"><span class="n">{{ scan_important }}</span><span class="l">important</span></div>
+  <div class="card"><span class="n">{{ scan_ok | length }}/{{ groups['service_vms'] | length }}</span><span class="l">hosts answered</span></div>
+</div>
+
+<table>
+  <thead>
+    <tr><th>host</th><th>total</th><th>critical</th><th>important</th><th>moderate</th><th>low</th></tr>
+  </thead>
+  <tbody>
+{% for host in groups['service_vms'] | sort %}
+{%   set f = scan_findings[host] | default({}) %}
+{%   if f.ok | default(false) | bool %}
+    <tr>
+      <td>{{ host }}</td>
+      <td>{{ f.total }}</td>
+      <td{{ ' class="bad"' if (f.critical | int) > 0 else '' }}>{{ f.critical }}</td>
+      <td>{{ f.important }}</td>
+      <td>{{ f.moderate }}</td>
+      <td>{{ f.low }}</td>
+    </tr>
+{%   else %}
+    <tr><td>{{ host }}</td><td colspan="5" class="bad">NOT SCANNED &mdash; {{ f.detail | default('no result recorded') }}</td></tr>
+{%   endif %}
+{% endfor %}
+  </tbody>
+</table>
+
+<p>
+  Previous run total: <strong>{{ scan_previous.total | default('none — first run') }}</strong> &middot;
+  Escalated to alerts: <strong>{{ 'YES — ' ~ scan_escalation_reason if scan_escalate | bool else 'no' }}</strong>
+</p>
+
+<p><a href="latest.txt">latest.txt</a> &middot; <a href="state.json">state.json</a></p>
+
+<div class="note">
+  <p><strong>What this means.</strong> Nothing in this estate updates itself. That is
+  a deliberate trade recorded in <code>docs/unattended.md</code>: packages install on
+  demand and images are digest-pinned, so nothing shifts underneath while nobody is
+  watching. The cost of that trade is the number at the top of this page, and the
+  reason this scan exists is that the number was previously unknown rather than
+  accepted.</p>
+  <p>Acting on it is a manual decision this job will never take for you. Applying
+  errata is dnf's security-only upgrade path, run on the host by hand, followed by
+  the reboot a kernel or glibc advisory usually requires.</p>
+</div>
+
+<div class="note">
+  <p><strong>This page is not a secret, and it should be.</strong> The Authelia login in
+  front of <code>scan.{{ service_domain }}</code> protects the hostname, not the
+  service: this same content is served unauthenticated on
+  <code>{{ hostvars[infra_host].ansible_host }}:8085</code> to anything on the LAN
+  or the tailnet. That is an accepted risk, recorded in
+  <code>docs/automation-opportunities.md</code>.</p>
+</div>
+
+</body>
+</html>
