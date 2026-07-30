@@ -59,6 +59,30 @@
   ansible.builtin.command: /usr/local/sbin/pve-health.sh
   changed_when: false
 
+# Same check and same reasoning as roles/service_vm/tasks/verify.yml: assert the
+# rendered file rather than the vault variable, because it is what pve-health.sh
+# actually pings with and it is present regardless of whether the vault is.
+# This host renders only HC_PING_PVE, but the regex is key-agnostic so it stays
+# correct if another is ever added.
+- name: Read the healthchecks.io ping configuration
+  ansible.builtin.slurp:
+    src: /etc/homelab-healthchecks.env
+  register: pve_mon_hc_env
+  no_log: true
+
+- name: Assert every healthchecks.io ping UUID is configured
+  ansible.builtin.assert:
+    that:
+      - not ((pve_mon_hc_env.content | b64decode) is search("(?m)^HC_PING_[A-Z_]+=(''|\"\"|)$"))
+    fail_msg: >-
+      /etc/homelab-healthchecks.env on {{ inventory_hostname }} has an empty
+      HC_PING_* value, so the hypervisor's healthchecks.io check will never be
+      pinged — and this host is the one whose death takes every VM with it, so
+      its silence is the signal that matters most. Set vault_hc_ping_pve and
+      run `make pve`; editing the vault alone changes nothing on the host.
+  no_log: true
+  diff: false
+
 - name: Mark PVE monitoring verification complete
   ansible.builtin.set_fact:
     pve_mon_verified: true

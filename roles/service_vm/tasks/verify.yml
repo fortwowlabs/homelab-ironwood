@@ -53,6 +53,47 @@
         label: "{{ item.path }}"
       changed_when: false
 
+# healthchecks.io is the only alerting layer that survives the house losing
+# power or its network, and hc-ping.sh treats an empty UUID as "skip and exit
+# 0" — correct for a fresh checkout, wrong here, because it disarms the backstop
+# while every local check stays green and every deploy reports changed=0.
+#
+# Asserted against the RENDERED file rather than the vault_hc_ping_* variables.
+# That distinction is the whole point: this play also runs from the nightly
+# runner on svc-infra, whose checkout is a `git archive` and therefore cannot
+# contain the gitignored vault. A vault-variable assert passes from the
+# workstation and fails on the runner every night. The rendered file is on the
+# host in both cases, and it is what the ping actually reads — so this also
+# catches a vault that was edited but never deployed, which the variable form
+# would have called fine.
+#
+# The regex rejects any HC_PING_* key whose value is empty, rather than naming
+# the keys, so it does not need to know which host carries which: svc-media uses
+# HC_PING_HEARTBEAT and svc-infra uses HC_PING_VERIFY and HC_PING_BACKUPS, but
+# healthchecks.env.j2 renders all three on both. The guard matches the one on
+# the render task in packages.yml — svc-download has no such file at all,
+# because its nftables backstop blocks the egress that would use it.
+- name: Read the healthchecks.io ping configuration
+  ansible.builtin.slurp:
+    src: /etc/homelab-healthchecks.env
+  register: service_vm_hc_env
+  no_log: true
+  when: not (service_guarded_egress | bool)
+
+- name: Assert every healthchecks.io ping UUID is configured
+  ansible.builtin.assert:
+    that:
+      - not ((service_vm_hc_env.content | b64decode) is search("(?m)^HC_PING_[A-Z_]+=(''|\"\"|)$"))
+    fail_msg: >-
+      /etc/homelab-healthchecks.env on {{ inventory_hostname }} has an empty
+      HC_PING_* value, so that healthchecks.io check will never be pinged and
+      its silence cannot be distinguished from the estate being dead. Set the
+      vault_hc_ping_* var (see inventory/group_vars/all_vault.yml.example) and
+      redeploy — editing the vault alone does not change anything on the host.
+  no_log: true
+  diff: false
+  when: not (service_guarded_egress | bool)
+
 - name: Mark shared VM verification complete
   ansible.builtin.set_fact:
     service_vm_verified: true

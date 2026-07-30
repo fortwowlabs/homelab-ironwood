@@ -201,30 +201,17 @@
       ownership/permissions, so nightly verification cannot run. Install it
       as described in docs/operations.md ("The nightly verification runner").
 
-# Same reasoning as the assert above, applied to the other thing that is
-# configured by hand and silently optional. hc-ping.sh treats an empty UUID as
-# "skip and exit 0", which is the right behaviour for a fresh checkout and the
-# wrong behaviour for this estate: healthchecks.io is the only alerting layer
-# that survives the house losing power or network, so an unset UUID disarms the
-# backstop while every local check stays green and every deploy reports
-# changed=0. All four are set today; this exists so that a vault edit, a
-# rebuild from a bare clone, or a paste under the wrong name cannot quietly
-# undo that. Checked on one host because the vault is global.
-- name: Assert the healthchecks.io ping UUIDs are configured
-  ansible.builtin.assert:
-    that:
-      - (lookup('vars', item, default='')) | string | trim | length > 0
-    fail_msg: >-
-      {{ item }} is empty, so that healthchecks.io check will never be pinged
-      and its silence cannot be distinguished from the estate being dead.
-      See the vault_hc_ping_* block in inventory/group_vars/all_vault.yml.example.
-  loop:
-    - vault_hc_ping_verify
-    - vault_hc_ping_backups
-    - vault_hc_ping_pve
-    - vault_hc_ping_heartbeat
-  no_log: true
-  diff: false
+# The healthchecks UUIDs are asserted in roles/service_vm/tasks/verify.yml
+# against the rendered /etc/homelab-healthchecks.env, not here against the vault
+# variables. Reason on the record, because the first attempt got it wrong: this
+# play runs in two contexts, and only one of them has a vault. The nightly
+# runner's checkout is a `git archive`, which cannot carry the gitignored
+# vault.yml, so every vault_* var is undefined on svc-infra and a vault-based
+# assert fails there every night while passing from the workstation.
+#
+# The rendered file is also the more honest subject: it is what hc-ping.sh
+# actually reads, so checking it catches a vault edited but never deployed —
+# which the vault-variable form would have reported as fine.
 
 - name: Verify node_exporter metrics
   ansible.builtin.include_role:
