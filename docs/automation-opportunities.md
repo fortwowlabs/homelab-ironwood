@@ -241,3 +241,58 @@ Unchanged from the analysis above:
 - **Uptime Kuma monitors** — no supported provisioning path.
 - Everything in Tier 4: account creation where only you should know the
   password, indexer credentials, printer pairing, Semaphore's project wiring.
+
+## Consider later — accepted risks from the 2026-07-29 review
+
+Each of these was found, understood and deliberately left alone. They are here
+so that "we decided" does not decay into "nobody noticed". None is a live
+compromise; all are things that make a future mistake more expensive.
+
+- **Direct `IP:port` bypasses SSO.** The eleven protected services are still
+  reachable unauthenticated from the whole flat LAN and the tailnet, because
+  firewalld and the nftables backstop open every catalog `ui_port` to
+  `lan_cidr`. Kept as the recovery path if Authelia breaks. Closing it means
+  scoping those ports to svc-media's address, which would also need
+  `searxng` (Open WebUI dials it cross-VM), `shelfmark` and Cockpit left open,
+  an update to the rendered-nft assertion in `validate_generated_catalog.py`,
+  and a check of every hand-made Uptime Kuma monitor.
+- **The Authelia session cookie is scoped to the parent domain**, so Caddy
+  forwards it to the ~20 vhosts *outside* forward_auth as well. Any of those
+  backends can read a logged-in user's `authelia_session` and replay it against
+  a protected one. Fixing it means stripping just that cookie per-vhost, which
+  Caddy can do but fiddlily; the alternative — narrowing the cookie domain —
+  is what makes single sign-on work at all.
+- **The nightly runner's SSH key and vault password.** See
+  `unattended.md`. Narrowing it means a forced-command wrapper and a dedicated
+  sudoers entry instead of reusing the `NOPASSWD:ALL` deploy account.
+- **Ping UUIDs and the ntfy token travel as `curl` argv**, where
+  `/proc/<pid>/cmdline` is world-readable, so any local account can read them
+  during the request. A healthchecks UUID is a bearer credential: holding one
+  lets you keep a check green forever, which is worse than no check. Fix is
+  `curl --config` or reading the value from the already-injected environment by
+  name. Currently near-moot — `vault_ntfy_token` is empty and ntfy runs
+  unauthenticated.
+- **`netbox-redis` keeps a chowned persistent volume** (`--appendonly yes`),
+  against the rule in `CLAUDE.md` that cache and broker containers should get no
+  volume at all. Blast radius is limited by its authenticated `PING`
+  healthcheck, but this is the configuration that wedged two redis containers
+  here before.
+- **svc-download's node_exporter runs `SecurityLabelDisable=true` while
+  rootful and mounting `/`.** The justifying comment was copied from the
+  rootless svc-media/svc-infra copies, where it is accurate. The narrower fix
+  is `SecurityLabelType=spc_t`, which keeps a label.
+- **No scheduled canary publishes to `homelab-alerts`.** Every alert path is
+  exercised only when something breaks, so a broken delivery path — wrong topic
+  subscription, an ACL, a rejected token — produces silence that is
+  indistinguishable from good news. The heartbeat only probes ntfy's
+  `/v1/health`, which proves its HTTP server answers, not that a message can be
+  published.
+- **`pve_mon_verified` is never asserted** by the final play in `verify.yml`, so
+  a `pve_mon_hosts` play that matched nothing still yields a green run. Left
+  alone because the nightly runner legitimately excludes that play by `--limit`,
+  so the fix needs an explicit "was the hypervisor in scope" flag rather than a
+  bare assert. Partly mitigated: the zed and smartd wiring assertions now also
+  run daily inside `pve-health.sh` on the host itself.
+- **`systemd-analyze verify` has never run** against this repo's units.
+  `validate_systemd_units.py` downgrades itself to static checks on non-Linux
+  hosts, the workstation is macOS, and CI has never fired.

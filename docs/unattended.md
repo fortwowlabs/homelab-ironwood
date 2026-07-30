@@ -132,6 +132,29 @@ than one that admits its edges:
   home; keep Tailscale working on the phone and a laptop.
 - **The vault is not in git.** A total loss needs the vault out of band, or
   every secret gets regenerated.
+- **SSO protects the proxied path, not the service.** `forward_auth` applies to
+  `https://<name>.<domain>`. Every protected service stays reachable
+  unauthenticated on its direct `IP:port` from `lan_cidr` and the tailnet. That
+  is deliberate — it is the way back in if Authelia itself breaks while nobody
+  is home — but it means the SSO layer is a boundary against the internet and
+  against casual browsing, not against anything already on the LAN.
+- **The nightly runner is root-equivalent across the estate.** `svcops` on
+  svc-infra holds a passphraseless SSH key authorised for the `NOPASSWD:ALL`
+  deploy account on all three VMs, plus `.vault_pass`. That capability used to
+  exist only on the workstation, which is powered off; it is now on an
+  always-on VM. Accepted knowingly: the runner cannot verify anything it cannot
+  reach, and the alternative is no verification while away. Recorded as a
+  follow-up in `automation-opportunities.md`.
+
+### The `changed=0` check needs two runs after a commit
+
+The workflow in `CLAUDE.md` ends with a clean-tree deploy reporting `changed=0`.
+Immediately after any commit, the first `make infra` reports **`changed=3`**:
+`.deployed-rev` on svc-infra still holds the previous revision, so the runner
+checkout-sync block rebuilds the archive, unpacks it and records the new
+revision. Run `make infra` a second time and it settles to `changed=0`. This is
+expected, not drift — but it does mean the guarantee is "the second deploy is
+clean", and step 5 of the departure checklist above should be read that way.
 
 ## Coming home
 

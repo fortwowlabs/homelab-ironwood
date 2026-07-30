@@ -40,6 +40,19 @@ gitignored, so a clean tree still does not fully describe the deployed state.
 The commit pins the code, not the secrets. Rebuilding from a bare clone
 requires the vault out of band.
 
+**Second caveat: on svc-infra the first deploy after any commit reports
+`changed=3`, not `changed=0`.** The nightly runner keeps a `git archive` of the
+tree at `/opt/homelab-iac` with the deployed revision in `.deployed-rev`. Right
+after a commit that file still names the previous revision, so the sync block
+rebuilds the archive, unpacks it and records the new revision — three changed
+tasks, every time. Run `make infra` again and it settles to `changed=0`.
+
+So step 6 in practice is: deploy, and if svc-infra reports exactly those three,
+deploy once more and require `changed=0` from the second run. Anything else
+still has to be explained before merging. Do not paper over a genuine diff by
+running the deploy twice and quoting the second number — check *which* tasks
+changed.
+
 ### Step 8 was skipped for the repo's first 75 commits
 
 Twenty-two merged branches accumulated because the workflow had no delete step.
