@@ -219,6 +219,20 @@
     state: restarted
   when: pve_smartd_conf is changed or pve_smartd_hook is changed
 
+# Enablement is asserted unconditionally rather than folded into the restart
+# tasks above. Those carry `when: ... is changed`, so on any idempotent run they
+# do not execute and an `enabled:` on them is never re-applied. A daemon
+# disabled by hand during troubleshooting would keep running — so `is-active`
+# stays green and convergence reports changed=0 — and then be silently gone
+# after the next hypervisor reboot, taking ZFS event and SMART alerting with it.
+- name: Ensure the event-delivery daemons start at boot
+  ansible.builtin.systemd:
+    name: "{{ item }}"
+    enabled: true
+  loop:
+    - zfs-zed
+    - smartmontools
+
 - name: Verify PVE monitoring after convergence
   ansible.builtin.import_tasks: verify.yml
   when: not ansible_check_mode

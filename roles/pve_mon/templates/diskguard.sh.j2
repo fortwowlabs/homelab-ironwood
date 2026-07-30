@@ -20,25 +20,85 @@ host=$(hostname -s)
 STATE_DIR=/var/lib/homelab
 STATE="$STATE_DIR/diskguard.state"
 REALERT_SECS=$(( {{ alert_realert_hours | default(6) }} * 3600 ))
-mkdir -p "$STATE_DIR"
-
-over=""
-# ZFS pools first: thin zvols on a full pool freeze the guests writing to
-# them, which is the failure that actually happened.
-while read -r name cap; do
-    c=${cap%\%}
-    [[ "$c" =~ ^[0-9]+$ ]] || continue
-    [ "$c" -ge "$THRESH" ] && over+=$'\n'"zpool ${name} ${c}%"
-done < <(zpool list -H -o name,capacity 2>/dev/null)
-
-while read -r pct mount; do
-    p=${pct%\%}
-    [[ "$p" =~ ^[0-9]+$ ]] || continue
-    [ "$p" -ge "$THRESH" ] && over+=$'\n'"${mount} ${p}%"
-done < <(df -P / /var/lib/vz 2>/dev/null | tail -n +2 | awk '{print $5, $6}')
+mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 auth=()
 [ -n "${NTFY_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+
+# Returns nonzero when delivery failed, so the caller can decline to record a
+# dedupe entry for an alert nobody received.
+alert() {  # $1=priority $2=tags $3=title $4=body
+    if curl -fsS --max-time 10 --retry 2 --retry-delay 5 "${auth[@]}" \
+        -H "Title: $3" -H "Priority: $1" -H "Tags: $2" \
+        -d "$4" "${NTFY_URL}/${topic}" >/dev/null 2>&1; then
+        return 0
+    fi
+    logger -t pve-diskguard "ntfy push failed: $3"
+    return 1
+}
+
+# `>` truncates before it fails, so a direct write left an empty state file
+# when the root filesystem was full — the very condition this guard reports —
+# and the next run re-alerted because it read no previous hash. Temp file plus
+# rename keeps the state either old or new, never empty.
+write_state() {  # $1=hash $2=timestamp
+    if printf '%s %s\n' "$1" "$2" > "${STATE}.tmp" 2>/dev/null \
+       && mv -f "${STATE}.tmp" "$STATE" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "${STATE}.tmp" 2>/dev/null || true
+    logger -t pve-diskguard "could not write ${STATE}; alert dedupe is running blind"
+    return 1
+}
+
+# `over` is what the human reads; `keys` is the identity set used for dedupe.
+# Keeping them apart is deliberate. The old code derived the hash from the
+# first two whitespace fields of `over`, which works for a pool line
+# ("zpool NAME PCT") but not for a filesystem line ("MOUNT PCT") — there the
+# percentage landed inside the hash, so 80% -> 81% -> 82% each looked like a
+# brand new alarm and the six-hour dedupe never engaged. A slowly filling
+# filesystem produced an urgent, DND-bypassing push every 15 minutes: up to 96
+# a day, which is exactly the behaviour the dedupe comment claims to prevent.
+over=""
+keys=""
+
+# `scan_ok` distinguishes "nothing is over threshold" from "the measurement
+# failed". They produced the same empty string before, so a zpool that could
+# not be read — module not loaded after an upgrade, pool exported, restricted
+# PATH under systemd — sent an explicit "all pools are back under 80%"
+# all-clear for a pool the guard could no longer see.
+scan_ok=1
+
+# ZFS pools first: thin zvols on a full pool freeze the guests writing to
+# them, which is the failure that actually happened.
+if zpool_out=$(zpool list -H -o name,capacity 2>/dev/null); then
+    while read -r name cap; do
+        [[ -n "$name" ]] || continue
+        c=${cap%\%}
+        [[ "$c" =~ ^[0-9]+$ ]] || continue
+        if [ "$c" -ge "$THRESH" ]; then
+            over+=$'\n'"zpool ${name} ${c}%"
+            keys+=$'\n'"zpool ${name}"
+        fi
+    done <<< "$zpool_out"
+else
+    scan_ok=0
+    logger -t pve-diskguard "zpool list failed; pool capacity is UNKNOWN this run"
+fi
+
+if df_out=$(df -P / /var/lib/vz 2>/dev/null); then
+    while read -r pct mount; do
+        p=${pct%\%}
+        [[ "$p" =~ ^[0-9]+$ ]] || continue
+        if [ "$p" -ge "$THRESH" ]; then
+            over+=$'\n'"${mount} ${p}%"
+            keys+=$'\n'"${mount}"
+        fi
+    done < <(printf '%s\n' "$df_out" | tail -n +2 | awk '{print $5, $6}')
+else
+    scan_ok=0
+    logger -t pve-diskguard "df failed; filesystem capacity is UNKNOWN this run"
+fi
 
 now=$(date +%s)
 prev_hash=""
@@ -49,31 +109,31 @@ if [[ -f "$STATE" ]]; then
 fi
 
 if [ -z "$over" ]; then
-    if [[ -n "$prev_hash" && "$prev_hash" != "none" ]]; then
-        curl -fsS --max-time 10 "${auth[@]}" \
-            -H "Title: PVE disk recovered on ${host}" \
-            -H "Priority: default" -H "Tags: floppy_disk" \
-            -d "All pools and filesystems are back under ${THRESH}%." \
-            "${NTFY_URL}/${topic}" >/dev/null 2>&1 || true
+    # A failed measurement is not an all-clear. Say nothing and leave the state
+    # alone so any pending alarm stays pending.
+    if (( scan_ok == 0 )); then
+        exit 0
     fi
-    printf 'none %s\n' "$now" > "$STATE"
+    if [[ -n "$prev_hash" && "$prev_hash" != "none" ]]; then
+        alert default floppy_disk "PVE disk recovered on ${host}" \
+            "All pools and filesystems are back under ${THRESH}%." || exit 0
+    fi
+    write_state none "$now" || true
     exit 0
 fi
 
 # Same dedupe contract as the VMs' disk-alert: a pool filling over days must
-# not produce 96 identical alerts per day.
-hash=$(printf '%s' "$over" | grep -oE '^[^ ]+ [^ ]+' | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
+# not produce 96 identical alerts per day. Hash the identity set, never the
+# percentages — see the comment where `keys` is built.
+hash=$(printf '%s' "$keys" | LC_ALL=C sort | sha256sum | cut -d' ' -f1)
 if [[ "$hash" == "$prev_hash" ]] && (( now - prev_alert < REALERT_SECS )); then
     exit 0
 fi
 
-curl -fsS --max-time 10 --retry 2 --retry-delay 5 "${auth[@]}" \
-    -H "Title: PVE disk alarm on ${host}" \
-    -H "Priority: urgent" \
-    -H "Tags: rotating_light,floppy_disk" \
-    -d "At/over ${THRESH}%:${over}" \
-    "${NTFY_URL}/${topic}" >/dev/null 2>&1 || \
-    logger -t pve-diskguard "ntfy push failed; over ${THRESH}%:${over}"
-
-printf '%s %s\n' "$hash" "$now" > "$STATE"
+# Record the dedupe entry only if the push landed, so a failed delivery is
+# retried on the next run instead of becoming six hours of silence.
+if alert urgent rotating_light,floppy_disk "PVE disk alarm on ${host}" \
+       "At/over ${THRESH}%:${over}"; then
+    write_state "$hash" "$now" || true
+fi
 exit 0

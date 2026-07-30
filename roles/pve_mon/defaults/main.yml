@@ -3,6 +3,14 @@
 # full ZFS pool does not degrade gracefully: thin zvols on a full pool freeze
 # the guests writing to them, which is exactly how the 2026-07-20 outage went.
 pve_disk_threshold: 80
+# Capacity at which the DAILY health check fails, putting the problem on the
+# healthchecks.io path that leaves the house. Higher than pve_disk_threshold on
+# purpose: the 80% ntfy alarm above is the early warning, and ntfy runs on a
+# guest whose disk is on the pool being reported, so it is the channel that
+# disappears exactly when the pool fills. This is the "the estate is about to
+# stop" number, and keeping it clear of 80% stops a pool idling at 82% from
+# holding the external check red for a week.
+pve_disk_critical_threshold: 90
 # Days since the last completed scrub before the daily health check fails.
 # PVE scrubs on the second Sunday of each month via /etc/cron.d/zfsutils-linux,
 # so 45 days means a scrub has been skipped entirely rather than merely run

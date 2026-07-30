@@ -10,11 +10,18 @@
     label: "{{ item.1 }} {{ item.0 }}"
   changed_when: false
 
-- name: Verify the event-delivery daemons are running
-  ansible.builtin.command: "systemctl is-active {{ item }}"
-  loop:
-    - zfs-zed
-    - smartmontools
+# is-enabled as well as is-active: a daemon that is running but disabled passes
+# every liveness check and then vanishes at the next reboot, which for a
+# hypervisor that is expected to run unattended for months is the whole failure.
+- name: Verify the event-delivery daemons are running and enabled
+  ansible.builtin.command:
+    argv:
+      - systemctl
+      - "{{ item.1 }}"
+      - "{{ item.0 }}"
+  loop: "{{ ['zfs-zed', 'smartmontools'] | product(['is-active', 'is-enabled']) | list }}"
+  loop_control:
+    label: "{{ item.1 }} {{ item.0 }}"
   changed_when: false
 
 # Reading zed.rc back is the point: a stock PVE upgrade rewrites files under

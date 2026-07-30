@@ -10,15 +10,22 @@
 # Checks, in the order that matters:
 #   1. Pool health. zed alerts on the transition; this catches a pool that
 #      was already degraded before any of this was installed.
-#   2. Scrub age. A scrub that silently stopped running means undetected bit
+#   2. Pool and filesystem CAPACITY. See the long comment at the capacity
+#      block: this is the one hypervisor failure with no other route out.
+#   3. Scrub age. A scrub that silently stopped running means undetected bit
 #      rot, and nothing else in this repo would ever notice.
-#   3. Failed units, since PVE has no failed-unit watcher of its own.
+#   4. That zed and smartd are still wired to the ntfy hooks, because the
+#      nightly runner cannot check this host at all.
+#   5. Failed units, since PVE has no failed-unit watcher of its own.
 #
 # Exits nonzero on a problem so the OnFailure drop-in raises the ntfy alert;
 # it owns the healthchecks side only.
 set -uo pipefail
 
 SCRUB_MAX_DAYS={{ pve_scrub_max_age_days | default(45) }}
+# Overridable the same way diskguard's THRESH is, so the capacity branch can be
+# exercised on a healthy host instead of being trusted on first use.
+CRIT_THRESH="${CRIT_THRESH:-{{ pve_disk_critical_threshold | default(90) }}}"
 
 # shellcheck source=/dev/null
 [[ -r /etc/homelab-healthchecks.env ]] && . /etc/homelab-healthchecks.env
@@ -28,6 +35,46 @@ problems=""
 status=$(zpool status -x 2>&1)
 if [[ "$status" != "all pools are healthy" ]]; then
     problems+=$'\n'"zpool status -x: ${status}"
+fi
+
+# Capacity. This block is the reason the check exists in its current form.
+#
+# A 100%-full pool is still ONLINE and `zpool status -x` still says "all pools
+# are healthy" — capacity is not a ZFS health state — so every check above this
+# passed happily through the 2026-07-20 rpool outage. The early warning at
+# {{ pve_disk_threshold | default(80) }}% is pve-diskguard's job, but it can only
+# push to ntfy, which runs on svc-media, whose own zvol lives on the pool that
+# is filling. As the pool approaches full the thin-provisioned guests freeze and
+# ntfy freezes with them, so every alert after that point has nowhere to go.
+#
+# Reporting capacity here puts it on the healthchecks.io path instead, which
+# leaves the house. The threshold is deliberately higher than diskguard's: ntfy
+# handles "keep an eye on this", and this handles "the estate is about to stop",
+# so a pool sitting at 82% for a week does not hold the external check red and
+# train the operator to ignore it.
+if zpool_cap=$(zpool list -H -o name,capacity 2>/dev/null); then
+    while read -r pool_name cap; do
+        [[ -n "$pool_name" ]] || continue
+        c=${cap%\%}
+        [[ "$c" =~ ^[0-9]+$ ]] || continue
+        if (( c >= CRIT_THRESH )); then
+            problems+=$'\n'"pool ${pool_name} is ${c}% full (critical ${CRIT_THRESH}%) — thin zvols on a full pool freeze every guest"
+        fi
+    done <<< "$zpool_cap"
+else
+    problems+=$'\n'"zpool list failed; pool capacity is UNKNOWN, which is not the same as fine"
+fi
+
+if df_cap=$(df -P / /var/lib/vz 2>/dev/null); then
+    while read -r pct mount; do
+        p=${pct%\%}
+        [[ "$p" =~ ^[0-9]+$ ]] || continue
+        if (( p >= CRIT_THRESH )); then
+            problems+=$'\n'"${mount} is ${p}% full (critical ${CRIT_THRESH}%)"
+        fi
+    done < <(printf '%s\n' "$df_cap" | tail -n +2 | awk '{print $5, $6}')
+else
+    problems+=$'\n'"df failed; filesystem capacity is UNKNOWN, which is not the same as fine"
 fi
 
 # `zpool status` prints scrub state per pool. "scrub repaired ... on <date>"
@@ -57,6 +104,27 @@ while read -r pool; do
         echo "${pool}: scrub ${age_d}d ago, pool healthy"
     fi
 done < <(zpool list -H -o name 2>/dev/null)
+
+# Alert-path wiring. roles/pve_mon/tasks/verify.yml asserts the same two things,
+# but that play is excluded from the nightly run: verify-run.sh passes
+# --limit 'service_vms:localhost' because the runner on svc-infra has no root
+# SSH key for this host. Those asserts therefore only fire when the operator
+# runs `make verify` from the workstation, which is precisely what does not
+# happen while the house is empty. A PVE or zfs-zed package upgrade rewriting
+# /etc/zfs/zed.d/zed.rc as a dpkg conffile would revert ZED_EMAIL_PROG and send
+# pool degradation back to unread local root mail, with zed still `active` so
+# nothing else would notice.
+if ! grep -qF 'ZED_EMAIL_PROG="/usr/local/sbin/zed-ntfy.sh"' /etc/zfs/zed.d/zed.rc 2>/dev/null; then
+    problems+=$'\n'"zed no longer points at the ntfy hook; ZFS pool events would go to unread local root mail"
+fi
+if ! grep -qF '/usr/local/sbin/smartd-ntfy.sh' /etc/smartd.conf 2>/dev/null; then
+    problems+=$'\n'"smartd no longer points at the ntfy hook; disk warnings would go to unread local root mail"
+fi
+for unit in zfs-zed smartmontools; do
+    if ! systemctl is-active --quiet "$unit" 2>/dev/null; then
+        problems+=$'\n'"${unit} is not running; the alerts it delivers are dead"
+    fi
+done
 
 failed=$(systemctl --failed --plain --no-legend 2>/dev/null | grep -v '^notify-failure@' || true)
 if [[ -n "$failed" ]]; then
