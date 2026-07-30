@@ -81,9 +81,12 @@ infra_service_names: >-
 # fails the build if a group used here has no rule, or if no rule grants
 # `admins` (that one would lock everybody out of everything).
 #
-# `admin` is the estate's original account, kept while the multi-user cutover
-# is verified. Remove it once brandon is confirmed working — a generic shared
-# login is exactly what naming real people replaces.
+# `admin` is the estate's original account. It stays permanently (decided
+# 2026-07-30) — it is not a placeholder pending brandon's cutover, so do not
+# remove it once brandon has a real password. Both admin and brandon get real,
+# distinct hashes in vault_authelia_password_hashes; deliberately, neither gets
+# an entry in vault_authelia_password_plaintexts the way valerie/michael/erin/
+# guest do — nothing here requires that dict to be complete.
 authelia_users:
   - { name: admin,   displayname: Admin,   groups: [admins] }
   - { name: brandon, displayname: Brandon, groups: [admins] }
