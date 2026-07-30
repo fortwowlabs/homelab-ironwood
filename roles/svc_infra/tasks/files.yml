@@ -458,7 +458,10 @@
 # 0770 on install and re-asserting 0755 here would loosen it back every
 # converge — another permanent `changed` flip-flop, and a small security
 # regression each time. Existence is all this task needs to guarantee.
-- name: Create the Nextcloud app and user-files directories
+# noqa: risky-file-permissions — the unset mode is the point, per the comment
+# above: Nextcloud tightens its data directory to 0770 on install, so declaring
+# a mode here would loosen it back on every converge. The rule cannot see that.
+- name: Create the Nextcloud app and user-files directories  # noqa: risky-file-permissions
   ansible.builtin.file:
     path: "/opt/homelab/appdata/{{ item }}"
     state: directory

@@ -23,6 +23,7 @@ ANSIBLE_VAULT := $(BIN)ansible-vault
 ANSIBLE_LINT := $(BIN)ansible-lint
 YAMLLINT := $(BIN)yamllint
 SHELLCHECK ?= shellcheck
+GITLEAKS ?= gitleaks
 
 # Keep Ansible's controller-side scratch data inside the checkout. This makes
 # validation work in restricted runners and `clean` removes it predictably.
@@ -77,6 +78,7 @@ validate-tools:
 	@test -x "$(ANSIBLE_LINT)" || { echo "missing $(ANSIBLE_LINT); run 'make deps-dev'" >&2; exit 127; }
 	@test -x "$(YAMLLINT)" || { echo "missing $(YAMLLINT); run 'make deps-dev'" >&2; exit 127; }
 	@command -v "$(SHELLCHECK)" >/dev/null || { echo "missing ShellCheck (install it with your OS package manager)" >&2; exit 127; }
+	@command -v "$(GITLEAKS)" >/dev/null || { echo "missing gitleaks (install it with your OS package manager)" >&2; exit 127; }
 
 validate-syntax:
 	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE) --inventory $(FIXTURE_INVENTORY) --syntax-check $(PLAYBOOK)
@@ -115,6 +117,12 @@ validate-secrets:
 	$(PYTHON) tests/scan_history_secrets.py
 	$(PYTHON) tests/validate_secret_tasks.py
 	$(PYTHON) tests/validate_secret_output.py
+# Second opinion on the working tree with gitleaks' ~170 upstream rules. The
+# four gates above stay: they know this repo's conventions (vault_ naming, the
+# placeholder forms in all_vault.yml.example) and gitleaks does not. Scope and
+# the two allowlists are explained in .gitleaks.toml. History is deliberately
+# not re-scanned here — scan_history_secrets.py already walks every blob.
+	$(GITLEAKS) dir . --config .gitleaks.toml --no-banner --redact
 
 validate-ci:
 	$(PYTHON) tests/validate_ci_safety.py

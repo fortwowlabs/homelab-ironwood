@@ -9,3 +9,27 @@ exclude_paths:
   - .venv/
   - collections/
   - tests/fixtures/
+
+# Security-relevant rules pulled in individually rather than by raising the
+# profile. Measured on 2026-07-30: `--profile safety` reports 353 findings, of
+# which 290 are var-naming[no-role-prefix], 39 command-instead-of-module and 23
+# name[*] — all style, and the var-naming ones would mean renaming ~290
+# references across every role for no security gain. Exactly one finding in that
+# 353 was security-relevant, and it is a false positive (see the noqa in
+# roles/svc_infra/tasks/files.yml).
+#
+# So the profile stays at min and the rules that actually catch security bugs
+# are named here. Each one guards a failure mode this repo can realistically
+# hit:
+#   no-log-password         — a vault secret rendered into the deploy log
+#   risky-file-permissions  — a secret-bearing file created world-readable
+#   risky-octal             — 0644 written as 644, silently meaning something else
+#   risky-shell-pipe        — a pipeline whose failure is swallowed without pipefail
+#   latest / package-latest — unpinned versions, against this repo's digest-pin rule
+enable_list:
+  - no-log-password
+  - risky-file-permissions
+  - risky-octal
+  - risky-shell-pipe
+  - latest
+  - package-latest

@@ -1,0 +1,44 @@
+# gitleaks configuration — a second opinion beside the four hand-rolled secret
+# gates in tests/.
+#
+# Why both. validate_secrets.py and scan_history_secrets.py carry a SIGNATURES
+# tuple maintained by hand: private keys, AWS, GitHub, Slack, JWT. That list is
+# good for what it names and blind to everything else, and nothing prompts
+# anyone to extend it. gitleaks ships ~170 upstream rules and is updated by
+# people watching credential formats full-time. The hand-rolled gates stay:
+# they encode repo-specific knowledge (the vault_ naming convention, the
+# placeholder forms used in all_vault.yml.example) that a generic scanner has
+# no way to know.
+#
+# Scope: the working tree only. Git history is already covered by
+# tests/scan_history_secrets.py, which walks every reachable blob.
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = """
+Vendored and generated trees. These are gitignored and untracked — installed by
+`make deps` and removed by `make clean` — so they are not this repo's code and
+cannot reach a commit. community.proxmox ships example API tokens and a test
+private key in its own docs and unit tests, which is where all three of the
+findings on this tree came from on 2026-07-30.
+"""
+paths = [
+  '''^collections/''',
+  '''^\.venv/''',
+  '''^\.ansible/''',
+  '''__pycache__/''',
+]
+
+[[allowlists]]
+description = """
+The vault template. all_vault.yml.example exists to document every vault_ key
+with an empty or obviously-fake value; that is the file's whole purpose, and
+tests/validate_secrets.py already enforces the placeholder forms with
+PLACEHOLDER_RE. A generic entropy rule reading these as live credentials is the
+expected false positive.
+"""
+paths = [
+  '''^inventory/group_vars/all_vault\.yml\.example$''',
+]
