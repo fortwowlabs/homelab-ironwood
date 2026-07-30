@@ -1,0 +1,16 @@
+# Enabled for the runner account by roles/svc_infra/tasks/verify-runner.yml:
+#   systemctl enable --now homelab-scan@svcops.timer
+[Unit]
+Description=Run the homelab-iac report-only security scan nightly for %i
+
+[Timer]
+Unit=homelab-scan@%i.service
+# 05:30, after the 04:00 verification and the 04:40 backup-freshness check.
+# The three nightly jobs are deliberately staggered rather than chained: a scan
+# that hangs must not be able to delay or mask a verify.
+OnCalendar=*-*-* 05:30:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

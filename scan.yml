@@ -1,0 +1,190 @@
+---
+# Report-only security scan. Sibling to verify.yml and driven the same two
+# ways: `make scan` from the workstation, and homelab-scan@svcops.timer on
+# svc-infra at 05:30 nightly.
+#
+# The separation from verify.yml is deliberate. verify.yml answers "is the
+# estate as configured?" and must stay fast and fail-closed. This answers "is
+# the estate SAFE?", a different question with a different failure mode: a
+# wrong answer here is silence, not a red run.
+#
+# Two rules govern everything below.
+#
+#  1. REPORT ONLY. Nothing here installs, upgrades, restarts or remediates.
+#     Auto-remediation on these hosts would fight the custom SELinux policy
+#     module, rootless podman's subuid mappings and the NFS automounts.
+#     tests/validate_scan_readonly.py enforces this at build time.
+#
+#  2. NO vault_ REFERENCES. This runs from the nightly runner's checkout at
+#     /opt/homelab-iac, which is a `git archive` — and the vault is gitignored,
+#     so every vault_ variable is undefined there. b77f27f is the cautionary
+#     tale: an assert on vault_hc_ping_* passed on the workstation and failed on
+#     all three hosts at 04:01, generating a false alarm from the gate meant to
+#     prevent silence. Assert against rendered files on disk instead.
+- name: Scan every service VM for security findings
+  hosts: service_vms
+  gather_facts: true
+  # NOT any_errors_fatal, unlike verify.yml. One host failing to answer must not
+  # cost the findings from the other two: a partial report is worth strictly
+  # more than none, and the failure is carried into the report as an explicit
+  # per-host state rather than being reported as zero findings.
+  any_errors_fatal: false
+  become: true
+  tasks:
+    - name: Run the host security scan, recording failure rather than aborting
+      block:
+        - name: Scan shared service VM security posture
+          ansible.builtin.include_role:
+            name: service_vm
+            tasks_from: scan
+      rescue:
+        - name: Record that this host could not be scanned
+          ansible.builtin.set_fact:
+            service_vm_scanned: false
+            service_vm_errata:
+              ok: false
+              critical: 0
+              important: 0
+              moderate: 0
+              low: 0
+              total: 0
+              detail: "scan tasks failed on {{ inventory_hostname }}"
+
+- name: Publish the scan report
+  hosts: infra_vms
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Collect per-host findings
+      ansible.builtin.set_fact:
+        scan_findings: >-
+          {{ dict(scan_hosts | zip(scan_hosts
+             | map('extract', hostvars, 'service_vm_errata') | list)) }}
+      vars:
+        scan_hosts: "{{ groups['service_vms'] | sort }}"
+
+    - name: Separate the hosts that answered from the hosts that did not
+      ansible.builtin.set_fact:
+        scan_ok: >-
+          {{ scan_findings | dict2items
+             | selectattr('value.ok', 'defined')
+             | selectattr('value.ok', 'equalto', true)
+             | map(attribute='key') | list | sort }}
+        scan_broken: >-
+          {{ scan_findings | dict2items
+             | rejectattr('value.ok', 'equalto', true)
+             | map(attribute='key') | list | sort }}
+
+    - name: Total the findings across every host that answered
+      ansible.builtin.set_fact:
+        scan_total: "{{ totals.total }}"
+        scan_critical: "{{ totals.critical }}"
+        scan_important: "{{ totals.important }}"
+      vars:
+        answered: "{{ scan_ok | map('extract', scan_findings) | list }}"
+        totals:
+          total: "{{ answered | map(attribute='total') | map('int') | sum }}"
+          critical: "{{ answered | map(attribute='critical') | map('int') | sum }}"
+          important: "{{ answered | map(attribute='important') | map('int') | sum }}"
+
+    - name: Read the previous run's totals
+      ansible.builtin.slurp:
+        src: "{{ scan_state_file }}"
+      register: scan_previous_raw
+      failed_when: false
+
+    - name: Establish the previous totals, seeding the baseline on first use
+      ansible.builtin.set_fact:
+        # A first run has no baseline. Seeding it with the CURRENT numbers means
+        # night one reports no delta rather than alerting that every finding
+        # appeared at once — the estate did not get worse, the scanner just
+        # started looking.
+        scan_previous: >-
+          {{ (scan_previous_raw.content | b64decode | from_json)
+             if (scan_previous_raw.content is defined)
+             else {'total': scan_total | int,
+                   'critical': scan_critical | int,
+                   'important': scan_important | int} }}
+
+    - name: Decide what, if anything, is worth waking up for
+      ansible.builtin.set_fact:
+        # Escalation is on the DELTA, not the absolute count. This estate
+        # deliberately runs behind on patches; alerting nightly on a number
+        # expected to be non-zero is how a channel becomes background noise,
+        # which this repo has already written down as a failure mode. What is
+        # worth waking up for is the number getting worse, or the scanner
+        # failing to run at all.
+        scan_escalate: >-
+          {{ (scan_broken | length > 0)
+             or ((scan_critical | int) > (scan_previous.critical | default(0) | int))
+             or ((scan_important | int) > (scan_previous.important | default(0) | int))
+             or ((scan_total | int) > (scan_previous.total | default(0) | int)) }}
+        scan_escalation_reason: >-
+          {{ (scan_broken | join(', ') ~ ' could not be scanned')
+             if (scan_broken | length > 0)
+             else 'pending security errata increased ' ~
+                  (scan_previous.total | default(0)) ~ ' -> ' ~ scan_total }}
+        scan_summary_line: >-
+          {{ scan_total }} pending security errata across
+          {{ scan_ok | length }}/{{ groups['service_vms'] | length }} hosts
+          ({{ scan_critical }} critical, {{ scan_important }} important;
+          previous total {{ scan_previous.total | default('none') }})
+          {{ ('; NOT SCANNED: ' ~ (scan_broken | join(', ')))
+             if (scan_broken | length > 0) else '' }}
+
+    - name: Write the scan report
+      ansible.builtin.template:
+        # Explicit path, not a bare filename: this play does not apply the
+        # svc_infra role, so the role's templates/ is not on the search path.
+        # It stays under roles/svc_infra/templates/ anyway, because that is the
+        # tree tests/validate_secret_tasks.py globs when deciding which
+        # templates are secret-bearing — a playbook-level templates/ directory
+        # would sit outside that gate.
+        src: roles/svc_infra/templates/scan-report.txt.j2
+        dest: "{{ scan_report_dir }}/latest.txt"
+        owner: "{{ svc_uid }}"
+        group: "{{ svc_gid }}"
+        mode: "0644"
+
+    - name: Record this run's totals as the baseline for the next
+      ansible.builtin.copy:
+        content: |
+          {{ {'total': scan_total | int,
+              'critical': scan_critical | int,
+              'important': scan_important | int,
+              'recorded': ansible_date_time.iso8601} | to_nice_json }}
+        dest: "{{ scan_state_file }}"
+        owner: "{{ svc_uid }}"
+        group: "{{ svc_gid }}"
+        mode: "0644"
+
+    # Published on EVERY run, to the muted informational topic. This is not
+    # chatter: docs/automation-opportunities.md records as an accepted risk that
+    # no scheduled job publishes to ntfy at all, so a broken delivery path —
+    # wrong topic, an ACL, a rejected token — produces silence indistinguishable
+    # from good news. The heartbeat only probes ntfy's /v1/health, which proves
+    # its HTTP server answers, not that a message can be published. This does,
+    # nightly, and its absence is therefore itself a signal.
+    - name: Publish the routine scan summary
+      ansible.builtin.include_role:
+        name: notify
+      vars:
+        ntfy_title: "homelab scan ({{ scan_total }} pending)"
+        ntfy_result: "{{ scan_summary_line }}"
+        ntfy_tags: mag
+      when: notify_on_success | default(true) | bool
+
+    - name: Escalate a worsening posture or a failed scan
+      ansible.builtin.include_role:
+        name: notify
+      vars:
+        ntfy_title: "homelab SCAN: {{ scan_escalation_reason }}"
+        ntfy_result: "{{ scan_summary_line }}"
+        ntfy_priority: high
+        ntfy_topic_override: "{{ ntfy_alert_topic }}"
+        ntfy_tags: warning
+      when: scan_escalate | bool
+
+    - name: Mark the scan run complete
+      ansible.builtin.set_fact:
+        scan_completed: true

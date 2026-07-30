@@ -278,6 +278,7 @@ vault_authelia_password_plaintexts:
 #   homelab-backups     1 day  / 6 h     backups-fresh check on svc-infra
 #   homelab-pve         1 day  / 6 h     daily health check on the PVE host
 #   homelab-heartbeat   1 day  / 3 h     svc-media (proves the ntfy host lives)
+#   homelab-scan        1 day  / 6 h     nightly security scan on svc-infra
 #
 # There is deliberately no separate scrub check: PVE already scrubs monthly
 # from /etc/cron.d/zfsutils-linux, and homelab-pve-health fails if the last
@@ -287,3 +288,8 @@ vault_hc_ping_verify:    ""   # UUID only, e.g. 1a2b3c4d-....  Empty = disabled.
 vault_hc_ping_backups:   ""
 vault_hc_ping_pve:       ""
 vault_hc_ping_heartbeat: ""
+# Unlike the four above, an empty value here omits the key from
+# /etc/homelab-healthchecks.env entirely rather than rendering it blank — the
+# verify gate rejects any empty HC_PING_* value, and svc-media renders the same
+# file while never running the scan. See healthchecks.env.j2 for the full note.
+vault_hc_ping_scan:      ""

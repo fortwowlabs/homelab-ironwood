@@ -45,3 +45,7 @@ onfailure_units_extra:
   # rescue already alerts when a GATE fails; this covers the wrapper
   # failing before Ansible ever starts (no vault password, no venv).
   - homelab-verify@.service
+  # Same shape for the nightly scan. scan.yml publishes its own findings, so
+  # this drop-in is specifically for the scan failing to RUN — which is the
+  # failure that would otherwise look exactly like a clean estate.
+  - homelab-scan@.service

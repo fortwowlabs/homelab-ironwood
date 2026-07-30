@@ -23,6 +23,10 @@ SAFE_TASKS = [
     ROOT / "roles/svc_infra/tasks/verify.yml",
     ROOT / "roles/mon/tasks/verify.yml",
     ROOT / "roles/pve_mon/tasks/verify.yml",
+    # The scan path is held to the same restart-free rule as the verify path,
+    # for a stronger reason: a scan runs unattended at 05:30 against every host
+    # at once, so a stray restart there would be both invisible and estate-wide.
+    ROOT / "roles/service_vm/tasks/scan.yml",
 ]
 RESTART_RE = re.compile(r"\bsystemctl\s+(?:start|restart|try-restart)\b|\bstate:\s*restarted\b")
 

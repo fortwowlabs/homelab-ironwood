@@ -1,0 +1,42 @@
+homelab security scan — {{ ansible_date_time.iso8601 }}
+{{ '=' * 62 }}
+
+Report-only. Nothing in this run installed, upgraded or restarted anything.
+
+SUMMARY
+  pending security errata : {{ scan_total }}
+            of which crit : {{ scan_critical }}
+       of which important : {{ scan_important }}
+       hosts that answered: {{ scan_ok | length }}/{{ groups['service_vms'] | length }}
+{% if scan_broken | length > 0 %}
+  NOT SCANNED             : {{ scan_broken | join(', ') }}
+      A host that could not be asked is NOT a host with nothing pending.
+      Treat the numbers above as a floor, not a total.
+{% endif %}
+
+  previous run total      : {{ scan_previous.total | default('none — first run') }}
+  escalated to alerts     : {{ 'YES — ' ~ scan_escalation_reason if scan_escalate | bool else 'no' }}
+
+PENDING SECURITY ERRATA BY HOST
+{% for host in groups['service_vms'] | sort %}
+{%   set f = scan_findings[host] | default({}) %}
+{%   if f.ok | default(false) | bool %}
+  {{ "%-14s" | format(host) }} total {{ "%3s" | format(f.total) }}   critical {{ "%3s" | format(f.critical) }}   important {{ "%3s" | format(f.important) }}   moderate {{ "%3s" | format(f.moderate) }}   low {{ "%3s" | format(f.low) }}
+{%   else %}
+  {{ "%-14s" | format(host) }} NOT SCANNED — {{ f.detail | default('no result recorded') }}
+{%   endif %}
+{% endfor %}
+
+WHAT THIS MEANS
+  Nothing in this estate updates itself. That is a deliberate trade recorded in
+  docs/unattended.md — packages install on demand and images are digest-pinned,
+  so that nothing shifts underneath while nobody is watching. The cost of that
+  trade is the number at the top of this report, and the reason this scan
+  exists is that the number was previously unknown rather than accepted.
+
+  Acting on it is a manual decision, not something this job will ever take.
+  Applying errata is dnf's security-only upgrade path, run on the host by hand
+  and followed by the reboot a kernel or glibc advisory will usually require.
+  The exact command is deliberately not quoted here: tests/validate_scan_readonly.py
+  fails the build if an upgrade invocation appears anywhere under a scan path,
+  and that gate should not have to tell prose apart from a task.

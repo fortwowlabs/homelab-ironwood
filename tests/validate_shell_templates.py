@@ -28,6 +28,7 @@ TEMPLATES = (
     "roles/service_vm/templates/hc-ping.sh.j2",
     "roles/svc_infra/templates/backups-fresh.sh.j2",
     "roles/svc_infra/templates/verify-run.sh.j2",
+    "roles/svc_infra/templates/scan-run.sh.j2",
     "roles/pve_mon/templates/diskguard.sh.j2",
     "roles/pve_mon/templates/pve-health.sh.j2",
     "roles/pve_mon/templates/smartd-ntfy.sh.j2",

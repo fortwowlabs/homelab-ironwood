@@ -1,0 +1,80 @@
+---
+# Report-only security scan of the guest OS. Installs NOTHING, restarts
+# NOTHING — see tests/validate_scan_readonly.py, which fails the build if a
+# scan path ever grows a `dnf upgrade`.
+#
+# What this measures: how far behind the deliberate no-auto-update policy has
+# left this host. docs/unattended.md states the trade plainly ("six months away
+# means six months of unpatched containers"), and that is a defensible choice —
+# but until now there was no number attached to it anywhere. This produces the
+# number, nightly, without changing the policy.
+
+- name: Query pending security errata
+  # `updateinfo summary` rather than `list`: the summary is one short block with
+  # a count per severity, while `list` emits one line per affected package (22
+  # notices expand to ~60 lines on svc-infra today) and would have to be
+  # de-duplicated by advisory ID to mean anything.
+  #
+  # This needs repository metadata, so on svc-download it runs inside the
+  # guarded egress window — its nftables backstop denies DNS and 443 outright,
+  # and a query against stale cache would silently under-report.
+  block:
+    - name: Open guarded maintenance egress for the errata query
+      ansible.builtin.command: /usr/local/sbin/homelab-maintenance-egress open
+      register: service_vm_scan_egress_open
+      changed_when: "'opened' in service_vm_scan_egress_open.stdout"
+      when: service_guarded_egress | bool
+
+    - name: Read pending security errata
+      ansible.builtin.command:
+        argv: [dnf, --quiet, updateinfo, summary, --security]
+      register: service_vm_errata_raw
+      changed_when: false
+      # A failed query must NOT look like a clean host. rc is carried into the
+      # fact below and turned into an explicit failure state, because "0
+      # pending" and "could not ask" are the two readings this whole exercise
+      # exists to keep apart.
+      failed_when: false
+  always:
+    - name: Restore the strict backstop after the errata query
+      ansible.builtin.command: /usr/local/sbin/homelab-maintenance-egress close
+      register: service_vm_scan_egress_close
+      changed_when: "'closed' in service_vm_scan_egress_close.stdout"
+      when: service_guarded_egress | bool
+
+# Severity words come from the DNF updateinfo vocabulary, not from Rocky: the
+# same four appear on any dnf-based distribution. A severity dnf reports that is
+# not in this list would be missed by the per-severity counts but still caught
+# by `total`, which is parsed from its own line rather than summed from these.
+- name: Summarise pending security errata
+  ansible.builtin.set_fact:
+    service_vm_errata:
+      ok: "{{ (service_vm_errata_raw.rc | default(1)) == 0 }}"
+      critical: "{{ counts.critical }}"
+      important: "{{ counts.important }}"
+      moderate: "{{ counts.moderate }}"
+      low: "{{ counts.low }}"
+      total: "{{ counts.total }}"
+      detail: >-
+        {{ 'query failed rc=' ~ (service_vm_errata_raw.rc | default('none'))
+           if (service_vm_errata_raw.rc | default(1)) != 0
+           else 'ok' }}
+  vars:
+    out: "{{ service_vm_errata_raw.stdout | default('') }}"
+    counts:
+      # The total line carries no severity word ("22 Security notice(s)"), so
+      # this pattern cannot match the indented per-severity lines beneath it —
+      # "2 Critical Security notice(s)" has Critical between the digits and the
+      # word Security. Parsing it separately rather than summing the four below
+      # is deliberate: a severity dnf grows later would be absent from the
+      # breakdown but still present in the total, and the report prints both so
+      # the discrepancy is visible rather than silently swallowed.
+      total: "{{ (out | regex_findall('(\\d+)\\s+Security notice') | first | default('0')) | int }}"
+      critical: "{{ (out | regex_findall('(\\d+)\\s+Critical\\s+Security notice') | first | default('0')) | int }}"
+      important: "{{ (out | regex_findall('(\\d+)\\s+Important\\s+Security notice') | first | default('0')) | int }}"
+      moderate: "{{ (out | regex_findall('(\\d+)\\s+Moderate\\s+Security notice') | first | default('0')) | int }}"
+      low: "{{ (out | regex_findall('(\\d+)\\s+Low\\s+Security notice') | first | default('0')) | int }}"
+
+- name: Mark the host scan complete
+  ansible.builtin.set_fact:
+    service_vm_scanned: true

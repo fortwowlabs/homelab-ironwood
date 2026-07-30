@@ -11,6 +11,7 @@ PLAYBOOK := site.yml
 PREFLIGHT_PLAYBOOK := preflight.yml
 VERIFY_PLAYBOOK := verify.yml
 DISRUPTIVE_PLAYBOOK := verify-disruptive.yml
+SCAN_PLAYBOOK := scan.yml
 FIXTURE_INVENTORY := tests/fixtures/inventory.yml
 
 VENV := .venv
@@ -55,7 +56,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 .PHONY: help deps deps-dev validate validate-tools validate-syntax \
 	validate-ansible validate-yaml validate-shell validate-links \
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
-	check check-diff verify verify-disruptive drift reconcile access ping lint \
+	check check-diff verify verify-disruptive scan drift reconcile access ping lint \
 	vault-edit clean
 
 help: ## Show this help
@@ -85,9 +86,10 @@ validate-syntax:
 	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE) --inventory $(FIXTURE_INVENTORY) --syntax-check $(PREFLIGHT_PLAYBOOK)
 	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE) --inventory $(FIXTURE_INVENTORY) --syntax-check $(VERIFY_PLAYBOOK)
 	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE) --inventory $(FIXTURE_INVENTORY) --syntax-check $(DISRUPTIVE_PLAYBOOK)
+	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE) --inventory $(FIXTURE_INVENTORY) --syntax-check $(SCAN_PLAYBOOK)
 
 validate-ansible:
-	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE_LINT) --offline --profile min $(PLAYBOOK) $(PREFLIGHT_PLAYBOOK) $(VERIFY_PLAYBOOK) $(DISRUPTIVE_PLAYBOOK)
+	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE_LINT) --offline --profile min $(PLAYBOOK) $(PREFLIGHT_PLAYBOOK) $(VERIFY_PLAYBOOK) $(DISRUPTIVE_PLAYBOOK) $(SCAN_PLAYBOOK)
 
 validate-yaml:
 	$(YAMLLINT) $(YAML_FILES)
@@ -163,6 +165,9 @@ access: ## Re-run the media VM's DNS, Caddy, and Homepage access layer
 
 verify: ## Run the non-disruptive verification playbook
 	$(ANSIBLE) $(VERIFY_PLAYBOOK) $(VAULT) $(ARGS)
+
+scan: ## Run the report-only security scan (never remediates)
+	$(ANSIBLE) $(SCAN_PLAYBOOK) $(VAULT) $(ARGS)
 
 verify-disruptive: ## Explicitly run the fail-closed recovery drill
 	$(ANSIBLE) $(DISRUPTIVE_PLAYBOOK) $(VAULT) $(ARGS)

@@ -1,0 +1,31 @@
+# Instantiated nightly security scan. The instance is the unprivileged Linux
+# account that owns the checkout and its SSH credentials:
+#   systemctl start homelab-scan@svcops.service
+#
+# Rides the same runner as homelab-verify@.service — same checkout, same venv,
+# same keys. The two are separate units rather than one because they answer
+# different questions and have different failure meanings: a red verify means
+# the estate drifted, while a red scan means the scan could not run. Collapsing
+# them would make a scanner outage look like a configuration fault.
+[Unit]
+Description=homelab-iac report-only security scan for %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=%i
+WorkingDirectory=/opt/homelab-iac
+EnvironmentFile=/etc/homelab-healthchecks.env
+# ExecStartPre, NOT ConditionPathIsDirectory. systemd treats an unmet condition
+# as SUCCESS: ExecStart never runs, Result=success, OnFailure= does not fire,
+# hc-ping.sh never sends its fail, and is-active/is-enabled on the timer both
+# still pass. A missing or half-built virtualenv would silently end nightly
+# scanning with every indicator green. This is the same correction made to
+# homelab-verify@.service — see the comment there.
+ExecStartPre=/usr/bin/test -d /opt/homelab-iac/.venv
+ExecStart=/usr/local/sbin/homelab-scan-run.sh
+# Longer than the verify unit's 1800s: image and benchmark scanning are added
+# to this playbook in later branches and both are minutes-scale per host.
+TimeoutStartSec=3600
+UMask=0077

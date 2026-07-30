@@ -117,3 +117,9 @@ verify_runner_archive: /tmp/homelab-iac-runner.tar
 # secret to tests/validate_secret_tasks.py, which would then demand no_log on
 # the assert whose whole purpose is to print a loud message.
 verify_runner_secret_file: "{{ verify_runner_root }}/.vault_pass"
+
+# The nightly security scan reuses this same runner — same checkout, same
+# svcops account, same venv, same SSH keys; only the units, the wrapper and the
+# playbook are its own. Its paths live in inventory/group_vars/all/main.yml
+# rather than here, because scan.yml's reporting play does not apply this role
+# and so would never see role defaults.

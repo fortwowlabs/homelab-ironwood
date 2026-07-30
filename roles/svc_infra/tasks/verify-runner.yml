@@ -227,3 +227,45 @@
     enabled: true
     state: started
     daemon_reload: "{{ verify_runner_units is changed }}"
+
+# ------------------------------------------------------- nightly scan ---
+# The scan reuses everything above — checkout, venv, SSH keys, vault password.
+# Only the wrapper, the units and the report directory are its own.
+- name: Create the scan report directory
+  ansible.builtin.file:
+    path: "{{ scan_report_dir }}"
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0755"
+
+- name: Install the scan wrapper
+  ansible.builtin.template:
+    src: scan-run.sh.j2
+    dest: /usr/local/sbin/homelab-scan-run.sh
+    owner: root
+    group: root
+    # 0755, not 0750 root-owned. The unit runs as svcops, and a wrapper it
+    # cannot execute would fail in a way that looks like a scan failure. This
+    # is the same trap that made hc-ping.sh silently permission-denied for the
+    # verify runner — see the note in CLAUDE.md.
+    mode: "0755"
+
+- name: Install the nightly scan units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - homelab-scan@.service
+    - homelab-scan@.timer
+  register: scan_runner_units
+
+- name: Arm the nightly scan timer
+  ansible.builtin.systemd:
+    name: "homelab-scan@{{ verify_runner_user }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: "{{ scan_runner_units is changed }}"

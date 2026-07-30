@@ -1,0 +1,82 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# homelab-scan-run.sh — run the nightly report-only security scan and report
+# the outcome in both directions.
+#
+# Two reporting paths, deliberately, and they carry different news:
+#   - scan.yml publishes its findings to ntfy itself. That is the useful
+#     message, and it is the one that names the hosts and the counts.
+#   - this wrapper pings healthchecks.io. That is the one that still works when
+#     ntfy, svc-media, the LAN or the power is the thing that broke.
+#
+# The PVE host is excluded by --limit, exactly as the verify runner excludes
+# it: this account holds no SSH key for root@thurgadin and should not have one.
+# The hypervisor reports its own posture directly.
+set -uo pipefail
+
+ROOT={{ verify_runner_root | quote }}
+SECRET_FILE={{ verify_runner_secret_file | quote }}
+RUNNER={{ verify_runner_user | quote }}
+
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-healthchecks.env ]] && . /etc/homelab-healthchecks.env
+
+if [[ ! -r "$SECRET_FILE" ]]; then
+    echo "$SECRET_FILE is missing — the one-time manual step in docs/operations.md has not been done, so the nightly scan cannot run" >&2
+    /usr/local/sbin/hc-ping.sh "${HC_PING_SCAN:-}" fail
+    exit 1
+fi
+
+# Say so loudly rather than pinging nothing and looking healthy. An unset UUID
+# means this run has NO dead-man's switch: if the scan later stops running
+# entirely, nothing outside the house will notice. Not fatal — the scan itself
+# is still worth running and still publishes to ntfy — but it must not be
+# silent, because "no ping configured" and "ping configured and working" are
+# indistinguishable from the outside otherwise.
+# NOTE the wording: this deliberately does not spell out the vault variable's
+# name. tests/validate_secret_tasks.py classifies any template containing a
+# literal vault_ token as secret-bearing and then demands no_log on the task
+# that renders it — which would suppress the diff on a wrapper script that
+# holds no secret at all. Same reason verify_runner_secret_file is held in a
+# variable rather than written out; see roles/svc_infra/defaults/main.yml.
+if [[ -z "${HC_PING_SCAN:-}" ]]; then
+    echo "WARNING: HC_PING_SCAN is unset — this scan has no healthchecks.io dead-man's switch." >&2
+    echo "         Create the homelab-scan check, put its UUID in the vault (see" >&2
+    echo "         inventory/group_vars/all_vault.yml.example) and re-run 'make infra'." >&2
+fi
+
+# Ansible writes control sockets, temp files and a fact cache; point all of
+# them inside the runner's own tree so nothing depends on a writable HOME or a
+# shared /tmp.
+export ANSIBLE_CONFIG="${ROOT}/ansible.cfg"
+export ANSIBLE_HOME="${ROOT}/.ansible"
+export ANSIBLE_LOCAL_TEMP="${ROOT}/.ansible/tmp"
+export XDG_CACHE_HOME="${ROOT}/.ansible/cache"
+mkdir -p "$ANSIBLE_LOCAL_TEMP" "$XDG_CACHE_HOME"
+
+rev=$(cat "${ROOT}/.deployed-rev" 2>/dev/null || echo unknown)
+echo "scanning against revision ${rev}"
+
+cd "$ROOT" || exit 1
+"${ROOT}/.venv/bin/ansible-playbook" scan.yml \
+    --vault-password-file "$SECRET_FILE" \
+    --limit 'service_vms:localhost' \
+    --extra-vars notify_on_success=true
+rc=$?
+
+# NOTE the asymmetry with verify-run.sh, which is deliberate. A nonzero rc here
+# means the SCAN failed to complete — not that findings exist. Findings are
+# normal and expected; this estate deliberately runs behind on patches, and
+# scan.yml reports them through ntfy without failing. Later branches add
+# scanners that exit nonzero merely for having found something (oscap exits 2
+# whenever any rule fails, which is every run), and those exit codes are
+# absorbed inside the playbook rather than being allowed to reach this wrapper.
+if (( rc == 0 )); then
+    /usr/local/sbin/hc-ping.sh "${HC_PING_SCAN:-}"
+    echo "scan completed (revision ${rev}, runner ${RUNNER})"
+    exit 0
+fi
+
+/usr/local/sbin/hc-ping.sh "${HC_PING_SCAN:-}" fail
+echo "scan FAILED to complete with rc=${rc} (revision ${rev})" >&2
+exit 1
