@@ -17,17 +17,24 @@ infra_secret_apps entry that provides the portal), which is why this is its
 own test rather than part of validate_infra_catalog.py.
 
 The second half checks the identity side: the `authelia_users` roster and the
-`access_control` rules that decide what those accounts reach. Both fail
-quietly in their own way — a group with no rule denies everything (visible,
-recoverable), while no rule for `admins` locks every account out of every
-protected service at once (visible only after the deploy, and only fixable
-from a direct IP:port path). The password hashes are NOT checked here: they
-live in the gitignored vault, so that gate is a deploy-time assert in
-roles/svc_infra/tasks/files.yml instead.
+`access_control` rules that decide what those accounts reach. Three failure
+modes matter here, and only the first two are visible from the rules alone —
+a group with no rule denies everything (visible, recoverable), no rule for
+`admins` locks every account out of every protected service at once (visible
+only after the deploy, and only fixable from a direct IP:port path), and a
+rule that grants `admins` but whose `domain` pattern does not actually cover
+every name in `sso_protected_services` locks admins out of whichever services
+fall outside it — while `roles/svc_media/tasks/verify.yml`'s smoke test stays
+green, because it only proves the request reached the login form, not that
+the account behind it is let through. That third case is why this file checks
+`domain` at all rather than just `subject`. The password hashes are NOT
+checked here: they live in the gitignored vault, so that gate is a
+deploy-time assert in roles/svc_infra/tasks/files.yml instead.
 """
 
 from __future__ import annotations
 
+import fnmatch
 import re
 import sys
 from pathlib import Path
@@ -64,13 +71,19 @@ def load(path: Path) -> dict:
     return document if isinstance(document, dict) else {}
 
 
-def load_template(path: Path) -> dict | None:
+def load_template(path: Path, substitutions: dict[str, str] | None = None) -> dict | None:
     """Parse a Jinja template as YAML by neutralising its expressions.
 
     The Authelia config is templated but structurally static — the only
     substitutions are scalars like {{ service_domain }} inside quoted values.
     Replacing them with a placeholder yields parseable YAML, which is what
     lets the rules be checked as data rather than by grepping for strings.
+
+    `substitutions` inserts REAL values for named variables (service_domain,
+    so a rule's `domain: '*.{{ service_domain }}'` becomes the matchable
+    `*.fortwow.dev` instead of the generic `*.JINJA`) before every remaining
+    expression is stubbed. Order matters: named substitutions run first, so
+    they must not themselves contain `{{ }}`.
 
     Returns None if the result will not parse. That case MUST be reported
     rather than treated as an empty config: an unparseable template silently
@@ -83,6 +96,8 @@ def load_template(path: Path) -> dict | None:
     # header, which renders as comment lines rather than as a YAML value.
     text = re.sub(r"^\s*\{\{.*?\}\}\s*$", "#", text, flags=re.MULTILINE)
     text = re.sub(r"^.*\{%.*?%\}.*$", "", text, flags=re.MULTILINE)
+    for name, value in (substitutions or {}).items():
+        text = re.sub(r"\{\{\s*" + re.escape(name) + r"\s*\}\}", value, text)
     text = re.sub(r"\{\{.*?\}\}", "JINJA", text)
     try:
         document = yaml.safe_load(text)
@@ -91,8 +106,17 @@ def load_template(path: Path) -> dict | None:
     return document if isinstance(document, dict) else None
 
 
-def check_identity(failures: list[str]) -> int:
-    """Validate the account roster against the authorization rules."""
+def check_identity(
+    failures: list[str], protected: object, service_domain: object
+) -> int:
+    """Validate the account roster against the authorization rules.
+
+    `protected` and `service_domain` are passed in raw (whatever
+    sso_protected_services / service_domain currently are, including
+    malformed) rather than pre-validated, so this function is safe to call
+    before main() has finished checking their shape — the accounts and their
+    authorization are wrong or right independently of that.
+    """
     users = load(INFRA_DEFAULTS).get("authelia_users")
     if users is None:
         # Nothing to check; the single-account shape predates this list.
@@ -128,7 +152,17 @@ def check_identity(failures: list[str]) -> int:
         # earlier entry rather than erroring — including its group list.
         failures.append(f"duplicate authelia_users names: {', '.join(duplicates)}")
 
-    config = load_template(AUTHELIA_CONFIG_TEMPLATE)
+    protected_names = (
+        protected
+        if isinstance(protected, list) and all(isinstance(n, str) for n in protected)
+        else []
+    )
+    domain_ok = isinstance(service_domain, str) and bool(service_domain.strip())
+
+    config = load_template(
+        AUTHELIA_CONFIG_TEMPLATE,
+        {"service_domain": service_domain} if domain_ok else None,
+    )
     if config is None:
         failures.append(
             f"{AUTHELIA_CONFIG_TEMPLATE.relative_to(ROOT)} does not parse as YAML once "
@@ -149,17 +183,29 @@ def check_identity(failures: list[str]) -> int:
     rules = access_control.get("rules") or []
 
     ruled_groups: set[str] = set()
+    # Domain patterns from rules that both grant 'admins' and actually require
+    # a login (one_factor/two_factor) — a 'bypass' rule would let admins
+    # through with no authentication, which is a different problem than the
+    # coverage gap this collects for, so it is deliberately excluded here.
+    admin_domain_patterns: list[str] = []
     for rule in rules:
         if not isinstance(rule, dict):
             continue
         subjects = rule.get("subject") or []
         if isinstance(subjects, str):
             subjects = [subjects]
+        rule_groups: set[str] = set()
         for subject in subjects:
             if isinstance(subject, str):
                 match = GROUP_SUBJECT_RE.match(subject)
                 if match:
-                    ruled_groups.add(match.group(1))
+                    rule_groups.add(match.group(1))
+        ruled_groups.update(rule_groups)
+        if ADMIN_GROUP in rule_groups and rule.get("policy") in ("one_factor", "two_factor"):
+            domains = rule.get("domain") or []
+            if isinstance(domains, str):
+                domains = [domains]
+            admin_domain_patterns.extend(d for d in domains if isinstance(d, str))
 
     if default_policy == "deny" and ADMIN_GROUP not in ruled_groups:
         failures.append(
@@ -182,6 +228,39 @@ def check_identity(failures: list[str]) -> int:
             "access_control rules grant groups no user belongs to: "
             f"{', '.join(orphaned)}"
         )
+
+    # Coverage, not just existence: a rule can grant 'admins' somewhere and
+    # still miss a protected service if its `domain` pattern is scoped too
+    # narrowly (one hostname instead of the wildcard). That would deny admins
+    # on every service the pattern misses, and roles/svc_media/tasks/verify.yml
+    # would not catch it — its smoke test only proves the request reaches the
+    # login form, not that a real account is let through afterward. Skipped
+    # entirely if the lockout check above already fired: every name would show
+    # up as "uncovered" in that case too, which would just be noise on top of
+    # the more fundamental failure.
+    if protected_names and ADMIN_GROUP in ruled_groups:
+        if not domain_ok:
+            failures.append(
+                "service_domain is not a usable string in "
+                f"{MAIN_VARS.relative_to(ROOT)} — access_control domain "
+                "coverage cannot be checked"
+            )
+        else:
+            uncovered = sorted(
+                name
+                for name in protected_names
+                if not any(
+                    fnmatch.fnmatch(f"{name}.{service_domain}", pattern)
+                    for pattern in admin_domain_patterns
+                )
+            )
+            if uncovered:
+                failures.append(
+                    f"access_control grants {ADMIN_GROUP!r} but no admin rule's "
+                    f"domain covers: {', '.join(uncovered)} — admins would be "
+                    "denied on those services even though the portal itself "
+                    "and the smoke test both look fine"
+                )
 
     # The roster is public config; the hashes are not. Both halves have to be
     # rendered by real Jinja, not merely mentioned — every name checked here
@@ -214,10 +293,15 @@ def main() -> int:
 
     main_vars = load(MAIN_VARS)
     protected = main_vars.get("sso_protected_services")
+    service_domain = main_vars.get("service_domain")
 
     # Runs regardless of the list below: the accounts and their authorization
     # are wrong or right independently of how many vhosts are gated today.
-    account_count = check_identity(failures)
+    # check_identity is given the raw, not-yet-validated `protected` value —
+    # it treats anything that is not a clean list of strings as "nothing to
+    # cross-check domain coverage against" rather than raising, so it is safe
+    # to call before the shape check just below.
+    account_count = check_identity(failures, protected, service_domain)
 
     if protected is None:
         # An absent list is a legitimate state: it is the documented rollback
@@ -230,8 +314,11 @@ def main() -> int:
     if not isinstance(protected, list) or not all(
         isinstance(name, str) and name.strip() for name in protected
     ):
-        print("sso_protected_services must be a list of non-empty strings", file=sys.stderr)
-        return 1
+        # Append rather than print-and-return: check_identity may already have
+        # found real problems above, and discarding them here just because
+        # this list is also malformed would hide one failure behind another.
+        failures.append("sso_protected_services must be a list of non-empty strings")
+        return report(failures)
 
     duplicates = sorted({name for name in protected if protected.count(name) > 1})
     if duplicates:

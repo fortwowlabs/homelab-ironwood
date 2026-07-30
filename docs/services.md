@@ -19,11 +19,13 @@ domain is `fortwow.dev`; derive the current service VM addresses from
 | `prowlarr` | `svc-download` | Indexer management inside the VPN jail |
 | `sonarr` | `svc-download` | Television automation inside the VPN jail |
 | `radarr` | `svc-download` | Movie automation inside the VPN jail |
+| `bazarr` | `svc-download` | Subtitle automation for Sonarr/Radarr inside the VPN jail |
 | `lazylibrarian` | `svc-download` | Book/audiobook automation inside the VPN jail |
+| `jdownloader` | `svc-download` | General-purpose downloader inside the VPN jail |
 | `shelfmark` | `svc-download` | Interactive book/audiobook search and requests inside the VPN jail |
 | `searxng` | `svc-download` | Metasearch inside the VPN jail; Open WebUI's search provider |
 | `cockpit-dl` | `svc-download` | Download VM host administration |
-| `auth` | `svc-infra` | Authelia SSO portal; fronts eleven services (see below) |
+| `auth` | `svc-infra` | Authelia SSO portal; fronts twelve services (see below) |
 | `chat` | `svc-infra` | Open WebUI; chat and image generation against the GPU host |
 
 Download UIs reach their jailed containers through generated systemd socket
@@ -31,9 +33,11 @@ proxies. Do not publish a download container directly on the host network.
 
 ### Single sign-on
 
-`auth` on `svc-infra` is the Authelia login portal. Eleven services sit behind
-it via Caddy `forward_auth`: the seven download apps above, plus `code-server`,
-`webtop`, `syncthing` and `prometheus`.
+`auth` on `svc-infra` is the Authelia login portal. Twelve services sit behind
+it via Caddy `forward_auth`: the eight download apps above (including
+`searxng`, whose browser-facing vhost this gates — Open WebUI's own use of it
+dials svc-download's `IP:port` directly and is unaffected), plus
+`code-server`, `webtop`, `syncthing` and `prometheus`.
 
 The protected set is `sso_protected_services` in
 `inventory/group_vars/all/main.yml` — one list, consumed by both vhost loops in
@@ -58,7 +62,7 @@ Two things worth knowing before debugging anything here:
   escape hatch, and it is also why Syncthing's own GUI password still matters
   on the LAN.
 - **`make verify` now depends on Authelia.** If the portal is down, Caddy's
-  `forward_auth` returns 502 and the smoke test fails for all eleven at once.
+  `forward_auth` returns 502 and the smoke test fails for all twelve at once.
   That is correct — they really are broken — but the cause is one container.
 
 Services deliberately left open are listed with their reasons alongside the

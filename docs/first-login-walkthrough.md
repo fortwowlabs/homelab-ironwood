@@ -39,7 +39,7 @@ printed anywhere else, and the file is gitignored.
 
 ### 0.2 Sign in to SSO 🔑
 
-Do this before anything else. Eleven services sit behind a single sign-on
+Do this before anything else. Twelve services sit behind a single sign-on
 gate, and logging in here once means none of them prompt again for the next
 12 hours — otherwise you get bounced to the portal partway through Phase 4.
 
@@ -59,6 +59,7 @@ the table below. That is deliberate, not a bug — see §0.3.
 |---|---|
 | Sonarr, Radarr, Prowlarr, SABnzbd, Bazarr, LazyLibrarian, jDownloader | had no login of their own on the LAN |
 | Syncthing, Prometheus | were completely unauthenticated |
+| SearXNG | open search relay whose queries egress on the Mullvad subscription; gates the browser vhost only — Open WebUI still reaches it directly at svc-download's `IP:port` |
 | code-server, Webtop | remote shells — these keep their own password underneath as well, so they ask twice, deliberately |
 
 **Not** behind SSO, on purpose: Jellyfin, Immich, Nextcloud, Audiobookshelf,
@@ -77,8 +78,9 @@ and `password_reset` is disabled.
 `valerie`, `michael`, `erin` and `guest` can log in and are then denied
 everything. Worth being precise about why, because it looks broken:
 
-Nothing in the SSO set is something they would want. The eleven protected
-services are the download stack, two remote shells, Syncthing and Prometheus.
+Nothing in the SSO set is something they would want. The twelve protected
+services are the download stack (including SearXNG's browser vhost), two
+remote shells, Syncthing and Prometheus.
 The services a household actually uses — Jellyfin, Immich, Seerr, Nextcloud,
 Audiobookshelf — are deliberately *outside* SSO because native and mobile
 clients cannot follow a redirect to a login form, so those accounts are not
