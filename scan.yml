@@ -117,6 +117,30 @@
              | map(attribute='value') | map(attribute='fail', default=0)
              | map('int') | sum }}
 
+    - name: Collect the exposure and credential findings
+      ansible.builtin.set_fact:
+        # Flattened across hosts: the finding is "this port is open on that
+        # target", and which VM happened to hold the scanner is an
+        # implementation detail nobody reading the report cares about.
+        scan_exposure: >-
+          {{ groups['service_vms'] | sort
+             | map('extract', hostvars, 'service_vm_exposure')
+             | select('defined') | list | flatten }}
+        scan_credentials: >-
+          {{ groups['service_vms'] | sort
+             | map('extract', hostvars, 'service_vm_credentials')
+             | select('defined') | list | flatten }}
+
+    - name: Reduce the canaries to the two numbers escalation needs
+      ansible.builtin.set_fact:
+        # Ports open that no catalog explains. The security finding.
+        scan_unexpected_ports: >-
+          {{ scan_exposure | map(attribute='unexpected') | flatten | length }}
+        # Services still accepting a shipped default. Never a delta — one is
+        # always too many, and unlike a CVE count this is fixable in a minute.
+        scan_default_creds: >-
+          {{ scan_credentials | selectattr('vulnerable') | map(attribute='service') | list }}
+
     - name: Read the previous run's totals
       ansible.builtin.slurp:
         src: "{{ scan_state_file }}"
@@ -158,9 +182,15 @@
                  > (scan_previous.image_eosl | default(0) | int))
              or ((scan_oscap | length > 0)
                  and ((scan_oscap_failed | int)
-                      > (scan_previous.oscap_failed | default(scan_oscap_failed) | int))) }}
+                      > (scan_previous.oscap_failed | default(scan_oscap_failed) | int)))
+             or ((scan_unexpected_ports | int) > 0)
+             or ((scan_default_creds | length) > 0) }}
         scan_escalation_reason: >-
-          {{ (scan_broken | join(', ') ~ ' could not be scanned')
+          {{ ('DEFAULT CREDENTIALS ACCEPTED: ' ~ (scan_default_creds | join(', ')))
+             if (scan_default_creds | length > 0)
+             else (scan_unexpected_ports ~ ' unexplained open port(s)')
+             if ((scan_unexpected_ports | int) > 0)
+             else (scan_broken | join(', ') ~ ' could not be scanned')
              if (scan_broken | length > 0)
              else 'image scan did not run'
              if (not (infra_image_scan.ok | default(false) | bool))

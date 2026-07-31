@@ -42,3 +42,21 @@ expected false positive.
 paths = [
   '''^inventory/group_vars/all_vault\.yml\.example$''',
 ]
+
+[[allowlists]]
+description = """
+The default-credential canary. This file exists precisely to contain
+credential-shaped strings — admin/admin, admin/admin123,
+changeme@example.com/MyPassword — and every one of them is a PUBLISHED UPSTREAM
+DEFAULT lifted from the project's own documentation, not a secret belonging to
+this estate. gitleaks' curl-auth-user rule firing here is the rule working
+correctly on content that is deliberately public.
+
+Scoped to this one path rather than disabling the rule, so a real `curl -u`
+credential appearing anywhere else still fails the build. If this file ever
+needs a genuine password it is the wrong design: the canary must keep working
+on the nightly runner, whose checkout has no vault.
+"""
+paths = [
+  '''^roles/service_vm/templates/credential-canary\.sh\.j2$''',
+]

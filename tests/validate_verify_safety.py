@@ -28,6 +28,8 @@ SAFE_TASKS = [
     # at once, so a stray restart there would be both invisible and estate-wide.
     ROOT / "roles/service_vm/tasks/scan.yml",
     ROOT / "roles/service_vm/tasks/scan-benchmark.yml",
+    ROOT / "roles/service_vm/tasks/scan-exposure.yml",
+    ROOT / "roles/service_vm/tasks/scan-credentials.yml",
 ]
 RESTART_RE = re.compile(r"\bsystemctl\s+(?:start|restart|try-restart)\b|\bstate:\s*restarted\b")
 

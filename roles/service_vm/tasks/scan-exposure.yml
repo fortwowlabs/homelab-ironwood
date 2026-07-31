@@ -1,0 +1,93 @@
+---
+# Exposure diff: what is ACTUALLY reachable on another VM, against what the
+# catalogs explain. Read-only — nmap opens connections and closes them.
+#
+# This is the only check in the estate that tests the firewall from the outside.
+# Everything else asserts that a rule is present in the configuration, which is
+# a different claim from the port being shut.
+
+- name: Work out which hosts this one is responsible for scanning
+  ansible.builtin.set_fact:
+    scan_exposure_targets: >-
+      {{ scan_exposure_pairs
+         | selectattr('scanner', 'equalto', inventory_hostname)
+         | map(attribute='target') | list }}
+    service_vm_exposure: []
+
+- name: Scan each target
+  # -Pn   the hosts are up; skipping discovery avoids a false "host down" when
+  #       ICMP is filtered, which would report every port as closed.
+  # -n    no DNS. The resolver is dnsmasq on svc-media, and a scan must not
+  #       depend on a service it is scanning.
+  # -p-   all 65535. The point is finding what nobody expected, and a top-1000
+  #       scan would miss both 61208 (Glances) and 22000 (Syncthing).
+  #
+  # pipefail so a broken nmap cannot present as a clean, empty port list.
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      nmap -Pn -n -p- --open -T4 {{ hostvars[item].ansible_host | quote }} \
+        | grep -oE '^[0-9]+/tcp' \
+        | cut -d/ -f1 \
+        | sort -n
+    executable: /bin/bash
+  loop: "{{ scan_exposure_targets }}"
+  register: service_vm_exposure_raw
+  changed_when: false
+  failed_when: false
+
+# THE POSITIVE CONTROL, and the reason this file has one at all.
+#
+# A port scanner that under-reports is worse than no scanner: it says "nothing
+# unexpected is open" and is believed. On 2026-07-30 a hand-rolled sweep
+# reported svc-download as having a single open port when it had eleven —
+# conntrack and ephemeral source ports exhausted at high concurrency, and every
+# dropped connection looked exactly like a closed one.
+#
+# sshd is the control because it cannot legitimately be shut: Ansible reached
+# the target over it to gather facts minutes ago. If the scan cannot see 22 on
+# a host that is demonstrably answering on 22, the scan is broken and its
+# silence means nothing.
+- name: Require the scan to detect a port known to be open
+  ansible.builtin.assert:
+    that:
+      - "'22' in (item.stdout_lines | default([]))"
+    fail_msg: >-
+      The port scan of {{ item.item }} did not detect sshd on 22, which Ansible
+      is connected over right now. That makes the scan broken rather than the
+      estate clean — treat these results as meaningless until it passes.
+    quiet: true
+  loop: "{{ service_vm_exposure_raw.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: Diff each target's observed ports against the expected set
+  ansible.builtin.set_fact:
+    service_vm_exposure: "{{ service_vm_exposure + [entry] }}"
+  loop: "{{ service_vm_exposure_raw.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  vars:
+    observed: "{{ item.stdout_lines | default([]) | map('int') | list | sort }}"
+    # Which expected set applies is decided by the target's inventory group, not
+    # by its hostname, so renaming a VM does not silently detach it from its
+    # own expectations.
+    expected: >-
+      {{ (scan_expected_ports.download
+          if 'download_vms' in hostvars[item.item].group_names
+          else scan_expected_ports.media
+          if 'media_vms' in hostvars[item.item].group_names
+          else scan_expected_ports.infra) | map('int') | list | sort }}
+    entry:
+      target: "{{ item.item }}"
+      observed: "{{ observed }}"
+      # Open and unexplained. The finding that matters: something is listening
+      # on the LAN that no catalog entry accounts for.
+      unexpected: "{{ observed | difference(expected) }}"
+      # Expected and shut. Not a security finding but a correctness one — a
+      # service that should be reachable is not, which usually means it is down.
+      missing: "{{ expected | difference(observed) }}"
+
+- name: Mark the exposure scan complete
+  ansible.builtin.set_fact:
+    service_vm_exposure_ran: true

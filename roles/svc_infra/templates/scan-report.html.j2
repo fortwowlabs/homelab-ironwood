@@ -124,6 +124,35 @@
 </div>
 {% endif %}
 
+{% if scan_default_creds | default([]) | length > 0 %}
+<div class="banner">
+  <strong>{{ scan_default_creds | join(', ') }} still accept their shipped default credentials.</strong><br>
+  Fix these first. Unlike a CVE count this is not a trade-off anyone chose &mdash;
+  it is a login anybody on the LAN can look up in the project's own
+  documentation, and it takes a minute to change.
+</div>
+{% endif %}
+
+<h2 style="font-size:1.05rem;margin:2rem 0 .5rem;">Exposed ports</h2>
+{% if scan_exposure | default([]) | length > 0 %}
+<table>
+  <thead><tr><th>target</th><th>open</th><th>unexplained</th><th>expected but shut</th></tr></thead>
+  <tbody>
+{% for e in scan_exposure | sort(attribute='target') %}
+    <tr>
+      <td>{{ e.target }}</td>
+      <td>{{ e.observed | length }}</td>
+      <td{{ ' class="bad"' if e.unexpected | length > 0 else '' }}>{{ e.unexpected | join(', ') or '&mdash;' }}</td>
+      <td>{{ e.missing | join(', ') or '&mdash;' }}</td>
+    </tr>
+{% endfor %}
+  </tbody>
+</table>
+<p style="opacity:.75;font-size:.85rem;">Scanned from another VM &mdash; a host scanning itself goes over loopback and bypasses its own firewall entirely.</p>
+{% else %}
+<div class="note">Not run &mdash; no result recorded. Zero ports found is not zero ports open.</div>
+{% endif %}
+
 <h2 style="font-size:1.05rem;margin:2rem 0 .5rem;">Benchmark (OpenSCAP)</h2>
 {% if scan_oscap | length > 0 %}
 <table>

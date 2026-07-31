@@ -101,6 +101,36 @@
         service_vm_oscap: {}
         service_vm_oscap_ran: false
 
+# Both canaries default to "did not run" so the aggregation never has to tell
+# "clean" apart from "absent".
+- name: Assume neither canary ran on this host
+  ansible.builtin.set_fact:
+    service_vm_exposure: []
+    service_vm_exposure_ran: false
+    service_vm_credentials: []
+    service_vm_credentials_ran: false
+
+- name: Diff what is actually exposed against what the catalogs explain
+  when: inventory_hostname in (scan_exposure_pairs | map(attribute='scanner') | list)
+  block:
+    - name: Run the exposure scan
+      ansible.builtin.include_tasks: scan-exposure.yml
+  rescue:
+    - name: Record that the exposure scan failed without losing the other findings
+      ansible.builtin.set_fact:
+        service_vm_exposure: []
+        service_vm_exposure_ran: false
+
+- name: Check for services still accepting their shipped defaults
+  block:
+    - name: Run the credential canary
+      ansible.builtin.include_tasks: scan-credentials.yml
+  rescue:
+    - name: Record that the credential canary failed without losing the other findings
+      ansible.builtin.set_fact:
+        service_vm_credentials: []
+        service_vm_credentials_ran: false
+
 - name: Mark the host scan complete
   ansible.builtin.set_fact:
     service_vm_scanned: true

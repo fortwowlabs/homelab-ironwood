@@ -59,6 +59,39 @@ CONTAINER IMAGE VULNERABILITIES
   compare against, but an image built long ago on a distribution that has since
   patched is the same finding by another name.
 
+DEFAULT CREDENTIALS
+{% if scan_credentials | length > 0 %}
+{%   for c in scan_credentials | sort(attribute='service') %}
+  {{ "%-14s %s" | format(c.service, 'STILL ACCEPTS ITS SHIPPED DEFAULT' if c.vulnerable else 'ok') }}
+      {{ c.detail }}
+{%   endfor %}
+{%   if scan_default_creds | length > 0 %}
+
+  Fix these first. Unlike a CVE count this is not a trade-off anyone chose, it
+  is a login anybody on the LAN can find in the project's own documentation,
+  and it takes a minute to change.
+{%   endif %}
+{% else %}
+  Not run — no result recorded. A canary that did not run is not a clean estate.
+{% endif %}
+
+EXPOSED PORTS (scanned from another VM; loopback would bypass the firewall)
+{% if scan_exposure | length > 0 %}
+{%   for e in scan_exposure | sort(attribute='target') %}
+  {{ "%-14s %d open" | format(e.target, e.observed | length) }}
+{%     if e.unexpected | length > 0 %}
+      UNEXPLAINED: {{ e.unexpected | join(', ') }}
+          Open to the LAN and accounted for by no catalog entry.
+{%     endif %}
+{%     if e.missing | length > 0 %}
+      expected but shut: {{ e.missing | join(', ') }}
+          Not a security finding — usually a service that is down.
+{%     endif %}
+{%   endfor %}
+{% else %}
+  Not run — no result recorded. Zero ports found is not zero ports open.
+{% endif %}
+
 BENCHMARK (OpenSCAP / scap-security-guide)
 {% if scan_oscap | length > 0 %}
 {% for host, profiles in scan_oscap | dictsort %}

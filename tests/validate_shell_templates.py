@@ -30,6 +30,7 @@ TEMPLATES = (
     "roles/svc_infra/templates/verify-run.sh.j2",
     "roles/svc_infra/templates/scan-run.sh.j2",
     "roles/svc_infra/templates/scan-images.sh.j2",
+    "roles/service_vm/templates/credential-canary.sh.j2",
     "roles/pve_mon/templates/diskguard.sh.j2",
     "roles/pve_mon/templates/pve-health.sh.j2",
     "roles/pve_mon/templates/smartd-ntfy.sh.j2",

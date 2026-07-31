@@ -28,6 +28,13 @@ service_packages:
   - cockpit
   - cockpit-podman
   - cockpit-storaged
+  # Exposure scanning (scan.yml). nmap rather than a hand-rolled socket sweep:
+  # a naive full-range scan at high concurrency exhausts ephemeral source ports
+  # and conntrack, and the dropped connections read as "closed". Measured
+  # 2026-07-30 — such a sweep reported svc-download as having only port 22 open
+  # while nine service ports were in fact reachable. A port scanner that
+  # under-reports is worse than none: it says "all closed, all good".
+  - nmap
   # Report-only benchmark scanning (scan.yml). openscap-scanner is the engine,
   # scap-security-guide the policy content. Neither runs on its own: nothing
   # here ever applies a remediation, which on these hosts would fight the

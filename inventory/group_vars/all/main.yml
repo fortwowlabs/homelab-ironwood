@@ -240,6 +240,70 @@ scan_oscap_profiles:
 scan_oscap_weekday: "0"
 scan_oscap_force: false
 
+# --- exposure diff ---------------------------------------------------------
+# Nothing in this repo has ever proved that the firewall DENIES. firewalld and
+# the nftables backstop are configured, and their configuration is asserted —
+# but "the rule is present" and "the port is shut" are different claims, and
+# only the second one matters. This scans each VM FROM ANOTHER VM and compares
+# what is actually reachable against what the catalogs explain.
+#
+# From another VM, not from itself: loopback bypasses the firewall entirely, so
+# a host scanning itself learns nothing about its own exposure. The pairs below
+# also mean svc-infra is the scanner for both other hosts, which is deliberate —
+# it is where Prometheus runs, so it is the one source allowed to reach
+# node_exporter on 9100, and that path gets exercised as a side effect.
+#
+# nmap, not a socket sweep. Measured 2026-07-30: a hand-rolled full-range Python
+# scan at high concurrency reported svc-download as having ONE port open when it
+# had eleven — ephemeral source ports and conntrack exhaust, and the dropped
+# connections are indistinguishable from a closed port. A scanner that
+# under-reports is worse than no scanner, because it reports "all closed".
+scan_exposure_pairs:
+  - { scanner: "{{ infra_host }}", target: "{{ media_host }}" }
+  - { scanner: "{{ infra_host }}", target: "{{ download_host }}" }
+  - { scanner: "{{ media_host }}", target: "{{ infra_host }}" }
+
+# Ports every service VM legitimately exposes to the LAN, independent of any
+# catalog. Kept as a named list so an unexplained port is unexplained because
+# nothing accounts for it, not because this file forgot to mention sshd.
+#   22   sshd — the deploy path and the way back in
+#   9090 Cockpit — proxied as cockpit-<host>.<domain>
+scan_common_ports: [22, 9090]
+# node_exporter. Reachable ONLY from svc-infra, where Prometheus scrapes it —
+# confirmed by scanning the same host from svc-media and not seeing it. That
+# asymmetry is a real control, so it is modelled rather than flattened away.
+scan_prometheus_scrape_port: 9100
+
+scan_expected_ports:
+  # svc-download: the nine jailed app UIs, reached through systemd socket
+  # proxies, plus the common pair. Its stack is otherwise sealed by the
+  # nftables backstop.
+  download: >-
+    {{ ((download_apps | default({})).values() | map(attribute='ui_port') | list)
+       + scan_common_ports + [scan_prometheus_scrape_port] | unique | sort }}
+  # svc-media: the access layer rather than a catalog. 53 dnsmasq, 443 Caddy,
+  # 8096 Jellyfin (published on the LAN IP, not loopback, so Caddy on this same
+  # host is not the only reader), 8080 ntfy (every alert in the estate is
+  # published to it), and the Minecraft servers.
+  #
+  # Port 80 is deliberately absent and its absence is checked: Caddy serves
+  # HTTPS only here, and a plaintext listener appearing would be a real change.
+  media: >-
+    {{ [53, 443, 8080, 8096]
+       + ((minecraft_servers | default({})).values() | map(attribute='port') | list)
+       + scan_common_ports + [scan_prometheus_scrape_port] | unique | sort }}
+  # svc-infra: both catalogs' ui_ports, their TCP extra_ports, and the four
+  # bespoke multi-container services whose ports live in their own Quadlet
+  # templates rather than in a catalog entry.
+  infra: >-
+    {{ ((infra_apps | default({})).values() | map(attribute='ui_port') | list)
+       + ((infra_secret_apps | default({})).values() | map(attribute='ui_port') | list)
+       + ((infra_apps | default({})).values() | map(attribute='extra_ports', default=[])
+          | list | flatten | selectattr('protocol', 'equalto', 'tcp')
+          | map(attribute='port') | list)
+       + [2283, 8000, 8080, 8081]
+       + scan_common_ports | unique | sort }}
+
 # Every image this estate runs, gathered from all five places digests live.
 # tests/validate_scan_image_coverage.py fails the build if a digest exists
 # anywhere in group_vars and is not reachable from this list — otherwise adding
