@@ -95,6 +95,28 @@
           critical: "{{ answered | map(attribute='critical') | map('int') | sum }}"
           important: "{{ answered | map(attribute='important') | map('int') | sum }}"
 
+    - name: Collect benchmark results from every host that ran one
+      ansible.builtin.set_fact:
+        # Shape: {host: {profile: {pass: n, fail: n, ...}}}. Hosts that did not
+        # benchmark drop out entirely, so an empty dict means "not benchmark
+        # day" — which the report renders as such rather than as a zero score.
+        scan_oscap: >-
+          {{ dict(hosts | zip(hosts | map('extract', hostvars, 'service_vm_oscap') | list))
+             | dict2items | rejectattr('value', 'eq', {}) | items2dict }}
+      vars:
+        hosts: "{{ groups['service_vms'] | sort }}"
+
+    - name: Total the benchmark failures across every host that ran one
+      ansible.builtin.set_fact:
+        # One number, summed over hosts and profiles. Escalation needs a scalar
+        # it can compare against last week's, and a per-profile breakdown that
+        # only moves when a rule flips is noise in an alert — the report carries
+        # the detail.
+        scan_oscap_failed: >-
+          {{ scan_oscap.values() | map('dict2items') | flatten
+             | map(attribute='value') | map(attribute='fail', default=0)
+             | map('int') | sum }}
+
     - name: Read the previous run's totals
       ansible.builtin.slurp:
         src: "{{ scan_state_file }}"
@@ -133,7 +155,10 @@
              or ((infra_image_scan.critical | default(0) | int)
                  > (scan_previous.image_critical | default(0) | int))
              or ((infra_image_scan.eosl | default([]) | length)
-                 > (scan_previous.image_eosl | default(0) | int)) }}
+                 > (scan_previous.image_eosl | default(0) | int))
+             or ((scan_oscap | length > 0)
+                 and ((scan_oscap_failed | int)
+                      > (scan_previous.oscap_failed | default(scan_oscap_failed) | int))) }}
         scan_escalation_reason: >-
           {{ (scan_broken | join(', ') ~ ' could not be scanned')
              if (scan_broken | length > 0)
@@ -147,6 +172,11 @@
                   (infra_image_scan.critical | default(0))
              if ((infra_image_scan.critical | default(0) | int)
                  > (scan_previous.image_critical | default(0) | int))
+             else 'benchmark failures increased ' ~
+                  (scan_previous.oscap_failed | default(0)) ~ ' -> ' ~ scan_oscap_failed
+             if ((scan_oscap | length > 0)
+                 and ((scan_oscap_failed | int)
+                      > (scan_previous.oscap_failed | default(scan_oscap_failed) | int)))
              else 'pending security errata increased ' ~
                   (scan_previous.total | default(0)) ~ ' -> ' ~ scan_total }}
         scan_summary_line: >-
@@ -184,20 +214,44 @@
         group: "{{ svc_gid }}"
         mode: "0644"
 
+    # The baseline is the last known GOOD measurement, never simply the last
+    # run's output. Each group is carried forward untouched unless it was
+    # actually measured this time.
+    #
+    # Learned from a real false alarm on 2026-07-30: a run in which every host
+    # failed to scan computed a total of 0 and wrote that as the baseline, so
+    # the next healthy run reported "pending security errata increased 0 -> 53"
+    # and escalated. A failed measurement must never become the number the next
+    # run is compared against — that turns one outage into two alerts, the
+    # second of which is pure fiction.
     - name: Record this run's totals as the baseline for the next
       ansible.builtin.copy:
         content: |
-          {{ {'total': scan_total | int,
-              'critical': scan_critical | int,
-              'important': scan_important | int,
-              'image_critical': infra_image_scan.critical | default(0) | int,
-              'image_high': infra_image_scan.high | default(0) | int,
-              'image_eosl': infra_image_scan.eosl | default([]) | length,
+          {{ {'total': (scan_total | int) if errata_measured
+                       else (scan_previous.total | default(0) | int),
+              'critical': (scan_critical | int) if errata_measured
+                          else (scan_previous.critical | default(0) | int),
+              'important': (scan_important | int) if errata_measured
+                           else (scan_previous.important | default(0) | int),
+              'image_critical': (infra_image_scan.critical | int) if images_measured
+                                else (scan_previous.image_critical | default(0) | int),
+              'image_high': (infra_image_scan.high | int) if images_measured
+                            else (scan_previous.image_high | default(0) | int),
+              'image_eosl': (infra_image_scan.eosl | length) if images_measured
+                            else (scan_previous.image_eosl | default(0) | int),
+              'oscap_failed': (scan_oscap_failed | int) if (scan_oscap | length > 0)
+                              else (scan_previous.oscap_failed | default(0) | int),
               'recorded': ansible_date_time.iso8601} | to_nice_json }}
         dest: "{{ scan_state_file }}"
         owner: "{{ svc_uid }}"
         group: "{{ svc_gid }}"
         mode: "0644"
+      vars:
+        # "Measured" means every host answered, not merely that the play
+        # finished. A partial result is reportable but must not become the
+        # comparison point.
+        errata_measured: "{{ scan_broken | length == 0 }}"
+        images_measured: "{{ infra_image_scan.ok | default(false) | bool }}"
 
     # Published on EVERY run, to the muted informational topic. This is not
     # chatter: docs/automation-opportunities.md records as an accepted risk that

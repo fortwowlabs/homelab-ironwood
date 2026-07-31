@@ -27,6 +27,7 @@ SAFE_TASKS = [
     # for a stronger reason: a scan runs unattended at 05:30 against every host
     # at once, so a stray restart there would be both invisible and estate-wide.
     ROOT / "roles/service_vm/tasks/scan.yml",
+    ROOT / "roles/service_vm/tasks/scan-benchmark.yml",
 ]
 RESTART_RE = re.compile(r"\bsystemctl\s+(?:start|restart|try-restart)\b|\bstate:\s*restarted\b")
 

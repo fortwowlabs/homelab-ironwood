@@ -29,6 +29,13 @@ service_packages:
   - cockpit
   - cockpit-podman
   - cockpit-storaged
+  # Report-only benchmark scanning (scan.yml). openscap-scanner is the engine,
+  # scap-security-guide the policy content. Neither runs on its own: nothing
+  # here ever applies a remediation, which on these hosts would fight the
+  # SELinux policy module, rootless podman's subuid mappings and the NFS
+  # automounts. tests/validate_scan_readonly.py enforces that at build time.
+  - openscap-scanner
+  - scap-security-guide
 # No caddy/dnsmasq here — the access layer (reverse proxy + private DNS)
 # stays on svc-media; infra services are reached the same way svc-download's
 # proxied apps are: Caddy on svc-media proxies to hostvars[infra_host].ansible_host.

@@ -75,6 +75,32 @@
       moderate: "{{ (out | regex_findall('(\\d+)\\s+Moderate\\s+Security notice') | first | default('0')) | int }}"
       low: "{{ (out | regex_findall('(\\d+)\\s+Low\\s+Security notice') | first | default('0')) | int }}"
 
+# Default so the aggregation downstream never has to distinguish "absent
+# because it is not benchmark day" from "absent because something broke".
+- name: Assume no benchmark ran on this host
+  ansible.builtin.set_fact:
+    service_vm_oscap: {}
+    service_vm_oscap_ran: false
+
+# Isolated in its own rescue, NOT left to the caller's. scan.yml's per-host
+# rescue marks the whole host unscanned and zeroes its errata — so when the
+# benchmark's result-counting broke on 2026-07-30, a 620-second evaluation that
+# had actually succeeded took the errata figures down with it and all three
+# hosts reported NOT SCANNED. The two findings are independent and their
+# failures must be too.
+- name: Evaluate the OpenSCAP benchmarks
+  when: >-
+    (scan_oscap_force | default(false) | bool)
+    or (ansible_date_time.weekday_number == (scan_oscap_weekday | string))
+  block:
+    - name: Run the benchmark evaluation
+      ansible.builtin.include_tasks: scan-benchmark.yml
+  rescue:
+    - name: Record that the benchmark failed without losing the errata scan
+      ansible.builtin.set_fact:
+        service_vm_oscap: {}
+        service_vm_oscap_ran: false
+
 - name: Mark the host scan complete
   ansible.builtin.set_fact:
     service_vm_scanned: true

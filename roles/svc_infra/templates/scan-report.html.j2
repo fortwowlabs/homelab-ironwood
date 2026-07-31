@@ -124,6 +124,42 @@
 </div>
 {% endif %}
 
+<h2 style="font-size:1.05rem;margin:2rem 0 .5rem;">Benchmark (OpenSCAP)</h2>
+{% if scan_oscap | length > 0 %}
+<table>
+  <thead><tr><th>host</th><th>profile</th><th>pass</th><th>fail</th><th>n/a</th><th>score</th></tr></thead>
+  <tbody>
+{% for host, profiles in scan_oscap | dictsort %}
+{%   for profile, counts in profiles | dictsort %}
+{%     set scored = (counts.pass | default(0) | int) + (counts.fail | default(0) | int) %}
+    <tr>
+      <td>{{ host }}</td>
+      <td>{{ profile }}</td>
+      <td>{{ counts.pass | default(0) }}</td>
+      <td class="bad">{{ counts.fail | default(0) }}</td>
+      <td>{{ counts.notapplicable | default(0) }}</td>
+      <td>{{ "%.1f%%" | format((100 * (counts.pass | default(0) | int) / scored) if scored else 0) }}</td>
+    </tr>
+{%   endfor %}
+{% endfor %}
+  </tbody>
+</table>
+<div class="note">
+  Neither score is a target. STIG is a DoD baseline and most of the gap is
+  requirements this estate will never adopt &mdash; FIPS mode, smart-card auth,
+  classified audit rules. What matters is the trend: a score that drops means
+  something changed on the host. Full HTML report per host lives at
+  <code>/var/lib/homelab-scan/oscap-&lt;profile&gt;.html</code>.
+</div>
+{% else %}
+<div class="note">
+  Not run today. The benchmark is weekly (Sunday) because it costs ~10 minutes
+  of wall clock and ~30 of CPU across every VM to measure a property that only
+  moves when host configuration moves. Force it with
+  <code>make scan ARGS="-e scan_oscap_force=true"</code>.
+</div>
+{% endif %}
+
 <p><a href="latest.txt">latest.txt</a> &middot; <a href="state.json">state.json</a> &middot; <a href="images.txt">images.txt</a></p>
 
 <div class="note">

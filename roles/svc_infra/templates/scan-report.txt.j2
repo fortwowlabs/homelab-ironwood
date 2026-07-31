@@ -59,6 +59,32 @@ CONTAINER IMAGE VULNERABILITIES
   compare against, but an image built long ago on a distribution that has since
   patched is the same finding by another name.
 
+BENCHMARK (OpenSCAP / scap-security-guide)
+{% if scan_oscap | length > 0 %}
+{% for host, profiles in scan_oscap | dictsort %}
+{%   for profile, counts in profiles | dictsort %}
+{%     set scored = (counts.pass | default(0) | int) + (counts.fail | default(0) | int) %}
+  {{ "%-14s %-16s pass %3d  fail %3d  n/a %3d  score %5.1f%%" | format(
+       host, profile, counts.pass | default(0) | int, counts.fail | default(0) | int,
+       counts.notapplicable | default(0) | int,
+       (100 * (counts.pass | default(0) | int) / scored) if scored else 0) }}
+{%   endfor %}
+{% endfor %}
+
+  Full HTML per host: /var/lib/homelab-scan/oscap-<profile>.html
+
+  Neither score is a target. STIG is a DoD baseline and most of the gap is
+  requirements this estate will never adopt — FIPS mode, smart-card auth,
+  classified audit rules. What matters is the trend: a score that drops means
+  something changed on the host, and that is worth knowing even when the
+  absolute number is not.
+{% else %}
+  Not run today. The benchmark is weekly (Sunday), because it costs ~10 minutes
+  of wall clock and ~30 of CPU across every VM to measure a property that only
+  moves when host configuration moves. Force it with:
+      make scan ARGS="-e scan_oscap_force=true"
+{% endif %}
+
 WHAT THIS MEANS
   Nothing in this estate updates itself. That is a deliberate trade recorded in
   docs/unattended.md — packages install on demand and images are digest-pinned,

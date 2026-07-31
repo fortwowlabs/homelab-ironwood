@@ -203,6 +203,43 @@ scan_state_file: "{{ scan_report_dir }}/state.json"
 trivy_image: "docker.io/aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f"
 trivy_cache_dir: /opt/homelab/appdata/trivy-cache
 
+# --- OpenSCAP benchmark ----------------------------------------------------
+# Report-only, always. `oscap xccdf eval` NEVER runs with --remediate here:
+# applying a benchmark's fixes on these hosts would fight the custom SELinux
+# policy module, rootless podman's subuid mappings and the NFS automounts.
+# tests/validate_scan_readonly.py makes that a build-time property.
+#
+# Both profiles are evaluated. Measured on svc-infra 2026-07-30 against
+# scap-security-guide 0.1.81:
+#   stig           298s   pass 167  fail 290  score 36.5%
+#   cis_server_l1  317s   pass 166  fail 125  score 57.0%
+# STIG is a DoD baseline, so most of its extra 165 failures are requirements
+# this estate will never adopt (FIPS mode, smart-card auth, classified audit
+# rules). It is kept anyway because it is the stricter read and its score is
+# only meaningful as a trend, not as a target. Treat neither number as a goal:
+# what matters is that they do not silently get worse.
+#
+# rl10 rather than rhel10: Rocky ships its own rebuilt datastream, and the
+# rhel10 one is also present. Using the wrong one still runs and still scores,
+# which is exactly why it is pinned here rather than globbed for.
+scan_oscap_datastream: /usr/share/xml/scap/ssg/content/ssg-rl10-ds.xml
+scan_oscap_profiles:
+  - stig
+  - cis_server_l1
+
+# WEEKLY, not nightly. All three hosts run in parallel (forks=5), so both
+# profiles cost ~10 minutes of wall clock but ~30 minutes of sustained CPU and
+# I/O across every VM including the download host. Benchmark posture only moves
+# when host configuration moves, and `make verify` already guards that daily —
+# so a nightly run would buy a day of resolution on a slow signal at real cost.
+# Sunday (weekday 0) keeps 52 samples a year, which is plenty for a trend.
+#
+# Override with `-e scan_oscap_force=true` to run it on demand; `make scan`
+# deliberately does NOT force, so what you run by hand matches what runs at
+# 05:30.
+scan_oscap_weekday: "0"
+scan_oscap_force: false
+
 # Every image this estate runs, gathered from all five places digests live.
 # tests/validate_scan_image_coverage.py fails the build if a digest exists
 # anywhere in group_vars and is not reachable from this list — otherwise adding

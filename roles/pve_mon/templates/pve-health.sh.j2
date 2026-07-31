@@ -131,6 +131,29 @@ if [[ -n "$failed" ]]; then
     problems+=$'\n'"failed units:"$'\n'"${failed}"
 fi
 
+# Pending security updates. The hypervisor is the one host the nightly scan
+# cannot reach — scan.yml runs from svc-infra, which holds no root key here and
+# should not, since a nightly job with root on the hypervisor is a far larger
+# blast radius than the check is worth. So PVE reports its own patch posture
+# through the channel it already owns.
+#
+# REPORTING ONLY. This deliberately does not upgrade anything: PVE's own
+# configuration is hand-managed (see docs/), and an unattended upgrade of a
+# hypervisor is how a whole estate goes offline while nobody is watching.
+#
+# Counted, never listed. A bare count belongs in an alert; the package names
+# belong in `apt list --upgradable` run by a human who has decided to look.
+# This also never fails the health check — being behind on patches is a
+# standing condition here, not an incident, and making it fail would turn the
+# hypervisor's dead-man's switch permanently red.
+if command -v apt-get >/dev/null 2>&1; then
+    security_updates=$(apt-get --simulate upgrade 2>/dev/null \
+        | grep -c '^Inst .*security' || true)
+    if [[ "${security_updates:-0}" -gt 0 ]]; then
+        echo "PVE has ${security_updates} pending security update(s) — reporting only, nothing was applied"
+    fi
+fi
+
 if [[ -n "$problems" ]]; then
     echo "PVE health problems:${problems}" >&2
     /usr/local/sbin/hc-ping.sh "${HC_PING_PVE:-}" fail

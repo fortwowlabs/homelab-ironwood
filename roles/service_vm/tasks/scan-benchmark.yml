@@ -1,0 +1,119 @@
+---
+# OpenSCAP benchmark evaluation. Report-only: `oscap xccdf eval` produces a
+# score and an HTML report and changes nothing. --remediate and
+# `oscap xccdf generate fix` are forbidden by tests/validate_scan_readonly.py,
+# not merely avoided by habit — a benchmark's remediation on these hosts would
+# fight the custom SELinux policy module, rootless podman's subuid mappings and
+# the NFS automounts.
+#
+# Runs weekly rather than nightly; see scan_oscap_weekday in
+# inventory/group_vars/all/main.yml for why.
+
+- name: Create the benchmark report directory
+  ansible.builtin.file:
+    path: /var/lib/homelab-scan
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Evaluate each OpenSCAP profile
+  # oscap EXITS 2 WHENEVER ANY RULE FAILS, which is every run on every host —
+  # 125 failures on the CIS profile here, 290 on STIG. Treating that as an
+  # error would make the scan permanently red and teach everyone to ignore it,
+  # so only rc>=3 (a real oscap malfunction) counts as failure. rc 0 means a
+  # perfect score, rc 1 means oscap itself errored, rc 2 means rules failed.
+  ansible.builtin.command:
+    argv:
+      - oscap
+      - xccdf
+      - eval
+      - --profile
+      - "xccdf_org.ssgproject.content_profile_{{ item }}"
+      - --results
+      - "/var/lib/homelab-scan/oscap-{{ item }}.xml"
+      - --report
+      - "/var/lib/homelab-scan/oscap-{{ item }}.html"
+      - "{{ scan_oscap_datastream }}"
+  loop: "{{ scan_oscap_profiles }}"
+  register: service_vm_oscap_runs
+  changed_when: false
+  failed_when: service_vm_oscap_runs.rc | default(1) >= 3
+
+- name: Count rule results per profile
+  # Parsed from the results XML rather than scraped from the HTML: the XML is
+  # the machine-readable artifact and its <result> elements are stable, while
+  # the HTML is a rendering upstream restyles between releases.
+  #
+  # A shell pipeline rather than an inline python -c, learned the hard way:
+  # YAML's `>-` folds each newline into a space, so a multi-line `python3 -c "`
+  # becomes `python3 -c " import ...` — a leading space INSIDE the quotes, which
+  # Python reads as indentation and rejects with IndentationError. It failed on
+  # all three hosts after a 620s evaluation had already succeeded.
+  #
+  # Emits YAML (`pass: 166`) rather than JSON so the result parses with a plain
+  # `| from_yaml`, no quoting of braces required anywhere in the chain.
+  #
+  # pipefail matters here rather than being lint appeasement: without it a grep
+  # that fails outright is masked by the exit status of awk, and the task
+  # produces empty output that reads as a clean "0 results" — the same silent
+  # failure this whole scan exists to prevent. With it, a real breakage yields
+  # no output and the assert below names it. (Caught by the risky-shell-pipe
+  # rule enabled in cbcfb42, on its first real opportunity.)
+  #
+  # A literal `|` block, not `>-`: folding is what produced the IndentationError
+  # described above, and there is no reason to invite it back.
+  ansible.builtin.shell:
+    cmd: |
+      set -o pipefail
+      grep -o '<result>[a-z]*</result>' {{ ('/var/lib/homelab-scan/oscap-' ~ item ~ '.xml') | quote }} \
+        | sed 's:</\?result>::g' \
+        | sort | uniq -c \
+        | awk '{printf "%s: %s\n", $2, $1}'
+    executable: /bin/bash
+  loop: "{{ scan_oscap_profiles }}"
+  register: service_vm_oscap_counts
+  changed_when: false
+  # grep exits 1 when a profile legitimately produced no results; that is a
+  # empty count, not a task failure. A genuinely broken evaluation is caught by
+  # the assert below instead, which can say something useful about it.
+  failed_when: false
+
+- name: Summarise the benchmark result
+  ansible.builtin.set_fact:
+    service_vm_oscap: >-
+      {{ dict(scan_oscap_profiles | zip(
+           service_vm_oscap_counts.results
+           | map(attribute='stdout')
+           | map('from_yaml')
+           | map('default', {}, true)
+           | list)) }}
+    service_vm_oscap_ran: true
+
+# A profile that scored nothing at all means the evaluation did not really run,
+# and an empty count would render as a tidy 0.0% — a broken benchmark and a
+# perfectly failing host look identical in a table of numbers. This is the same
+# distinction the errata and image scans draw between "none found" and "could
+# not look", and it is the one that makes the difference worth reporting.
+- name: Require that every profile actually scored something
+  ansible.builtin.assert:
+    that:
+      - service_vm_oscap[item] | default({}) | length > 0
+      - (service_vm_oscap[item].pass | default(0) | int)
+        + (service_vm_oscap[item].fail | default(0) | int) > 0
+    fail_msg: >-
+      OpenSCAP profile {{ item }} produced no rule results on
+      {{ inventory_hostname }}. The evaluation ran but scored nothing, which is
+      a broken scan rather than a clean host — check
+      /var/lib/homelab-scan/oscap-{{ item }}.xml.
+    quiet: true
+  loop: "{{ scan_oscap_profiles }}"
+
+# Discard the 15MB results XML once the counts are out of it. The HTML report
+# is what a human reads and is a third the size; keeping both on every host
+# every week is 90MB of duplicated evidence nobody opens.
+- name: Remove the bulky results XML
+  ansible.builtin.file:
+    path: "/var/lib/homelab-scan/oscap-{{ item }}.xml"
+    state: absent
+  loop: "{{ scan_oscap_profiles }}"
