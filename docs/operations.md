@@ -152,6 +152,33 @@ safety net either.
 A failed ntfy push is not permission to ignore a failed unit or disk
 threshold.
 
+### Image review
+
+Nothing updates itself, so bumping an image is a decision somebody makes. The
+scan measures the cost of not making it; this is the habit that turns that
+measurement into action.
+
+**Roughly monthly**, read <https://scan.fortwow.dev> and pick work from three
+signals, in priority order:
+
+1. **End-of-life base OS.** These never improve — the image will not receive
+   another security update no matter how long you wait, so the only fixes are a
+   re-pin to a maintained upstream or removing the service. Escalates on its
+   own, because it is the one finding where waiting is strictly worse.
+2. **Highest critical counts.** The report lists the worst images with build
+   dates beside them.
+3. **Oldest build dates.** A pin that has not moved in a year is usually
+   carrying fixes that shipped months ago.
+
+Then follow the `BUMP PROCEDURE` at the top of
+`inventory/group_vars/all/apps.yml`. Bump a small number at a time and re-run
+`make scan` afterwards to confirm the count actually fell.
+
+**This review is deliberately a habit rather than an alert**, which is its
+weakness and worth stating: a habit is exactly what a long absence interrupts.
+That is why end-of-life images and rising critical counts escalate to ntfy on
+their own — those two do not wait for anyone to remember.
+
 ### The nightly security scan
 
 `homelab-scan@svcops.timer` rides the same runner as the verification below —

@@ -83,6 +83,7 @@ control node, create a mode-`0600` `.vault_pass` and set
 | `make verify` | Non-disruptive health and policy gates; temporary NFS probes are always removed |
 | `make verify-disruptive` | Fail-closed drill with guaranteed service-state restoration |
 | `make scan` | Report-only security scan; never installs, upgrades, or remediates |
+| `make image-digest REF=<ref>` | Resolve an image tag to the immutable digest the catalogs pin |
 | `make reconcile` | Opt-in Proxmox VM shape reconciliation; never moves or shrinks disks |
 | `make vault-edit` | Edit the encrypted vault |
 

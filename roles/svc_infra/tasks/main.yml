@@ -3,6 +3,12 @@
   ansible.builtin.import_tasks: files.yml
   tags: [files]
 
+# Pull images BEFORE apps.yml flushes handlers and restarts anything: a bad
+# digest must abort the deploy, not take a service down mid-restart.
+- name: Pre-pull immutable images
+  ansible.builtin.import_tasks: images.yml
+  tags: [files, apps, images]
+
 - name: Converge infra applications
   ansible.builtin.import_tasks: apps.yml
   tags: [apps]

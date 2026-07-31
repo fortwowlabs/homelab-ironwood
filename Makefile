@@ -56,7 +56,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 .PHONY: help deps deps-dev validate validate-tools validate-syntax \
 	validate-ansible validate-yaml validate-shell validate-links \
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
-	check check-diff verify verify-disruptive scan drift reconcile access ping lint \
+	check check-diff verify verify-disruptive scan image-digest drift reconcile access ping lint \
 	vault-edit clean
 
 help: ## Show this help
@@ -107,6 +107,7 @@ validate-catalog:
 	$(PYTHON) tests/validate_generated_catalog.py
 	$(PYTHON) tests/validate_sso.py
 	$(PYTHON) tests/validate_scan_image_coverage.py
+	$(PYTHON) tests/validate_image_provenance.py
 
 validate-provisioning:
 	$(PYTHON) tests/validate_pve_states.py
@@ -167,6 +168,10 @@ access: ## Re-run the media VM's DNS, Caddy, and Homepage access layer
 
 verify: ## Run the non-disruptive verification playbook
 	$(ANSIBLE) $(VERIFY_PLAYBOOK) $(VAULT) $(ARGS)
+
+image-digest: ## Resolve REF=<image:tag> to the pinnable @sha256 digest
+	@test -n "$(REF)" || { echo 'usage: make image-digest REF=ghcr.io/owner/image:tag' >&2; exit 64; }
+	@scripts/image-digest.sh "$(REF)"
 
 scan: ## Run the report-only security scan (never remediates)
 	$(ANSIBLE) $(SCAN_PLAYBOOK) $(VAULT) $(ARGS)

@@ -1,4 +1,60 @@
 ---
+# =========================================================================
+# BUMP PROCEDURE for container images (deliberate, not automatic)
+#
+# Applies to every digest in this file, in infra-apps.yml, in minecraft.yml,
+# and to the standalone *_image variables in main.yml. Nothing updates itself
+# here; that is a deliberate trade, and this is how the trade gets paid.
+#
+#   1. DECIDE WHAT TO BUMP. Read the scan report at https://scan.<domain>:
+#      worst images by critical count, anything on an end-of-life base OS
+#      (those never improve), and the oldest build dates. See the review
+#      section in docs/operations.md.
+#
+#   2. RESOLVE THE DIGEST.
+#        make image-digest REF=ghcr.io/owner/image:tag
+#      This asks the registry manifest. Do NOT read a digest off the Docker
+#      Hub web API — it can disagree with the manifest, which is why the
+#      provenance comments in this file say "verified against the registry
+#      manifest digest directly".
+#
+#   3. RECORD WHAT YOU ARE REPLACING, directly above the line:
+#        # was 2026-07-31: sha256:<the digest you are removing>
+#        image: "ghcr.io/owner/image@sha256:<new>"
+#      tests/validate_image_provenance.py checks that the recorded digest is
+#      the one git says was actually there. A wrong value fails the build:
+#      a rollback record pointing at the wrong image is worse than none,
+#      because it will be believed.
+#
+#   4. CHECK THE COUPLINGS BEFORE DEPLOYING.
+#      - Immich's four images share a release and MUST move together.
+#      - Three services share one valkey digest and two share one postgres
+#        digest, on purpose. Bumping one is a decision about all of them.
+#      - A new image whose Dockerfile sets a non-root USER lands on an
+#        unwritable subuid under rootless podman. Set PUID/PGID=0, or
+#        user: "0" in the catalog. See CLAUDE.md.
+#
+#   5. DEPLOY ONE VM AT A TIME — `make dl` / `make media` / `make infra`.
+#      The pre-pull runs before anything restarts, so a bad digest aborts the
+#      deploy with the old container still serving. If that happens, revert
+#      the digest and re-deploy rather than leaving the host parked: the
+#      Quadlet on disk will already reference an image that was never pulled.
+#
+#   6. VERIFY THE APPLICATION, NOT THE CONTAINER. `active` and a 200 from
+#      Caddy prove the process started. This repo has been bitten twice by
+#      exactly that: a wedged redis that blocked migrations for a day, and a
+#      service still accepting its shipped password.
+#
+#   7. RE-RUN `make scan` AND CHECK THE NUMBER MOVED. A bump whose critical
+#      count is unchanged bought nothing, and is worth knowing before you
+#      conclude the work is done.
+#
+#   ROLLBACK: revert the digest line and re-deploy. The `# was` comment names
+#   the target; `git log -p` on this file is the full history. If the old
+#   image is still local the restart is immediate, and if it has been pruned
+#   the deploy re-pulls it — pruning costs rollback time, never the ability.
+# =========================================================================
+#
 # Download-stack source of truth. Every consumer (Quadlet, socket proxy,
 # firewall, image pull, backup, canary and verification) derives from this map.
 # Image references are immutable manifests reviewed during the 2026-07 refactor.

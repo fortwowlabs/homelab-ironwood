@@ -1,4 +1,7 @@
 ---
+# Bumping any digest in this file follows the BUMP PROCEDURE at the top of
+# inventory/group_vars/all/apps.yml — resolve with `make image-digest`, record
+# the replaced digest in a `# was` comment, deploy one VM at a time.
 # Minecraft Java Edition servers (v6, svc-media) — LAN-only game servers.
 # A generic catalog + a single Quadlet template (mirrors media_images/
 # infra_apps): a third server is one more minecraft_servers entry, plus one

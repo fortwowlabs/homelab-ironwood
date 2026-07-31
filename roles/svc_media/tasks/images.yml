@@ -1,0 +1,112 @@
+---
+# Pull every image this host runs BEFORE apps.yml flushes handlers and restarts
+# anything. See roles/svc_infra/tasks/images.yml for the full reasoning; in
+# short, without this a bad digest takes the service down instead of aborting
+# the deploy, because the pull would otherwise happen inside the unit start.
+#
+# One honest limitation. This runs AFTER files.yml, not before it, because
+# files.yml is where `loginctl enable-linger` establishes the rootless session
+# at /run/user/<uid> that podman needs — pulling first would break a fresh host.
+# So an aborted bump leaves the re-rendered Quadlet on disk pointing at a digest
+# that was never pulled, while the OLD container keeps running. The service is
+# fine and stays fine; but until the digest is reverted and re-deployed, a
+# reboot or a manual restart of that unit would fail to start it. Revert and
+# re-deploy rather than leaving it parked.
+
+- name: Assemble the immutable images this host runs
+  ansible.builtin.set_fact:
+    # media_images is a flat name -> image map rather than a catalog of dicts,
+    # unlike download_apps and infra_apps — the media Quadlets are bespoke
+    # templates and take their image from this map directly.
+    media_required_images: >-
+      {{ ((media_images | default({})).values() | list)
+         + ([minecraft_image] if (minecraft_servers | default({})) | length > 0 else [])
+         + [node_exporter_image]
+         + ([beszel_agent_image] if beszel_agent_enabled | bool else [])
+         | unique | sort }}
+  changed_when: false
+
+- name: Check which images are already present
+  ansible.builtin.command: "podman image exists {{ item }}"
+  loop: "{{ media_required_images }}"
+  loop_control:
+    label: "{{ item | regex_replace('@.*', '') }}"
+  register: media_image_checks
+  become: true
+  become_user: homelab
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ svc_uid }}"
+  args:
+    # Required: `homelab` cannot chdir into Ansible's default working directory,
+    # and the command would die before podman ran. See the infra copy.
+    chdir: /tmp
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Pull missing images before anything restarts
+  ansible.builtin.command: "podman pull {{ item.item }}"
+  loop: "{{ media_image_checks.results | selectattr('rc', 'ne', 0) | list }}"
+  loop_control:
+    label: "{{ item.item | regex_replace('@.*', '') }}"
+  become: true
+  become_user: homelab
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ svc_uid }}"
+  args:
+    chdir: /tmp
+  changed_when: true
+  when: not ansible_check_mode
+
+- name: Report images that would be pulled during a check run
+  ansible.builtin.debug:
+    msg: >-
+      {{ media_image_checks.results | selectattr('rc', 'ne', 0) | list | length }}
+      image(s) would be pulled before any service restart.
+  when:
+    - ansible_check_mode
+    - media_image_checks.results | selectattr('rc', 'ne', 0) | list | length > 0
+
+# --- reclaim superseded images ---------------------------------------------
+# Nothing pruned anything until 2026-07-31, and svc-media was carrying 1.6G of
+# images no container referenced. Every bump leaves its predecessor behind.
+#
+# `-a` removes images NO CONTAINER USES; an image in use is never touched
+# regardless of age. The `until` filter then keeps recent ones, so the image you
+# just replaced normally survives long enough to roll back to instantly.
+#
+# READ THIS BEFORE TIGHTENING THE FILTER. `until` matches image CREATION time,
+# not how long the image has been unused — so a long-lived image replaced
+# yesterday IS eligible today. That is deliberate and safe, because pruning
+# never costs the ABILITY to roll back: reverting the digest and re-deploying
+# re-pulls whatever is missing. It costs rollback TIME, not rollback.
+- name: Reclaim images no container references
+  ansible.builtin.command: >-
+    podman image prune --all --force
+    --filter until={{ image_prune_keep_hours }}h
+  become: true
+  become_user: homelab
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ svc_uid }}"
+  args:
+    chdir: /tmp
+  register: svc_media_image_prune
+  # Reclaiming space is not a configuration change. Reporting `changed` on every
+  # converge that happens to free a byte would make `changed=0` — the repo's
+  # proof that deployed state matches the commit — meaningless.
+  changed_when: false
+  failed_when: false
+  when: not ansible_check_mode
+
+# podman image prune emits one deleted image ID per line and NO size summary,
+# so the count is the only honest thing to report here — an earlier version
+# printed `stdout_lines | last` and cheerfully announced a bare sha256 as though
+# it were a quantity of disk.
+- name: Report how many images were reclaimed
+  ansible.builtin.debug:
+    msg: >-
+      Reclaimed {{ svc_media_image_prune.stdout_lines | default([]) | length }} unreferenced
+      image(s) older than {{ image_prune_keep_hours }}h.
+  when:
+    - not ansible_check_mode
+    - svc_media_image_prune.stdout | default('') | trim | length > 0

@@ -155,11 +155,23 @@ default credential or an unexplained port is open.
 ## Supply chain
 
 - Container images are pinned to reviewed immutable digests in the relevant
-  catalog. Updating means reviewing the release, changing the digest,
-  deploying one VM at a time, testing, and recording rollback digests. Those
-  digests are scanned nightly (see above), so the cost of holding a pin is a
-  number rather than a guess — including whether its base OS has reached
-  end-of-life, after which the count can only grow.
+  catalog. The full procedure — resolving a digest from the registry manifest,
+  recording the one it replaces, the version-coupled and shared pins, and
+  deploying one VM at a time — is the `BUMP PROCEDURE` block at the top of
+  `inventory/group_vars/all/apps.yml`. Those digests are scanned nightly (see
+  above), so the cost of holding a pin is a number rather than a guess —
+  including whether its base OS has reached end-of-life, after which the count
+  can only grow.
+- **Rollback digests are recorded, and the record is enforced.** A changed
+  digest must carry a `# was <date>: sha256:…` comment naming the digest it
+  replaced, and `tests/validate_image_provenance.py` fails the build unless that
+  value matches what git says was previously there. This claim was aspirational
+  until 2026-07-31 — the document asserted it while nothing recorded anything,
+  so the documented recovery path did not exist. `git log -p` on the catalog
+  remains the authoritative history; the comment is the convenience.
+- A bad digest cannot take a service down. Images are pulled before any unit is
+  restarted, so an unreachable or mistyped digest aborts the deploy with the
+  previous container still serving.
 - The Rocky image is pinned to a dated filename and SHA-256 committed in Git.
   Verify the actual image on every use; a stamp file is not evidence that its
   current bytes are valid.
