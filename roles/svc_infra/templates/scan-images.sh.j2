@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# homelab-scan-images.sh — vulnerability-scan every image this estate runs and
+# emit one JSON document on stdout.
+#
+# Usage: homelab-scan-images.sh <file-with-one-image-reference-per-line>
+#
+# Runs Trivy as a container and scans BY REFERENCE, straight from the registry.
+# Nothing is pulled into this host's image store — which is both why one host
+# can cover the whole estate (including svc-download, whose nftables backstop
+# denies the egress a local pull would need) and why the read-only gate forbids
+# `podman pull` in a scan path.
+#
+# Deliberately NOT set -e. One unreachable registry or one malformed manifest
+# must not abandon the other forty-five images: a partial answer is worth far
+# more than none, so per-image failure is recorded as ok=false and carried into
+# the report, where it is counted separately from "no vulnerabilities found".
+# Those two readings looking identical is the failure this whole scan exists to
+# prevent.
+set -uo pipefail
+
+list_file=${1:?usage: homelab-scan-images.sh <image-list-file>}
+
+TRIVY={{ trivy_image | quote }}
+CACHE={{ trivy_cache_dir | quote }}
+
+mkdir -p "$CACHE"
+
+# --scanners vuln only: secret and misconfig scanning inside a third-party image
+# tells us about the upstream's build, which we cannot act on and did not ask.
+# --quiet keeps the progress bar out of the JSON.
+run_trivy() {
+    podman run --rm \
+        -v "${CACHE}:/root/.cache:Z" \
+        "$TRIVY" image --quiet --scanners vuln --format json "$1" 2>/dev/null
+}
+
+printf '{"images":['
+first=1
+
+while IFS= read -r ref; do
+    [[ -z "$ref" || "$ref" == \#* ]] && continue
+
+    (( first )) || printf ','
+    first=0
+
+    if ! out=$(run_trivy "$ref") || [[ -z "$out" ]]; then
+        # jq is not installed on these hosts; python3 always is.
+        python3 -c '
+import json, sys
+print(json.dumps({"ref": sys.argv[1], "ok": False,
+                  "detail": "trivy failed or returned nothing"}), end="")
+' "$ref"
+        continue
+    fi
+
+    printf '%s' "$out" | python3 -c '
+import json, sys
+
+ref = sys.argv[1]
+try:
+    doc = json.load(sys.stdin)
+except Exception as exc:                      # noqa: BLE001 - report, never raise
+    print(json.dumps({"ref": ref, "ok": False,
+                      "detail": f"unparseable trivy output: {exc}"}), end="")
+    sys.exit(0)
+
+counts = {"CRITICAL": 0, "HIGH": 0, "MEDIUM": 0, "LOW": 0, "UNKNOWN": 0}
+for result in doc.get("Results") or []:
+    for vuln in result.get("Vulnerabilities") or []:
+        severity = (vuln.get("Severity") or "UNKNOWN").upper()
+        counts[severity] = counts.get(severity, 0) + 1
+
+metadata = doc.get("Metadata") or {}
+operating_system = metadata.get("OS") or {}
+
+print(json.dumps({
+    "ref": ref,
+    "ok": True,
+    "critical": counts["CRITICAL"],
+    "high": counts["HIGH"],
+    "medium": counts["MEDIUM"],
+    "low": counts["LOW"],
+    # Build date of the pinned image. This is the staleness signal, and it is
+    # the one that works without knowing which TAG a digest came from — the
+    # catalogs pin digests only, so there is no upstream tag to diff against.
+    "created": (metadata.get("ImageConfig") or {}).get("created"),
+    "os": " ".join(filter(None, [operating_system.get("Family"),
+                                 operating_system.get("Name")])) or None,
+    # Base OS past end-of-life: no further security updates will EVER arrive
+    # for this image, so its CVE count can only grow. Worth more than any
+    # single advisory.
+    "eosl": bool(operating_system.get("EOSL")),
+}), end="")
+' "$ref"
+done < "$list_file"
+
+printf ']}'

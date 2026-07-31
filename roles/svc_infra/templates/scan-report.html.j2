@@ -82,7 +82,49 @@
   Escalated to alerts: <strong>{{ 'YES — ' ~ scan_escalation_reason if scan_escalate | bool else 'no' }}</strong>
 </p>
 
-<p><a href="latest.txt">latest.txt</a> &middot; <a href="state.json">state.json</a></p>
+<h2 style="font-size:1.05rem;margin:2rem 0 .5rem;">Container image vulnerabilities</h2>
+{% if infra_image_scan.ok | default(false) | bool %}
+<div class="cards">
+  <div class="card crit"><span class="n">{{ infra_image_scan.critical }}</span><span class="l">critical</span></div>
+  <div class="card imp"><span class="n">{{ infra_image_scan.high }}</span><span class="l">high</span></div>
+  <div class="card"><span class="n">{{ infra_image_scan.scanned }}</span><span class="l">images scanned</span></div>
+{% if infra_image_scan.failed %}
+  <div class="card crit"><span class="n">{{ infra_image_scan.failed }}</span><span class="l">scan failed</span></div>
+{% endif %}
+</div>
+
+{% if infra_image_scan.eosl | length > 0 %}
+<div class="banner">
+  <strong>{{ infra_image_scan.eosl | length }} image(s) run a base OS past end-of-life.</strong><br>
+  These will never receive another security update, so their counts can only
+  grow. This matters more than any single advisory below.
+  <ul>{% for ref in infra_image_scan.eosl %}<li>{{ ref.split('@')[0] }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+
+<table>
+  <thead><tr><th>image</th><th>critical</th><th>high</th><th>built</th><th>base OS</th></tr></thead>
+  <tbody>
+{% for img in (infra_image_scan.images | selectattr('ok') | sort(attribute='critical', reverse=true))[:20] %}
+    <tr>
+      <td>{{ img.ref.split('@')[0] }}</td>
+      <td{{ ' class="bad"' if (img.critical | int) > 0 else '' }}>{{ img.critical }}</td>
+      <td>{{ img.high }}</td>
+      <td>{{ img.created[:10] if img.created else '?' }}</td>
+      <td>{{ img.os or '?' }}{{ ' (EOL)' if img.eosl else '' }}</td>
+    </tr>
+{% endfor %}
+  </tbody>
+</table>
+<p style="opacity:.75;font-size:.85rem;">Top 20 by critical count. Full list of what was scanned: <a href="images.txt">images.txt</a></p>
+{% else %}
+<div class="banner">
+  <strong>Images were not scanned.</strong> {{ infra_image_scan.detail | default('no result recorded') }}<br>
+  Zero images scanned is not zero vulnerabilities found.
+</div>
+{% endif %}
+
+<p><a href="latest.txt">latest.txt</a> &middot; <a href="state.json">state.json</a> &middot; <a href="images.txt">images.txt</a></p>
 
 <div class="note">
   <p><strong>What this means.</strong> Nothing in this estate updates itself. That is

@@ -29,6 +29,7 @@ TEMPLATES = (
     "roles/svc_infra/templates/backups-fresh.sh.j2",
     "roles/svc_infra/templates/verify-run.sh.j2",
     "roles/svc_infra/templates/scan-run.sh.j2",
+    "roles/svc_infra/templates/scan-images.sh.j2",
     "roles/pve_mon/templates/diskguard.sh.j2",
     "roles/pve_mon/templates/pve-health.sh.j2",
     "roles/pve_mon/templates/smartd-ntfy.sh.j2",
@@ -55,6 +56,9 @@ def main() -> int:
     minecraft_document = yaml.safe_load(
         (ROOT / "inventory/group_vars/all/minecraft.yml").read_text(encoding="utf-8")
     )
+    main_vars = yaml.safe_load(
+        (ROOT / "inventory/group_vars/all/main.yml").read_text(encoding="utf-8")
+    )
     environment = Environment(
         loader=FileSystemLoader(str(ROOT)),
         undefined=StrictUndefined,
@@ -75,6 +79,12 @@ def main() -> int:
         "alert_realert_hours": 6,
         "backup_retention_days": 14,
         "cert_expiry_days": 21,
+        # Read from main.yml rather than hardcoded: these two are consumed by
+        # scan-images.sh.j2, and a fixture value that drifted from the real one
+        # would still render and still ShellCheck clean, so the gate would pass
+        # while proving nothing about the script that actually ships.
+        "trivy_image": main_vars["trivy_image"],
+        "trivy_cache_dir": main_vars["trivy_cache_dir"],
         "disk_alert_threshold": 85,
         "disk_alert_nfs_threshold": 90,
         # failed-units-watch.sh.j2 branches on group membership to decide

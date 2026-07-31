@@ -1,0 +1,78 @@
+---
+# Image vulnerability scanning. Runs on svc-infra only, and covers the WHOLE
+# estate from here: Trivy reads manifests and layers straight from the registry,
+# so the images belonging to svc-media and svc-download are scanned without
+# touching either host. That is what makes svc-download's nftables blackout a
+# non-issue for this job rather than a special case in it.
+#
+# Report-only, like everything else under a scan path — enforced by
+# tests/validate_scan_readonly.py, which forbids `podman pull` here precisely
+# because scanning by reference never needs one.
+
+- name: Write the list of images to scan
+  # Also the evidence of WHAT was scanned. A count in the report is only
+  # meaningful next to the list it came from, and this file is served beside
+  # the report itself.
+  ansible.builtin.copy:
+    content: |
+      {% for image in scan_images %}
+      {{ image }}
+      {% endfor %}
+    dest: "{{ scan_report_dir }}/images.txt"
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0644"
+
+- name: Scan every pinned image for vulnerabilities
+  # ~9s per image measured on this host, so ~7 minutes for the full set. Runs as
+  # the rootless container user, the only account with a working podman here —
+  # via become_user rather than an inline `sudo`, matching the pattern in
+  # verify-runner.yml (commands may drop to an unprivileged user; file
+  # transfers may not, because that needs setfacl and these hosts have none).
+  #
+  # chdir is REQUIRED, not tidiness. Ansible runs a command from a directory the
+  # connecting user owns, and `homelab` cannot chdir into it — so the script
+  # exited before podman ever started and every one of the 47 images came back
+  # failed. It looked exactly like a total registry outage. The report said
+  # "0 scanned (50 FAILED)" rather than "0 vulnerabilities", which is the only
+  # reason it was noticed at all.
+  ansible.builtin.command:
+    argv:
+      - /usr/local/sbin/homelab-scan-images.sh
+      - "{{ scan_report_dir }}/images.txt"
+    chdir: "{{ scan_report_dir }}"
+  become: true
+  become_user: homelab
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ svc_uid }}"
+  register: infra_image_scan_raw
+  changed_when: false
+  # Never fatal. The script already tolerates a per-image failure; this covers
+  # the whole invocation dying (podman gone, Trivy image unpullable) and turns
+  # it into a reported state rather than an aborted run.
+  failed_when: false
+
+- name: Summarise the image scan
+  ansible.builtin.set_fact:
+    infra_image_scan: >-
+      {{ {'ok': ran and (parsed.images | default([]) | length) > 0,
+          'images': parsed.images | default([]),
+          'scanned': parsed.images | default([]) | selectattr('ok') | list | length,
+          'failed': parsed.images | default([]) | rejectattr('ok') | list | length,
+          'critical': parsed.images | default([]) | selectattr('ok')
+                      | map(attribute='critical') | map('int') | sum,
+          'high': parsed.images | default([]) | selectattr('ok')
+                  | map(attribute='high') | map('int') | sum,
+          'eosl': parsed.images | default([]) | selectattr('ok')
+                  | selectattr('eosl') | map(attribute='ref') | list,
+          'detail': 'ok' if ran else 'image scan did not run'} }}
+  vars:
+    ran: "{{ (infra_image_scan_raw.rc | default(1)) == 0 }}"
+    parsed: >-
+      {{ (infra_image_scan_raw.stdout | default('') | from_json)
+         if (infra_image_scan_raw.stdout | default('')) | trim | length > 0
+         else {} }}
+
+- name: Mark the infra scan complete
+  ansible.builtin.set_fact:
+    svc_infra_scanned: true

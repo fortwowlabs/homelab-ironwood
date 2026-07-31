@@ -55,6 +55,14 @@
   gather_facts: true
   become: true
   tasks:
+    # Runs here rather than per-host because Trivy reads from the registry:
+    # svc-infra covers every image in the estate, including svc-download's,
+    # without either of the other hosts being involved.
+    - name: Scan every pinned container image
+      ansible.builtin.include_role:
+        name: svc_infra
+        tasks_from: scan
+
     - name: Collect per-host findings
       ansible.builtin.set_fact:
         scan_findings: >-
@@ -104,7 +112,9 @@
              if (scan_previous_raw.content is defined)
              else {'total': scan_total | int,
                    'critical': scan_critical | int,
-                   'important': scan_important | int} }}
+                   'important': scan_important | int,
+                   'image_critical': infra_image_scan.critical | default(0) | int,
+                   'image_eosl': infra_image_scan.eosl | default([]) | length} }}
 
     - name: Decide what, if anything, is worth waking up for
       ansible.builtin.set_fact:
@@ -116,19 +126,39 @@
         # failing to run at all.
         scan_escalate: >-
           {{ (scan_broken | length > 0)
+             or (not (infra_image_scan.ok | default(false) | bool))
              or ((scan_critical | int) > (scan_previous.critical | default(0) | int))
              or ((scan_important | int) > (scan_previous.important | default(0) | int))
-             or ((scan_total | int) > (scan_previous.total | default(0) | int)) }}
+             or ((scan_total | int) > (scan_previous.total | default(0) | int))
+             or ((infra_image_scan.critical | default(0) | int)
+                 > (scan_previous.image_critical | default(0) | int))
+             or ((infra_image_scan.eosl | default([]) | length)
+                 > (scan_previous.image_eosl | default(0) | int)) }}
         scan_escalation_reason: >-
           {{ (scan_broken | join(', ') ~ ' could not be scanned')
              if (scan_broken | length > 0)
+             else 'image scan did not run'
+             if (not (infra_image_scan.ok | default(false) | bool))
+             else 'an image base OS reached end-of-life'
+             if ((infra_image_scan.eosl | default([]) | length)
+                 > (scan_previous.image_eosl | default(0) | int))
+             else 'image criticals increased ' ~
+                  (scan_previous.image_critical | default(0)) ~ ' -> ' ~
+                  (infra_image_scan.critical | default(0))
+             if ((infra_image_scan.critical | default(0) | int)
+                 > (scan_previous.image_critical | default(0) | int))
              else 'pending security errata increased ' ~
                   (scan_previous.total | default(0)) ~ ' -> ' ~ scan_total }}
         scan_summary_line: >-
           {{ scan_total }} pending security errata across
           {{ scan_ok | length }}/{{ groups['service_vms'] | length }} hosts
           ({{ scan_critical }} critical, {{ scan_important }} important;
-          previous total {{ scan_previous.total | default('none') }})
+          previous total {{ scan_previous.total | default('none') }}).
+          Images: {{ infra_image_scan.critical | default(0) }} critical,
+          {{ infra_image_scan.high | default(0) }} high across
+          {{ infra_image_scan.scanned | default(0) }} scanned
+          {{ ('; %d on an EOL base OS' | format(infra_image_scan.eosl | length))
+             if (infra_image_scan.eosl | default([]) | length > 0) else '' }}
           {{ ('; NOT SCANNED: ' ~ (scan_broken | join(', ')))
              if (scan_broken | length > 0) else '' }}
 
@@ -160,6 +190,9 @@
           {{ {'total': scan_total | int,
               'critical': scan_critical | int,
               'important': scan_important | int,
+              'image_critical': infra_image_scan.critical | default(0) | int,
+              'image_high': infra_image_scan.high | default(0) | int,
+              'image_eosl': infra_image_scan.eosl | default([]) | length,
               'recorded': ansible_date_time.iso8601} | to_nice_json }}
         dest: "{{ scan_state_file }}"
         owner: "{{ svc_uid }}"

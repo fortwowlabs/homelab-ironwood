@@ -27,6 +27,38 @@ PENDING SECURITY ERRATA BY HOST
 {%   endif %}
 {% endfor %}
 
+CONTAINER IMAGE VULNERABILITIES
+{% if infra_image_scan.ok | default(false) | bool %}
+  images scanned          : {{ infra_image_scan.scanned }}{{ ' (%d FAILED)' | format(infra_image_scan.failed) if infra_image_scan.failed else '' }}
+  critical                : {{ infra_image_scan.critical }}
+  high                    : {{ infra_image_scan.high }}
+{%   if infra_image_scan.eosl | length > 0 %}
+
+  BASE OS PAST END-OF-LIFE — these will never receive another security update,
+  so their counts can only grow. This matters more than any single advisory:
+{%     for ref in infra_image_scan.eosl %}
+    {{ ref }}
+{%     endfor %}
+{%   endif %}
+
+  Worst images by critical+high:
+{%   for img in (infra_image_scan.images | selectattr('ok') | sort(attribute='critical', reverse=true))[:10] %}
+    {{ "%4d crit %5d high  %s" | format(img.critical, img.high, img.ref.split('@')[0]) }}
+{%     if img.created %}
+    {{ "                        built %s" | format(img.created[:10]) }}
+{%     endif %}
+{%   endfor %}
+{% else %}
+  NOT SCANNED — {{ infra_image_scan.detail | default('no result recorded') }}
+      Zero images scanned is not zero vulnerabilities found.
+{% endif %}
+
+  Every image here is digest-pinned, so these numbers do not change until
+  somebody deliberately re-pins. The build date is the staleness signal — the
+  catalogs record digests and never tags, so there is no upstream tag to
+  compare against, but an image built long ago on a distribution that has since
+  patched is the same finding by another name.
+
 WHAT THIS MEANS
   Nothing in this estate updates itself. That is a deliberate trade recorded in
   docs/unattended.md — packages install on demand and images are digest-pinned,

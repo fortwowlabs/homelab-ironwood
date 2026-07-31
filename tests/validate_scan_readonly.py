@@ -43,6 +43,8 @@ SCAN_PATHS = (
     "scan.yml",
     "roles/service_vm/tasks/scan.yml",
     "roles/svc_infra/templates/scan-run.sh.j2",
+    "roles/svc_infra/templates/scan-images.sh.j2",
+    "roles/svc_infra/tasks/scan.yml",
 )
 
 # `#` to end of line, when the `#` starts a token. Comments are stripped before
