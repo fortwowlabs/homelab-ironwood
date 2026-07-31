@@ -56,7 +56,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 .PHONY: help deps deps-dev validate validate-tools validate-syntax \
 	validate-ansible validate-yaml validate-shell validate-links \
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
-	check check-diff verify verify-disruptive scan image-digest drift reconcile access ping lint \
+	check check-diff verify verify-disruptive scan image-digest image-check image-bump drift reconcile access ping lint \
 	vault-edit clean
 
 help: ## Show this help
@@ -168,6 +168,13 @@ access: ## Re-run the media VM's DNS, Caddy, and Homepage access layer
 
 verify: ## Run the non-disruptive verification playbook
 	$(ANSIBLE) $(VERIFY_PLAYBOOK) $(VAULT) $(ARGS)
+
+image-check: ## Report which pinned images their tag has moved past
+	@scripts/image-check.sh
+
+image-bump: ## Bump REF=<image:tag> to the digest that tag now resolves to
+	@test -n "$(REF)" || { echo 'usage: make image-bump REF=docker.io/louislam/uptime-kuma:1' >&2; exit 64; }
+	@scripts/image-bump.sh "$(REF)"
 
 image-digest: ## Resolve REF=<image:tag> to the pinnable @sha256 digest
 	@test -n "$(REF)" || { echo 'usage: make image-digest REF=ghcr.io/owner/image:tag' >&2; exit 64; }

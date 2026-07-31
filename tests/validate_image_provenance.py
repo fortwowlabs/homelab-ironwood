@@ -45,9 +45,22 @@ BASE = "main"
 PINNED_RE = re.compile(r"([A-Za-z0-9._/-]+)@(sha256:[0-9a-f]{64})")
 WAS_RE = re.compile(r"#\s*was\b[^\n]*?(sha256:[0-9a-f]{64})", re.IGNORECASE)
 
-# How far above the image line the record may sit. Enough for a comment wrapped
-# over a couple of lines, tight enough that it cannot drift onto a neighbour.
-LOOKBACK = 4
+def record_above(lines: list[str], index: int) -> set[str]:
+    """Digests recorded in the contiguous comment block directly above a pin.
+
+    Bounded by the comment block rather than a fixed number of lines, and that
+    matters more here than it looks. The multi-container image maps in apps.yml
+    put pins on consecutive lines, so a fixed lookback lets one image's record
+    be credited to its neighbour — which means a bump carrying NO record would
+    pass this gate because the line above happened to belong to something else.
+    A gate that fails open is worse than no gate, since it is trusted.
+    """
+    found: set[str] = set()
+    back = index - 1
+    while back >= 0 and lines[back].lstrip().startswith("#"):
+        found.update(WAS_RE.findall(lines[back]))
+        back -= 1
+    return found
 
 
 def git(*args: str) -> str | None:
@@ -108,8 +121,7 @@ def main() -> int:
                 )
                 if index is None:
                     continue
-                window = "\n".join(new_lines[max(0, index - LOOKBACK):index])
-                recorded = {match for match in WAS_RE.findall(window)}
+                recorded = record_above(new_lines, index)
                 short = f"{name}@{digest[:19]}…"
                 if not recorded:
                     failures.append(

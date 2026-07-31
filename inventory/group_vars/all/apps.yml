@@ -11,20 +11,30 @@
 #      (those never improve), and the oldest build dates. See the review
 #      section in docs/operations.md.
 #
-#   2. RESOLVE THE DIGEST.
-#        make image-digest REF=ghcr.io/owner/image:tag
-#      This asks the registry manifest. Do NOT read a digest off the Docker
-#      Hub web API — it can disagree with the manifest, which is why the
-#      provenance comments in this file say "verified against the registry
-#      manifest digest directly".
+#   2. BUMP IT.
+#        make image-bump REF=ghcr.io/owner/image:tag
+#      Resolves the digest from the registry manifest, rewrites the pin, and
+#      records both the tag it now tracks and the digest it replaced. It edits
+#      only — it never validates, deploys or restarts.
 #
-#   3. RECORD WHAT YOU ARE REPLACING, directly above the line:
+#      It refuses to touch a digest pinned in more than one place, because the
+#      shared postgres and valkey pins are a decision about every service that
+#      shares them, not a mechanical edit.
+#
+#      By hand instead: `make image-digest REF=…` gives the digest, then add
+#        # tag: <tag>
 #        # was 2026-07-31: sha256:<the digest you are removing>
 #        image: "ghcr.io/owner/image@sha256:<new>"
-#      tests/validate_image_provenance.py checks that the recorded digest is
-#      the one git says was actually there. A wrong value fails the build:
-#      a rollback record pointing at the wrong image is worse than none,
-#      because it will be believed.
+#      Do NOT read a digest off the Docker Hub web API — it can disagree with
+#      the manifest, which is why the provenance comments in this file say
+#      "verified against the registry manifest digest directly".
+#
+#   3. THE RECORD IS CHECKED, not merely expected.
+#      tests/validate_image_provenance.py fails the build unless the recorded
+#      `# was` digest is the one git says was actually there. A rollback record
+#      pointing at the wrong image is worse than none, because it is believed.
+#      The `# tag:` line is what later lets `make image-check` tell you this
+#      image has fallen behind; without it the pin is unmeasured, not current.
 #
 #   4. CHECK THE COUPLINGS BEFORE DEPLOYING.
 #      - Immich's four images share a release and MUST move together.
@@ -81,6 +91,7 @@ download_apps:
     proxy: true
 
   sonarr:
+    # tag: latest
     image: "lscr.io/linuxserver/sonarr@sha256:24acea2956a0ccb11f103877d9f4f8576600fb34bff34820ed749c2256dab89f"
     ui_port: 8989
     volumes:
@@ -241,6 +252,7 @@ paperless_images:
 # REDIS_DATABASE numbers instead of two separate containers.
 netbox_images:
   webserver: "docker.io/netboxcommunity/netbox@sha256:691ec1a4f569f3dfb9fefd9f086cca1b39689ad59c3eae753712a741447e5e60"
+  # tag: 18-alpine
   postgres: "docker.io/library/postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"
   redis: "docker.io/valkey/valkey@sha256:c9b77919daeba2c02ad954d0c844cc4e7142069d177b89c5fd771f405daf9e02"
 
@@ -256,6 +268,7 @@ netbox_images:
 # disabled). To enable later: raise svc-infra RAM (or stop an idle VM),
 # render immich-machine-learning from this image, and flip that env to true.
 immich_images:
+  # tag: v3.0.3
   server: "ghcr.io/immich-app/immich-server@sha256:c716dc20f957aafd89fa9d284a2ec63e25c9e2d8d8e87c6197d540a3dce237db"
   machine_learning: "ghcr.io/immich-app/immich-machine-learning@sha256:d76fe88b69282c09a97eac4f82dafa82cfd77bce274bc742591cde974f87dacb"
   postgres: "ghcr.io/immich-app/postgres@sha256:bcf63357191b76a916ae5eb93464d65c07511da41e3bf7a8416db519b40b1c23"
@@ -274,5 +287,6 @@ immich_images:
 # (valkey 9.1.0-alpine).
 nextcloud_images:
   webserver: "docker.io/library/nextcloud@sha256:e93ccfc952c95f18175f3d297fb2f60c35070c05ca976050c250a9ddab793e75"
+  # tag: 18-alpine
   postgres: "docker.io/library/postgres@sha256:9a8afca54e7861fd90fab5fdf4c42477a6b1cb7d293595148e674e0a3181de15"
   redis: "docker.io/valkey/valkey@sha256:c9b77919daeba2c02ad954d0c844cc4e7142069d177b89c5fd771f405daf9e02"

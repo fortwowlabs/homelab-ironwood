@@ -38,6 +38,7 @@
 #                 /opt/homelab/appdata) included in the nightly backup tar
 infra_apps:
   uptime-kuma:
+    # tag: 1
     image: "docker.io/louislam/uptime-kuma@sha256:91e963bfda569ba115206e843febb446f473ab525add4e08b2b9e3beffa16985"
     ui_port: 3001
     volumes:
@@ -121,6 +122,7 @@ infra_apps:
   # developer utilities (JSON/base64/regex/hash tools etc). No volumes, no
   # env, no backup: nothing it renders is ever persisted server-side.
   it-tools:
+    # tag: latest
     image: "ghcr.io/corentinth/it-tools@sha256:8b8128748339583ca951af03dfe02a9a4d7363f61a216226fc28030731a5a61f"
     ui_port: 8082
     container_port: 80

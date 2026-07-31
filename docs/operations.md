@@ -158,8 +158,16 @@ Nothing updates itself, so bumping an image is a decision somebody makes. The
 scan measures the cost of not making it; this is the habit that turns that
 measurement into action.
 
-**Roughly monthly**, read <https://scan.fortwow.dev> and pick work from three
-signals, in priority order:
+**Roughly monthly**, start with:
+
+```bash
+make image-check     # which pins their tag has moved past
+```
+
+That covers images with a recorded tag; the count of untracked ones is printed
+alongside, and shrinks as images are bumped. Then read
+<https://scan.fortwow.dev> and pick work from three signals, in priority
+order:
 
 1. **End-of-life base OS.** These never improve — the image will not receive
    another security update no matter how long you wait, so the only fixes are a
