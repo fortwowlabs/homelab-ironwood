@@ -25,19 +25,20 @@ domain is `fortwow.dev`; derive the current service VM addresses from
 | `shelfmark` | `svc-download` | Interactive book/audiobook search and requests inside the VPN jail |
 | `searxng` | `svc-download` | Metasearch inside the VPN jail; Open WebUI's search provider |
 | `cockpit-dl` | `svc-download` | Download VM host administration |
-| `auth` | `svc-infra` | Authelia SSO portal; fronts twelve services (see below) |
+| `auth` | `svc-infra` | Authelia SSO portal; fronts thirteen services (see below) |
 | `chat` | `svc-infra` | Open WebUI; chat and image generation against the GPU host |
+| `scan` | `svc-infra` | Nightly security scan report (errata, image CVEs, benchmark, exposure) |
 
 Download UIs reach their jailed containers through generated systemd socket
 proxies. Do not publish a download container directly on the host network.
 
 ### Single sign-on
 
-`auth` on `svc-infra` is the Authelia login portal. Twelve services sit behind
-it via Caddy `forward_auth`: the eight download apps above (including
+`auth` on `svc-infra` is the Authelia login portal. Thirteen services sit
+behind it via Caddy `forward_auth`: the eight download apps above (including
 `searxng`, whose browser-facing vhost this gates — Open WebUI's own use of it
 dials svc-download's `IP:port` directly and is unaffected), plus
-`code-server`, `webtop`, `syncthing` and `prometheus`.
+`code-server`, `webtop`, `syncthing`, `prometheus` and `scan`.
 
 The protected set is `sso_protected_services` in
 `inventory/group_vars/all/main.yml` — one list, consumed by both vhost loops in

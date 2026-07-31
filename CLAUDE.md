@@ -90,6 +90,27 @@ broker that blocked Django migrations for a day, and a service still accepting
 its upstream default credentials. When a change is supposed to make something
 work, check that specific thing, by using it.
 
+### So does scanning, and it fails the same way
+
+`scan.yml` and `make scan` are report-only by construction:
+`tests/validate_scan_readonly.py` fails the build if `--remediate`, an upgrade
+invocation, `state: latest` or `podman pull` appears under a scan path. Do not
+work around that gate — add the path to it.
+
+Every check under it went through the same failure once: **it returned a clean
+result because it had not actually run.** An image scan reported zero
+vulnerabilities because it could not `chdir`. A benchmark reported hosts
+unscanned because its result counter broke after a successful 620-second
+evaluation. A port sweep found one open port where eleven were open. A
+CSRF-protected login returned identical responses for the right and the wrong
+password. Every one passed `make validate`.
+
+So when adding or changing a check here: make it distinguish "none found" from
+"could not look", and give it something that must be true if it ran. The port
+scan fails outright if it cannot see the sshd port Ansible is connected over;
+the credential canary is trusted only because it catches Calibre-Web's live
+default. A check with no positive control is a check nobody can tell is broken.
+
 ### Alerting counts as an application
 
 The same rule applies to the alert paths themselves, and it is easier to get

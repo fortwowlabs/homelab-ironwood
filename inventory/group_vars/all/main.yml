@@ -196,10 +196,12 @@ scan_state_file: "{{ scan_report_dir }}/state.json"
 # so no image is pulled to this host and svc-download's nftables blackout is
 # irrelevant: all of scan_images is scanned from svc-infra alone.
 #
-# Measured on svc-infra 2026-07-30: ~9s per image warm, so the full set is ~7
-# minutes, well inside homelab-scan@.service's 3600s TimeoutStartSec. The cache
-# is the vulnerability database and sits at a flat 1.2G — it does NOT grow with
-# image count, because nothing is stored per image.
+# Measured on svc-infra 2026-07-30: ~9s per image warm, and 323s for the whole
+# set end to end — well inside homelab-scan@.service's 3600s TimeoutStartSec.
+# (Per-image times do not simply multiply out; the first scan of a run pays for
+# the database open and the rest amortise it.) The cache is the vulnerability
+# database and sits at a flat 1.2G — it does NOT grow with image count, because
+# nothing is stored per image.
 trivy_image: "docker.io/aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f"
 trivy_cache_dir: /opt/homelab/appdata/trivy-cache
 

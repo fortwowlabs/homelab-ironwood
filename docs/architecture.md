@@ -1,7 +1,7 @@
 # Architecture
 
 `homelab-iac` keeps the Proxmox/Ansible/Podman design deliberately small: one
-control node, two service VMs, and external NFS storage. Ansible owns VM
+control node, three service VMs, and external NFS storage. Ansible owns VM
 provisioning and guest configuration; it does not own the Proxmox host,
 TrueNAS, pfSense, Tailscale, or application UI state.
 
@@ -11,7 +11,7 @@ TrueNAS, pfSense, Tailscale, or application UI state.
 control node
   |-- HTTPS + scoped token --> Proxmox API
   |-- root SSH -------------> Proxmox image/snippet/disk operations
-  `-- admin SSH + sudo ------> svc-download and svc-media
+  `-- admin SSH + sudo ------> svc-download, svc-media, svc-infra
 
 clients --> pfSense/Tailscale split DNS --> dnsmasq on svc-media
         --> Caddy on svc-media ----------> media/infra services
@@ -20,6 +20,9 @@ clients --> pfSense/Tailscale split DNS --> dnsmasq on svc-media
 svc-download -- WireGuard netns --> Mullvad --> Internet
 svc-download -- NFSv4 ---------------------> TrueNAS media/backups
 svc-media ---- NFSv4 ---------------------> TrueNAS media/backups
+svc-infra ---- NFSv4 ---------------------> TrueNAS media/backups
+
+svc-infra ---- nightly verify + scan ------> svc-download, svc-media, svc-infra
 ```
 
 ## Components and ownership
@@ -52,12 +55,22 @@ provides the normal named HTTPS endpoints with a publicly trusted wildcard
 managed by Certbot. dnsmasq answers only the split-horizon service domain.
 Firewalld scopes host ports to the configured LAN.
 
+### `svc-infra`
+
+Self-hosted applications run rootless as the service account, driven by the
+`infra_apps` and `infra_secret_apps` catalogs plus bespoke Quadlets for the
+multi-container services. It also carries Authelia (the SSO portal fronting
+thirteen vhosts), Prometheus and Grafana, and the two scheduled runners: nightly
+verification at 04:00 and the report-only security scan at 05:30. It has no
+Caddy or dnsmasq — the access layer stays on `svc-media`, which proxies here by
+LAN address.
+
 ### Storage and access
 
-TrueNAS exports the media and backup datasets over NFSv4. Both guests mount
-them with systemd automounts and prove access as the service UID; server-side
-ownership remains authoritative because root squash is expected. A dedicated
-Tailscale subnet router, not either service VM, provides remote access to the
+TrueNAS exports the media and backup datasets over NFSv4. All three guests
+mount them with systemd automounts and prove access as the service UID;
+server-side ownership remains authoritative because root squash is expected. A
+dedicated Tailscale subnet router, not any service VM, provides remote access to the
 LAN subnet.
 
 ## Sources of truth
@@ -74,6 +87,10 @@ LAN subnet.
   Quadlets, proxies, firewall ports, pulls, service state, backups, canary
   membership, probes, and recovery from that catalog. The same file centralizes
   reviewed media image digests.
+- `inventory/group_vars/all/infra-apps.yml` contains `infra_apps` and
+  `infra_secret_apps`, which own the svc-infra catalog on the same principle;
+  the two are kept disjoint so only the secret-bearing renders pay for
+  `no_log`.
 - `caddy_services` in `inventory/group_vars/all/main.yml` owns media and
   infrastructure endpoints. The access layer derives Caddy vhosts, private DNS
   records, and Homepage entries from it and the download catalog.
@@ -88,11 +105,11 @@ endpoint, change `caddy_services`; see [Services](services.md).
 
 `site.yml` performs these stages in order:
 
-1. Query and, when absent, provision both VMs through Proxmox.
+1. Query and, when absent, provision every service VM through Proxmox.
 2. Apply shared cloud-init, identity, package, SELinux, and NFS behavior.
 3. Converge and verify `svc-download` before allowing real download traffic.
-4. Converge host monitoring, then `svc-media`; this lets media verification
-   probe the configured Cockpit backends through Caddy.
+4. Converge host monitoring, then `svc-media` and `svc-infra`; this lets media
+   verification probe the configured Cockpit backends through Caddy.
 5. Assert that every targeted host set its verification result before sending
    the success notification.
 
@@ -101,6 +118,16 @@ does not converge or restart services. `verify-disruptive.yml` records which
 catalog services were running, proves the jail fails closed, and restores that
 exact prior state in an `always` path even when an assertion is deliberately
 failed.
+
+`scan.yml` is a fourth playbook and a sibling to `verify.yml`, not an extension
+of it. The two answer different questions with different failure modes:
+`verify.yml` asks whether the estate matches its configuration and fails closed,
+while `scan.yml` asks whether it is *safe* — where a wrong answer is silence
+rather than a red run. It therefore does not use `any_errors_fatal`; one host
+failing to answer must not cost the findings from the others, and is recorded as
+an explicit per-host state instead of being reported as nothing found. It never
+converges, restarts, upgrades or remediates, which is enforced at build time
+rather than by convention. See [Security](security.md#scanning).
 
 ## Safety invariants
 

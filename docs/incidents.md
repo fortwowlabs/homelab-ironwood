@@ -111,7 +111,7 @@ writing to it. Test both alert paths after recovery.
 ## NFS or backup failure
 
 1. Check TrueNAS availability/export restrictions, then use `findmnt -t nfs4`
-   on both guests. A local directory at the mountpoint is not proof of NFS.
+   on all three guests. A local directory at the mountpoint is not proof of NFS.
 2. Check write access as the configured service UID. Do not change a mounted
    NFS root's ownership from a root-squashed client.
 3. Stop applications that could write into an unmounted local path.

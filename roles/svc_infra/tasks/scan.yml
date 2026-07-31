@@ -24,7 +24,7 @@
     mode: "0644"
 
 - name: Scan every pinned image for vulnerabilities
-  # ~9s per image measured on this host, so ~7 minutes for the full set. Runs as
+  # 323s for the full 47-image set, measured on this host. Runs as
   # the rootless container user, the only account with a working podman here —
   # via become_user rather than an inline `sudo`, matching the pattern in
   # verify-runner.yml (commands may drop to an unprivileged user; file

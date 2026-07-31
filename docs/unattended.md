@@ -79,7 +79,7 @@ phone is quiet, nothing has been suppressed.
 
 ## The dead-man's switch
 
-Four jobs ping [healthchecks.io](https://healthchecks.io) when they succeed.
+Five jobs ping [healthchecks.io](https://healthchecks.io) when they succeed.
 healthchecks.io alerts *you* when a ping does not arrive:
 
 | Check | Pinged by | Period / grace | Its silence means |
@@ -88,6 +88,7 @@ healthchecks.io alerts *you* when a ping does not arrive:
 | `homelab-backups` | backup freshness check, svc-infra 04:40 | 1 day / 6 h | svc-infra is down or the NAS is unreachable |
 | `homelab-pve` | health check on the hypervisor, 06:30 | 1 day / 6 h | the hypervisor is gone — so is everything else |
 | `homelab-heartbeat` | svc-media, 07:00 | 1 day / 3 h | **ntfy is down, so no other alert can reach you** |
+| `homelab-scan` | nightly security scan, svc-infra 05:30 | 1 day / 6 h | the scan stopped running, so its silence is not "nothing found" |
 
 The last one is the keystone. Every inward alert travels through ntfy on
 svc-media; that heartbeat is the only thing that can report svc-media's own
@@ -97,10 +98,10 @@ death, and it checks that ntfy answers before reporting.
 
 Nothing automates this — the account is yours.
 
-1. Sign up at healthchecks.io (the free tier covers 20 checks; this uses 4).
+1. Sign up at healthchecks.io (the free tier covers 20 checks; this uses 5).
 2. **Add notification channels first** — email plus a phone push. A check with
    no channel fails silently.
-3. Create the four checks above with those periods and grace windows.
+3. Create the five checks above with those periods and grace windows.
 4. Copy each check's ping UUID — the last path element of its ping URL, not
    the whole URL — and run `make vault-edit`:
 
@@ -109,7 +110,16 @@ Nothing automates this — the account is yours.
    vault_hc_ping_backups:   "…"
    vault_hc_ping_pve:       "…"
    vault_hc_ping_heartbeat: "…"
+   vault_hc_ping_scan:      "…"
    ```
+
+   `vault_hc_ping_scan` behaves differently from the other four: leaving it
+   empty omits the key from `/etc/homelab-healthchecks.env` entirely rather
+   than rendering it blank. The verification gate rejects any *empty*
+   `HC_PING_*` value, and svc-media renders the same file while never running
+   the scan, so an unconditional key would fail verification on a host that has
+   no use for it. The scan still runs and still reports without the UUID — it
+   just has no external safety net, and says so in its journal on every run.
 
 5. `make deploy`, then trigger one job by hand and confirm the ping lands.
 
@@ -126,6 +136,12 @@ than one that admits its edges:
   installed on demand. Six months away means six months of unpatched
   containers — a deliberate trade of security currency for the certainty that
   nothing changes under you while nobody is watching.
+
+  What changed in July 2026 is that the *cost* of that trade is now measured
+  rather than assumed. The nightly scan (see [Security](security.md)) counts
+  pending errata and image CVEs and publishes the number; it still applies
+  nothing. The trade is unchanged, but it is now an informed one, and a sudden
+  jump in the count is escalated rather than discovered six months later.
 - **Nothing restarts a wedged application.** A container that is up but not
   working is caught by the nightly verification only if a gate covers it.
 - **No alert can fix anything.** Every response above needs a network path

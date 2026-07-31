@@ -139,18 +139,38 @@ The departure checklist and a field guide to every alert live in
 
 Every alert above travels through ntfy on svc-media, which cannot report that
 svc-media, the network, or the power is gone — silence and health look
-identical from a phone. Four healthchecks.io checks close that: jobs ping out
+identical from a phone. Five healthchecks.io checks close that: jobs ping out
 on success and healthchecks.io alerts on the ping that never arrives.
 
 Setup is one-time and manual (see the `vault_hc_ping_*` block in
 `inventory/group_vars/all_vault.yml.example`): create the account, **configure
-its notification channels first**, create the four checks, then paste the ping
+its notification channels first**, create the five checks, then paste the ping
 UUIDs with `make vault-edit`. Until then the UUIDs are empty, every ping is
 skipped with a journal line, and nothing fails — but there is no external
 safety net either.
 
 A failed ntfy push is not permission to ignore a failed unit or disk
 threshold.
+
+### The nightly security scan
+
+`homelab-scan@svcops.timer` rides the same runner as the verification below —
+same checkout, same account, same virtualenv, same SSH keys — and fires at
+05:30, after the 04:00 verification and the 04:40 backup-freshness check so the
+three never overlap. It is report-only and cannot be otherwise: a build-time
+gate rejects any remediation or upgrade invocation under a scan path.
+
+Run it by hand with `make scan`. The benchmark portion is weekly (Sunday); force
+it out of band with:
+
+```bash
+make scan ARGS="-e scan_oscap_force=true"
+```
+
+Read the result at `https://scan.<domain>`, or on the host at
+`/opt/homelab/appdata/scan-reports/latest.txt`. Full per-host OpenSCAP HTML
+lives at `/var/lib/homelab-scan/oscap-<profile>.html`. See
+[Security](security.md#scanning) for what each check does and does not prove.
 
 ### The nightly verification runner
 

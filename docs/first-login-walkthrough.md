@@ -177,6 +177,12 @@ First-run admin account. Its database credentials are already in the vault
 Ships with a **default account `admin` / `admin123`**. Log in and change it
 immediately — this is the only service with a publicly-known default.
 
+As of 2026-07-31 this is still unchanged, and the nightly credential canary
+now escalates it to `homelab-alerts` on every run until it is fixed (see
+[Security](security.md#scanning)). The canary reports it as
+`STILL ACCEPTS ITS SHIPPED DEFAULT`; that alert stops the moment the password
+is changed, and nothing else needs doing.
+
 ---
 
 ## Phase 4 — Download stack ✅ / ⚙️

@@ -92,11 +92,74 @@ disk, and storage. A storage mismatch requires a separate, backed-up
 maintenance procedure. The role may resume incomplete EFI/import/boot/resize
 steps, but it never destroys, recreates, moves, or shrinks an existing disk.
 
+## Scanning
+
+Everything else on this page describes a control. This section describes the
+only thing that checks whether those controls actually hold, and it is
+deliberately separate because the two claims are different: "the rule is
+configured" and "the port is shut" are not the same statement, and until July
+2026 nothing here ever made the second one.
+
+`make scan` runs the same playbook that `homelab-scan@svcops.timer` runs
+nightly at 05:30 on svc-infra, on the same runner as the nightly verification.
+Five checks:
+
+| Check | Cadence | Answers |
+|---|---|---|
+| Pending security errata | nightly | how far behind the no-auto-update policy has left each guest |
+| Container image CVEs | nightly | what the pinned digests carry, plus build age and end-of-life base OS |
+| OpenSCAP benchmark | weekly (Sun) | STIG and CIS Level 1 Server scores per host |
+| Exposure diff | nightly | what is *actually* reachable, scanned from another VM |
+| Default-credential canary | nightly | whether any service still accepts its shipped password |
+
+**It is report-only, and that is enforced rather than intended.**
+`tests/validate_scan_readonly.py` fails the build if `--remediate`, an upgrade
+invocation, `state: latest` or `podman pull` appears in any scan path.
+Remediation here would fight the custom SELinux policy module, rootless
+podman's subuid mappings, and the NFS automounts — and an unattended package
+upgrade would undo the point of pinning every digest.
+
+### Reading the output
+
+`https://scan.<domain>` behind Authelia, or `latest.txt` beside it. **The page
+is also served unauthenticated on svc-infra's `ui_port`, like every other
+service here** — see the accepted risk in
+[automation-opportunities.md](automation-opportunities.md). That matters more
+for this page than the others: its content is an index of every weakness in the
+estate rather than one more app someone could already reach.
+
+Alerting is delta-based. The estate deliberately runs behind on patches, so a
+nightly alert on a permanently non-zero count would become noise; escalation
+fires when a number gets *worse*, when a host cannot be scanned, or — with no
+delta required, because one is always too many — when a service accepts a
+default credential or an unexplained port is open.
+
+### What the checks do NOT prove
+
+- **A count of zero is only trustworthy if the check ran.** Every check
+  separates "none found" from "could not look", because during development
+  every single one of them first failed in the direction that looks clean: a
+  scan that could not `chdir` reported zero vulnerabilities, a broken counter
+  reported hosts unscanned, and a hand-rolled port sweep found one open port
+  where eleven were open. All passed their offline gates.
+- **The exposure scan is only as good as its own reachability.** It fails
+  outright if it cannot see sshd on a host Ansible is connected over at that
+  moment, because a port scanner that under-reports is worse than none — it
+  says "all closed" and is believed.
+- **The credential canary knows only the defaults it was taught.** It covers
+  services whose shipped credentials are published upstream; a weak password
+  someone chose is invisible to it.
+- **Benchmark scores are trends, not targets.** STIG is a DoD baseline and most
+  of its gap is requirements this estate will never adopt.
+
 ## Supply chain
 
 - Container images are pinned to reviewed immutable digests in the relevant
   catalog. Updating means reviewing the release, changing the digest,
-  deploying one VM at a time, testing, and recording rollback digests.
+  deploying one VM at a time, testing, and recording rollback digests. Those
+  digests are scanned nightly (see above), so the cost of holding a pin is a
+  number rather than a guess — including whether its base OS has reached
+  end-of-life, after which the count can only grow.
 - The Rocky image is pinned to a dated filename and SHA-256 committed in Git.
   Verify the actual image on every use; a stamp file is not evidence that its
   current bytes are valid.

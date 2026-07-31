@@ -10,7 +10,7 @@ verification unit is Linux-only.
 ### TrueNAS
 
 Create the media and backup datasets manually, with NFSv4 exports restricted
-to the two service VM addresses from `inventory/hosts.yml`. The service UID and
+to the three service VM addresses from `inventory/hosts.yml`. The service UID and
 GID in `inventory/group_vars/all/main.yml` must own the writable dataset paths.
 Confirm encryption unlock behavior and NFS recovery after a NAS reboot before
 placing applications into service. Ansible mounts and probes these exports but
