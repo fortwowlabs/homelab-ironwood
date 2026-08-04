@@ -72,14 +72,27 @@ jobs:
         env:
           GITLEAKS_VERSION: "8.30.1"
           GITLEAKS_SHA256: "551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+        # Unpacked in a TEMP DIRECTORY, not the workspace. Doing this in the
+        # checkout leaves a ~10 MB `gitleaks` binary and its tarball sitting in
+        # the repo root, where `git ls-files --others --exclude-standard` sees
+        # them as untracked files nothing ignores. tests/validate_secrets.py
+        # scans extensionless files (TEXT_SUFFIXES includes "") and refuses
+        # anything over 5 MB rather than reading it, so the job failed with
+        # "gitleaks: text file exceeds the scanner's 5 MB safety limit" — the
+        # tool the secret gate depends on breaking the secret gate.
+        #
+        # It could only ever fail here: the workstation installs gitleaks with
+        # brew, so `make validate` locally never sees this and cannot.
         run: |
           set -euo pipefail
-          archive="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          workdir="$(mktemp -d)"
+          trap 'rm -rf "$workdir"' EXIT
+          archive="${workdir}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           curl -sSLo "$archive" \
-            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/${archive}"
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
           echo "${GITLEAKS_SHA256}  ${archive}" | sha256sum --check --strict
-          tar -xzf "$archive" gitleaks
-          sudo install -m 0755 gitleaks /usr/local/bin/gitleaks
+          tar -xzf "$archive" -C "$workdir" gitleaks
+          sudo install -m 0755 "${workdir}/gitleaks" /usr/local/bin/gitleaks
           gitleaks version
 
       - name: Install pinned dependencies
