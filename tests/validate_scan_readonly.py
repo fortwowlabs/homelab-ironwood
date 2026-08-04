@@ -51,14 +51,64 @@ SCAN_PATHS = (
     "roles/svc_infra/tasks/scan.yml",
 )
 
-# `#` to end of line, when the `#` starts a token. Comments are stripped before
-# matching for the same reason the report templates are out of scope: a comment
-# explaining why an operation is forbidden must not itself trip the gate. A real
-# invocation would sit to the LEFT of any trailing `#`, so it still gets caught.
-# This covers YAML and shell, which is every file above.
-COMMENT_RE = re.compile(r"(?:^|\s)#.*$", re.MULTILINE)
 # Jinja comment blocks, which shell templates use for the managed-file header.
 JINJA_COMMENT_RE = re.compile(r"\{#.*?#\}", re.DOTALL)
+
+
+def blank(match: re.Match[str]) -> str:
+    """Replace a match with spaces, keeping its newlines so line numbers hold."""
+    return "".join("\n" if character == "\n" else " " for character in match.group(0))
+
+
+def strip_comments(text: str) -> str:
+    """Blank `#` comments, but never a `#` inside a quoted string.
+
+    Comments are stripped for the same reason the report templates are out of
+    scope: a comment explaining why an operation is forbidden must not itself
+    trip the gate.
+
+    The quote tracking is the part that matters. A plain "`#` to end of line"
+    rule blanks from the first `#` it sees, wherever it sees it — including
+    inside a YAML or shell string. So this, in a scan task, was silently
+    erased before any pattern ran:
+
+        ansible.builtin.command: sh -c 'oscap ... #--remediate'
+
+    That is a fail-open in a gate whose entire premise is that it cannot fail
+    open, and it is invisible: the file looks scanned and reports OK.
+
+    Where a line has an unbalanced quote — an apostrophe in prose, most often —
+    everything after it is treated as still inside a string and therefore NOT
+    blanked. That direction is deliberate: the worst case is a comment that
+    gets scanned and a false positive a human resolves, rather than a real
+    invocation that goes unread.
+
+    Character counts and newlines are preserved so reported line numbers keep
+    pointing at the real file.
+    """
+    output: list[str] = []
+    for line in text.split("\n"):
+        quote = ""
+        index = 0
+        cut = None
+        while index < len(line):
+            character = line[index]
+            if quote:
+                # Backslash escapes exist in double quotes only; YAML single
+                # quotes and shell single quotes both take '' / no escape.
+                if character == "\\" and quote == '"':
+                    index += 2
+                    continue
+                if character == quote:
+                    quote = ""
+            elif character in "\"'":
+                quote = character
+            elif character == "#" and (index == 0 or line[index - 1] in " \t"):
+                cut = index
+                break
+            index += 1
+        output.append(line if cut is None else line[:cut] + " " * (len(line) - cut))
+    return "\n".join(output)
 
 # Each pattern is paired with what it would actually do if it ever landed.
 FORBIDDEN: tuple[tuple[str, str, str], ...] = (
@@ -119,8 +169,7 @@ def main() -> int:
         raw = path.read_text(encoding="utf-8")
         # Blank comments to spaces rather than deleting them, so byte offsets —
         # and therefore reported line numbers — still point at the real file.
-        text = JINJA_COMMENT_RE.sub(lambda m: " " * len(m.group(0)), raw)
-        text = COMMENT_RE.sub(lambda m: " " * len(m.group(0)), text)
+        text = strip_comments(JINJA_COMMENT_RE.sub(blank, raw))
         for label, pattern, consequence in FORBIDDEN:
             for match in re.finditer(pattern, text, re.IGNORECASE):
                 line = text[: match.start()].count("\n") + 1

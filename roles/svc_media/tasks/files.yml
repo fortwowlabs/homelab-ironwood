@@ -113,9 +113,20 @@
       - (vault_romm_db_password | default('')) | length > 0
       - (vault_romm_db_root_password | default('')) | length > 0
       - (vault_romm_auth_secret_key | default('')) | length >= 32
+      # Length is not a guard: "REPLACE_db_root_password" is non-empty, so
+      # without these three a partly-filled vault would hand MariaDB a root
+      # password that is printed in a committed file — and once the data
+      # directory is initialised, changing it means an ALTER USER inside the
+      # running database, never a redeploy. vault_romm_auth_secret_key is only
+      # caught by the >= 32 check because the placeholder happens to be 27
+      # characters; that is luck, so it is guarded explicitly as well.
+      - not ((vault_romm_db_password | default('')) | string is match('REPLACE_'))
+      - not ((vault_romm_db_root_password | default('')) | string is match('REPLACE_'))
+      - not ((vault_romm_auth_secret_key | default('')) | string is match('REPLACE_'))
     fail_msg: >-
       Configure the RomM database passwords and an authentication secret of
-      at least 32 characters in the encrypted inventory.
+      at least 32 characters in the encrypted inventory — none of the three
+      may still be its REPLACE_* example placeholder.
   no_log: true
   diff: false
 

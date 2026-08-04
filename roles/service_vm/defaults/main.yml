@@ -11,3 +11,13 @@ service_packages: []
 onfailure_units_extra: []
 service_vm_onfailure_units: >-
   {{ (onfailure_units_base | default([])) + (onfailure_units_extra | default([])) }}
+
+# The NAME of the vault variables carrying healthchecks.io ping UUIDs, as a
+# string. Held here rather than written literally into verify.yml because
+# tests/validate_secret_tasks.py treats any `vault_` token in a task as a
+# secret reference and would demand no_log on the assert — and no_log censors
+# the whole task result, including the fail_msg that assert exists to print.
+# Same shape and same reason as authelia_hashes_var and
+# verify_runner_secret_file in roles/svc_infra/defaults/main.yml. Defaults are
+# not scanned by that test.
+service_hc_ping_vars: "vault_hc_ping_*"

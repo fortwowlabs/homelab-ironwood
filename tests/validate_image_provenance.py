@@ -17,10 +17,17 @@ that only checked for the presence of a `# was` line could be satisfied by
 pasting anything, which would produce a rollback record that reads convincingly
 and points nowhere — worse than no record at all, because it would be trusted.
 
-Comparison is against `main`, so it covers a whole branch whether the change is
-committed or still in the working tree. On a clean `main` there is nothing to
-compare and the gate passes trivially, which is correct: the check belongs at
-the moment of the bump.
+Comparison is against the point this branch left `main`, so it covers a whole
+branch whether the change is committed or still in the working tree. On a clean
+`main` there is nothing to compare and the gate passes trivially, which is
+correct: the check belongs at the moment of the bump.
+
+The merge base, not `main`'s tip, and that distinction is the difference
+between a gate and a decoration. CLAUDE.md sends parallel work to worktrees, so
+`main` moves while a branch is open. Compare against the tip and a digest that
+another branch has already merged reads as "no change here" — `digests -
+previously` comes out empty, the bump on THIS branch is never examined, and the
+gate reports OK for a rollback record that was never written.
 """
 
 from __future__ import annotations
@@ -70,6 +77,23 @@ def git(*args: str) -> str | None:
     return result.stdout if result.returncode == 0 else None
 
 
+def base_rev() -> str | None:
+    """The commit this branch left BASE at, or None if there is no BASE.
+
+    Falls back to BASE itself when no merge base exists — an orphan branch, or
+    a repository whose HEAD is unborn. That is the behaviour this gate had
+    before the merge base was introduced, so falling back can only be as weak
+    as the old check, never weaker, and it keeps the gate running rather than
+    quietly skipping.
+    """
+    if git("rev-parse", "--verify", BASE) is None:
+        return None
+    merge_base = git("merge-base", BASE, "HEAD")
+    if merge_base is None or not merge_base.strip():
+        return BASE
+    return merge_base.strip()
+
+
 def pins(text: str) -> dict[str, set[str]]:
     """Map each image name to every digest it is pinned at in this text."""
     found: dict[str, set[str]] = {}
@@ -85,9 +109,15 @@ def pins(text: str) -> dict[str, set[str]]:
 
 
 def main() -> int:
-    if git("rev-parse", "--verify", BASE) is None:
+    base = base_rev()
+    if base is None:
         print(f"Image provenance: skipped (no {BASE} to compare against)")
         return 0
+    # How the comparison point is described in output. Naming the short hash
+    # when it is not simply `main` matters: "vs main" while actually comparing
+    # against a three-week-old merge base is the kind of quietly wrong summary
+    # that gets believed.
+    against = BASE if base == BASE else f"{BASE}…HEAD merge-base {base[:9]}"
 
     failures: list[str] = []
     checked = 0
@@ -97,7 +127,7 @@ def main() -> int:
         if not path.exists():
             continue
         new_text = path.read_text(encoding="utf-8")
-        old_text = git("show", f"{BASE}:{relative}")
+        old_text = git("show", f"{base}:{relative}")
         if old_text is None:
             continue  # new file on this branch; nothing it could have replaced
 
@@ -133,7 +163,7 @@ def main() -> int:
                     failures.append(
                         f"{relative}:{index + 1} {short} records "
                         f"{sorted(recorded)[0][:26]}… as its previous digest, but "
-                        f"{BASE} has {sorted(previously)[0][:26]}…. A rollback "
+                        f"{against} has {sorted(previously)[0][:26]}…. A rollback "
                         f"record that points at the wrong image is worse than "
                         f"none, because it will be believed."
                     )
@@ -144,7 +174,7 @@ def main() -> int:
             print(f"  {failure}", file=sys.stderr)
         return 1
 
-    print(f"Image provenance: OK ({checked} digest change(s) vs {BASE})")
+    print(f"Image provenance: OK ({checked} digest change(s) vs {against})")
     return 0
 
 

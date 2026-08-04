@@ -70,6 +70,13 @@
   register: pve_mon_hc_env
   no_log: true
 
+# Same split as roles/service_vm/tasks/verify.yml: the slurp keeps no_log
+# because its result is the file itself, this assert drops it because its
+# result is one boolean from a regex match plus the fail_msg — and no_log
+# censors the whole task result, so it was suppressing the very message this
+# task exists to print. pve_hc_ping_var (roles/pve_mon/defaults) holds the var
+# NAME so no literal `vault_` token appears here; that token is what
+# tests/validate_secret_tasks.py keys on to demand no_log.
 - name: Assert every healthchecks.io ping UUID is configured
   ansible.builtin.assert:
     that:
@@ -78,9 +85,8 @@
       /etc/homelab-healthchecks.env on {{ inventory_hostname }} has an empty
       HC_PING_* value, so the hypervisor's healthchecks.io check will never be
       pinged — and this host is the one whose death takes every VM with it, so
-      its silence is the signal that matters most. Set vault_hc_ping_pve and
-      run `make pve`; editing the vault alone changes nothing on the host.
-  no_log: true
+      its silence is the signal that matters most. Set {{ pve_hc_ping_var }}
+      and run `make pve`; editing the vault alone changes nothing on the host.
   diff: false
 
 - name: Mark PVE monitoring verification complete

@@ -17,6 +17,20 @@ set -uo pipefail
 
 STATE_DIR=/var/lib/homelab
 STATE="$STATE_DIR/failed-units.state"
+# Consecutive runs that could not sweep. Its own file, not a third field in
+# $STATE: the dedupe state is deliberately left untouched by a blind run (see
+# below), so the two must not share a write.
+BLIND_STATE="$STATE_DIR/failed-units-blind.state"
+# homelab-failedunits.timer has OnUnitActiveSec=15min, so four runs is one hour
+# of not being able to look. One or two are ordinary and must not page: a
+# reboot, a
+# `systemctl daemon-reexec`, or the homelab user's manager restarting each
+# swallow a run, and alerting on those trains the operator to ignore this
+# alert. An hour of them is not a blip — it is a broken user manager or a
+# broken watcher, and on svc-media/svc-infra it means every rootless container
+# is unobserved, which from outside looks exactly like an all-clear. Longer
+# than an hour and an evening's outage could pass unseen.
+BLIND_ESCALATE_AFTER=4
 REALERT_SECS=$(( {{ alert_realert_hours | default(6) }} * 3600 ))
 host=$(hostname -s)
 topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC}}"
@@ -55,6 +69,21 @@ write_state() {  # $1=hash $2=timestamp
     rm -f "${STATE}.tmp" 2>/dev/null || true
     logger -p daemon.err -t failed-units-watch \
         "could not write ${STATE}; alert dedupe is running blind"
+    return 1
+}
+
+# Same temp-file-plus-rename idiom and the same reason: a truncated-then-failed
+# write would reset the consecutive count to nothing on every run, so the
+# escalation below could never reach its threshold no matter how long the host
+# stayed unobservable.
+write_blind_state() {  # $1=consecutive-count $2=last-alert-timestamp
+    if printf '%s %s\n' "$1" "$2" > "${BLIND_STATE}.tmp" 2>/dev/null \
+       && mv -f "${BLIND_STATE}.tmp" "$BLIND_STATE" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "${BLIND_STATE}.tmp" 2>/dev/null || true
+    logger -p daemon.err -t failed-units-watch \
+        "could not write ${BLIND_STATE}; blind-sweep escalation is not counting"
     return 1
 }
 
@@ -112,6 +141,44 @@ prev_alert=0
 if [[ -f "$STATE" ]]; then
     read -r prev_hash prev_alert < "$STATE" || true
     [[ "$prev_alert" =~ ^[0-9]+$ ]] || prev_alert=0
+fi
+
+# A single blind run says nothing, which is right: it is usually a restart.
+# Staying blind is a different condition entirely and had no way to be
+# reported. Without this, "every rootless container is down and I cannot see
+# them" logged to daemon.err, exited 0, and did that forever — indistinguishable
+# from a healthy host to anyone not reading the journal, which is the failure
+# mode this whole script exists to prevent.
+#
+# Counted here rather than inside the sweeps so it runs on every path: the
+# empty-failed branch below exits early, and a blind run whose partial sweep
+# DID find something must still be counted as blind.
+blind_count=0
+blind_alert=0
+if [[ -f "$BLIND_STATE" ]]; then
+    read -r blind_count blind_alert < "$BLIND_STATE" || true
+    [[ "$blind_count" =~ ^[0-9]+$ ]] || blind_count=0
+    [[ "$blind_alert" =~ ^[0-9]+$ ]] || blind_alert=0
+fi
+
+if (( sweep_ok == 1 )); then
+    # One good sweep clears it. The threshold is about CONSECUTIVE blindness;
+    # an hour of alternating failures is a host that can still be seen.
+    (( blind_count > 0 )) && { write_blind_state 0 0 || true; }
+else
+    blind_count=$(( blind_count + 1 ))
+    if (( blind_count >= BLIND_ESCALATE_AFTER )) \
+       && (( now - blind_alert >= REALERT_SECS )); then
+        # Only record the alert timestamp if the push landed, for the same
+        # reason write_state is conditional below: a failed delivery must not
+        # buy REALERT_SECS of silence.
+        if alert urgent "WATCHER BLIND on ${host}" \
+            "$(printf 'failed-units-watch has been unable to sweep for %s consecutive runs (~%s minutes).\n\nNothing here can confirm the host is clean, and no unit failure will be reported while this lasts. See: journalctl -t failed-units-watch' \
+                "$blind_count" "$(( blind_count * 15 ))")"; then
+            blind_alert=$now
+        fi
+    fi
+    write_blind_state "$blind_count" "$blind_alert" || true
 fi
 
 if [[ -z "$failed" ]]; then

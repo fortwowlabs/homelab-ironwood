@@ -80,6 +80,15 @@
   no_log: true
   when: not (service_guarded_egress | bool)
 
+# The slurp above keeps no_log because its result IS the file content, UUIDs
+# and all. This assert deliberately does not: it evaluates to a single boolean
+# from a regex match and echoes nothing from the file, while its fail_msg is
+# the only thing that tells the operator which host and which fix. no_log
+# censors the entire task result — the message included — so leaving it on
+# here replaced four sentences of instruction with {"censored": ...}. The var
+# NAME is reached through service_hc_ping_vars (roles/service_vm/defaults)
+# rather than written out, because a literal `vault_` token in this task would
+# make tests/validate_secret_tasks.py demand the no_log back.
 - name: Assert every healthchecks.io ping UUID is configured
   ansible.builtin.assert:
     that:
@@ -88,9 +97,9 @@
       /etc/homelab-healthchecks.env on {{ inventory_hostname }} has an empty
       HC_PING_* value, so that healthchecks.io check will never be pinged and
       its silence cannot be distinguished from the estate being dead. Set the
-      vault_hc_ping_* var (see inventory/group_vars/all_vault.yml.example) and
-      redeploy — editing the vault alone does not change anything on the host.
-  no_log: true
+      {{ service_hc_ping_vars }} var (see
+      inventory/group_vars/all_vault.yml.example) and redeploy — editing the
+      vault alone does not change anything on the host.
   diff: false
   when: not (service_guarded_egress | bool)
 

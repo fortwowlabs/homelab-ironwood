@@ -98,6 +98,21 @@ lines[start:index] = [f"{indent}# tag: {tag}\n",
                       f"{indent}# was {today}: {old_digest}\n"]
 lines[start + 2] = lines[start + 2].replace(old_digest, new_digest)
 open(path, "w", encoding="utf-8").write("".join(lines))
+
+# Only `# was ` / `# tag:` records are rewritten above; a descriptive comment
+# directly above the pin survives the bump unchanged and can end up describing
+# an image that is no longer there — "Pinned to v4.0.6 because ..." sitting on
+# top of a v5 digest, which is worse than no comment because it reads as
+# deliberate. This warns and does not edit: prose carries a REASON, and only a
+# human knows whether the reason still holds after the version moved.
+if start > 0 and lines[start - 1].lstrip().startswith("#"):
+    print(f"\nwarning: {path}:{start} is a comment directly above the pin just "
+          f"rewritten,\n"
+          f"         and it is not a `# was`/`# tag:` record, so it did NOT move:\n\n"
+          f"           {lines[start - 1].strip()}\n\n"
+          f"         Check it still describes {new_digest[:19]}… — nothing here "
+          f"edits prose.",
+          file=sys.stderr)
 PYEOF
 status=$?
 (( status == 3 )) && exit 0

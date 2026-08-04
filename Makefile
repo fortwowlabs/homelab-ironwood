@@ -125,6 +125,7 @@ validate-secrets:
 	$(PYTHON) tests/scan_history_secrets.py
 	$(PYTHON) tests/validate_secret_tasks.py
 	$(PYTHON) tests/validate_secret_output.py
+	$(PYTHON) tests/validate_vault_guards.py
 # Second opinion on the working tree with gitleaks' ~170 upstream rules. The
 # four gates above stay: they know this repo's conventions (vault_ naming, the
 # placeholder forms in all_vault.yml.example) and gitleaks does not. Scope and

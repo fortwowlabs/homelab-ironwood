@@ -42,11 +42,20 @@
   register: infra_managed_containers
   check_mode: false
 
-- name: Discover rootless infra network Quadlets
+# The `contains:` filter matters more here than on the container find above,
+# because this list feeds `state: absent` while that one only feeds a `stop`.
+# Without it the sweep deleted every .network file it did not expect, including
+# one placed by hand — a destructive action taken against files it had never
+# established it owned. The four sources in files/quadlets/*.network are
+# `copy:`d verbatim rather than templated, so they carry the marker as a
+# literal comment line; deleting that line from any of them makes this find
+# skip it and the next converge delete the deployed copy.
+- name: Discover Ansible-managed rootless infra network Quadlets
   ansible.builtin.find:
     paths: /opt/homelab/.config/containers/systemd
     patterns: "*.network"
     file_type: file
+    contains: 'Ansible managed'
   register: infra_managed_networks
   check_mode: false
 
@@ -60,12 +69,22 @@
          | difference(infra_expected_network_paths) }}
   changed_when: false
 
+# Tolerating a failure here is the correct behaviour, not laziness. A stale
+# .container file whose generated unit systemd never loaded — the file was
+# added and the daemon never reloaded, or the unit was already stopped and
+# reset — makes `systemctl stop` exit non-zero, which without this would abort
+# the deploy inside the very block whose job is to reconcile units that should
+# not exist. Nothing downstream depends on the stop succeeding: the
+# `state: absent` task below removes the file, and the handler's daemon-reload
+# is what actually retires the unit. Failing to stop something that is not
+# running is not a failure.
 - name: Stop stale rootless infra services
   ansible.builtin.command: >-
     systemctl --user -M homelab@ stop
     {{ item | basename | regex_replace('\.container$', '.service') }}
   loop: "{{ infra_stale_container_paths }}"
   changed_when: true
+  failed_when: false
 
 - name: Remove stale rootless infra unit files
   ansible.builtin.file:
@@ -335,10 +354,24 @@
       - (vault_netbox_secret_key | default('')) | length >= 50
       - (vault_netbox_redis_password | default('')) | length > 0
       - (vault_netbox_superuser_password | default('')) | length > 0
+      # A length check is not a guard. A var still holding its
+      # all_vault.yml.example value ("REPLACE_openssl_rand_hex_24") is
+      # non-empty, so without the four below NetBox would deploy a credential
+      # that is published verbatim in a committed file. That is worst for
+      # vault_netbox_superuser_password: it is the account NetBox creates for
+      # itself on first start, on a service every host on the LAN can reach.
+      # vault_netbox_secret_key escapes today only because the placeholder
+      # happens to be 27 characters and so trips the >= 50 check — an accident
+      # of string length, not a control. Guard it explicitly too.
+      - not ((vault_netbox_db_password | default('')) is match('REPLACE_'))
+      - not ((vault_netbox_secret_key | default('')) is match('REPLACE_'))
+      - not ((vault_netbox_redis_password | default('')) is match('REPLACE_'))
+      - not ((vault_netbox_superuser_password | default('')) is match('REPLACE_'))
     fail_msg: >-
       Configure vault_netbox_db_password, vault_netbox_secret_key (NetBox
       requires 50+ characters), vault_netbox_redis_password, and
-      vault_netbox_superuser_password in the encrypted inventory.
+      vault_netbox_superuser_password in the encrypted inventory — each must
+      be set and none may still be its REPLACE_* example placeholder.
   no_log: true
   diff: false
 
@@ -409,9 +442,14 @@
   ansible.builtin.assert:
     that:
       - (vault_immich_db_password | default('')) | length > 0
+      # Non-empty alone would let the all_vault.yml.example placeholder become
+      # the live Postgres password for the photo library — and rotating it
+      # afterwards means rewriting the database's own role, not just the vault.
+      - not ((vault_immich_db_password | default('')) is match('REPLACE_'))
     fail_msg: >-
       Configure vault_immich_db_password (openssl rand -hex 24) in the
-      encrypted inventory.
+      encrypted inventory — it must be set and must not still be the
+      REPLACE_* example placeholder.
   no_log: true
   diff: false
 

@@ -1,3 +1,12 @@
+# Ansible managed
+#
+# That marker is load-bearing, not decoration. The stale-Quadlet sweep in
+# roles/svc_infra/tasks/files.yml discovers *.network files by it and deletes
+# the ones its expected list no longer names; a file without it is invisible
+# to the sweep, so retiring this network would leave the unit behind on the
+# host. Templated Quadlets inherit the string from {{ ansible_managed }} —
+# this one is copy:'d verbatim, so it carries the marker literally.
+#
 # ~homelab/.config/containers/systemd/immich.network
 # Private bridge for the Immich server<->postgres<->redis trio (same pattern
 # as NetBox / Paperless-ngx). Machine-learning would join this network too
