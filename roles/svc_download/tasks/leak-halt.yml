@@ -1,0 +1,80 @@
+---
+# Refuse to converge the download stack while the leak canary's halt stands.
+#
+# This runs FIRST in the role — before packages, before images.yml (tagged
+# `always`, and the first thing that can flush handlers), and long before
+# apps.yml starts a unit. Anything later would be too late: by the time a
+# handler fires, the halt is already cleared.
+#
+# WHY IT EXISTS. leak-canary.sh stops every dl-* unit and writes
+# /var/lib/leak-canary/tripped when it sees traffic leaving the jail. That halt
+# is supposed to hold until a human has looked. It did not: apps.yml starts the
+# catalog units unconditionally, and never read the flag — so a routine
+# `make dl` silently restarted everything the canary had stopped.
+#
+# That is not hypothetical. It is how the 2026-07-24 trip actually ended, after
+# ~2.5h: not by anyone deciding it was safe, but by a deploy that did not know
+# a decision was owed. The alert had already been sent and swiped away.
+#
+# The override is deliberate rather than absolute. A blanket refusal would also
+# block unrelated fixes to this VM while the jail is halted, which is precisely
+# when someone may need to deploy one — so the escape hatch exists, but it has
+# to be typed:
+#
+#     make dl ARGS="-e leak_canary_override=true"
+#
+# and it appears in shell history and in the play output. Clearing a safety
+# halt becomes a deliberate act with a record, which is what was missing.
+
+- name: Check whether the leak canary has halted the download stack
+  ansible.builtin.stat:
+    path: /var/lib/leak-canary/tripped
+  register: download_leak_halt
+  check_mode: false
+
+- name: Read when the halt was recorded
+  ansible.builtin.slurp:
+    src: /var/lib/leak-canary/tripped
+  register: download_leak_halt_detail
+  when: download_leak_halt.stat.exists
+  check_mode: false
+
+- name: Refuse to converge the download stack while a leak halt stands
+  ansible.builtin.assert:
+    that:
+      - not download_leak_halt.stat.exists
+        or (leak_canary_override | default(false) | bool)
+    fail_msg: >-
+      The leak canary HALTED this stack at
+      {{ (download_leak_halt_detail.content | default('') | b64decode | trim)
+         or 'an unrecorded time' }}
+      and /var/lib/leak-canary/tripped is still present, so nobody has cleared
+      it. Deploying now would restart every dl-* unit the canary stopped and
+      erase the halt without anyone deciding it was safe — which is exactly how
+      the 2026-07-24 trip ended.
+
+      Investigate first: `journalctl -t leak-canary` on {{ inventory_hostname }}
+      has the alert, and `ip netns exec vpn curl -4 -sS
+      https://am.i.mullvad.net/connected` re-runs the identity check by hand.
+
+      If the halt was a false positive or the cause is fixed, clear it and
+      restart deliberately:
+        sudo rm /var/lib/leak-canary/tripped
+        sudo systemctl start 'dl-*.service'
+
+      To deploy WITHOUT clearing the halt — for an unrelated fix to this host —
+      re-run with: make dl ARGS="-e leak_canary_override=true"
+    success_msg: >-
+      No leak halt in place; the download stack is free to converge.
+    quiet: true
+
+- name: WARN that a standing leak halt is being overridden
+  ansible.builtin.debug:
+    msg: >-
+      *** OVERRIDE: /var/lib/leak-canary/tripped is present and
+      leak_canary_override=true was passed. This deploy WILL restart the dl-*
+      units the leak canary stopped. The halt is being cleared by this run, not
+      by an investigation. ***
+  when:
+    - download_leak_halt.stat.exists
+    - leak_canary_override | default(false) | bool

@@ -22,11 +22,26 @@ ROOT = Path(__file__).resolve().parents[1]
 # Units that deliberately have no OnFailure drop-in, with the reason. An entry
 # here is a decision on the record, not a TODO.
 EXEMPT = {
-    "leak-canary.service": (
-        "alerts natively with jail-specific context (which container, which "
-        "check) and runs every 15 minutes; a generic drop-in would only "
-        "double the noise"
-    ),
+    # leak-canary.service was exempt here until 2026-08-04, on the grounds that
+    # it "alerts natively with jail-specific context and a generic drop-in
+    # would only double the noise". That reasoning covers the canary FINDING
+    # something. It does not cover the canary FAILING TO RUN — which is what
+    # an OnFailure drop-in is for, and which produced no alert at all: the
+    # script never reached its own alert() call, and until TimeoutStartSec was
+    # added a hang left it in `activating`, which is not `failed`, so nothing
+    # anywhere noticed the estate's safety canary had stopped.
+    #
+    # The repo already made the correct version of this argument for the scan,
+    # in inventory/host_vars/svc-infra.yml: "scan.yml publishes its own
+    # findings, so this drop-in is specifically for the scan failing to RUN —
+    # which is the failure that would otherwise look exactly like a clean
+    # estate." Same unit shape, same reasoning, opposite conclusion.
+    #
+    # The cost is real and accepted: a genuine leak now notifies twice, once
+    # natively and once from the drop-in. A leak is rare and catastrophic, and
+    # two messages about one is not what turns a channel into noise — a nightly
+    # message about a decision already made is (see the Calibre-Web escalation,
+    # 2026-07-31 to 2026-08-03).
     "notify-failure@.service": (
         "is the alerter itself — an OnFailure here would be a loop, and it "
         "always exits 0 by design"

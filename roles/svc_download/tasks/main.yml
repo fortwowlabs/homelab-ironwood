@@ -1,4 +1,11 @@
 ---
+# FIRST, and tagged `always`: a leak halt must be honoured no matter which tag
+# the operator scoped the run to. images.yml is also `always` and can flush
+# handlers, so a gate placed after it would already be too late.
+- name: Honour a standing leak-canary halt
+  ansible.builtin.import_tasks: leak-halt.yml
+  tags: [always]
+
 - name: Validate download host prerequisites
   ansible.builtin.import_tasks: packages.yml
   tags: [files]

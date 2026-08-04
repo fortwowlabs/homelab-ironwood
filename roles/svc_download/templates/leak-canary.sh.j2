@@ -29,6 +29,11 @@ set -uo pipefail
 
 STATE_DIR=/var/lib/leak-canary
 FLAG="$STATE_DIR/tripped"
+# Consecutive runs in which the egress IDENTITY could not be established. Not
+# a leak — see section 3 — but a number that only grows means the one check
+# that proves whose exit node we are using has silently stopped working.
+UNVERIFIED="$STATE_DIR/egress-unverified"
+UNVERIFIED_LIMIT={{ leak_canary_egress_unverified_limit | default(8) }}
 # NTFY_ALERT_TOPIC, not NTFY_TOPIC. NTFY_TOPIC is homelab-deploy — the routine
 # feed that carries every deploy notice and is subscribed muted. This script
 # publishes the loudest message in the estate ("LEAK: download jail — download
@@ -79,23 +84,45 @@ fi
 #    via --network=ns: (podman only fills it for netns it created), so it
 #    cannot distinguish "in the jail" from "drifted".
 want_inode=$(stat -Lc %i /run/netns/vpn) || fail_leak "netns /run/netns/vpn missing"
+
+# Read a container's network-namespace inode, or fail if it has no running
+# process. The pid and the stat MUST be read together: they are two syscalls
+# against a moving target, and a container that restarts between them leaves a
+# stale pid whose /proc entry is already gone.
+#
+# That race used to stop the entire stack. The pid read had a retry; the stat
+# that consumed it did not, so `stat` returned nothing, the comparison against
+# want_inode failed, and the script reported "container X is NOT in the vpn
+# netns" — writing the tripped flag and demanding manual clearance for a
+# container that had merely been restarted.
+container_ns_inode() {   # $1=container; prints the inode, or returns 1
+    local pid
+    pid=$(podman inspect -f '{% raw %}{{.State.Pid}}{% endraw %}' "$1" 2>/dev/null || true)
+    [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 0 ]] || return 1
+    stat -Lc %i /proc/"$pid"/ns/net 2>/dev/null || return 1
+}
+
 for c in "${expected[@]}"; do
     podman container exists "$c" \
         || down "expected container $c does not exist"
     systemctl is-active --quiet "dl-$c.service" \
         || down "dl-$c.service is not active"
-    pid=$(podman inspect -f '{% raw %}{{.State.Pid}}{% endraw %}' "$c" 2>/dev/null || true)
-    # A transient podman API hiccup can yield an empty/zero pid on a container
-    # that IS healthy; retry once before treating it as a leak (stopping the
-    # whole stack). An empty or non-numeric value must never satisfy -gt.
-    if ! [[ "$pid" =~ ^[0-9]+$ ]] || [[ "$pid" -le 0 ]]; then
-        sleep 2
-        pid=$(podman inspect -f '{% raw %}{{.State.Pid}}{% endraw %}' "$c" 2>/dev/null || true)
+
+    # Retry the PAIR, not just the pid.
+    inode=$(container_ns_inode "$c") || { sleep 2; inode=$(container_ns_inode "$c" || true); }
+
+    if [[ -z "$inode" ]]; then
+        # No running process, twice. A container that is not running cannot be
+        # leaking, so this is DOWN, not LEAK: alert, do not stop the stack, do
+        # not write the flag. Getting this severity wrong is expensive in both
+        # directions — halting on a restart trains people to clear the flag
+        # without reading it.
+        down "container $c has no running process (checked twice) — restarting or crashed"
+    elif [[ "$inode" != "$want_inode" ]]; then
+        # A DIFFERENT namespace. This is the real breach: the process is
+        # running and its traffic is not going through the jail.
+        fail_leak "container $c is in netns inode ${inode}, not the jail's ${want_inode}"
     fi
-    [[ "$pid" =~ ^[0-9]+$ && "$pid" -gt 0 ]] \
-        || fail_leak "container $c has no running pid (after retry)"
-    [[ "$(stat -Lc %i /proc/"$pid"/ns/net 2>/dev/null)" == "$want_inode" ]] \
-        || fail_leak "container $c is NOT in the vpn netns (pid: $pid)"
 done
 
 # 2. Topology drift.
@@ -104,11 +131,70 @@ ip -n vpn route show default | grep -q 'dev wg0' \
 ip -n vpn route show | grep -Ev 'dev (lo|wg0|veth-vpn)' | grep -q . \
     && fail_leak "unexpected route present in netns"
 
-# 3. Egress identity. Timeout/stall = tunnel down = fail-closed = OK.
-egress=$(ip netns exec vpn curl -4 -s --max-time 10 https://am.i.mullvad.net/connected || true)
-if [[ -n "$egress" && "$egress" != *"You are connected to Mullvad"* ]]; then
-    fail_leak "egress check says NOT Mullvad: $egress"
+# 3. Egress identity. THREE outcomes, and conflating two of them halted the
+#    whole download stack for ~2.5h overnight on 2026-07-24.
+#
+#    The old test was `curl -s` with no `-f`, so an HTTP ERROR PAGE came back
+#    as a successful fetch: am.i.mullvad.net served a 502 from its own nginx,
+#    the body was non-empty and did not contain the magic string, and that was
+#    read as "NOT Mullvad" — a leak. It was not a leak. It was Mullvad's status
+#    page having a bad night.
+#
+#    An HTTP error is not a foreign-IP disclosure, so the status code is now
+#    read separately from the body:
+#      200 + "connected to Mullvad"  -> verified
+#      200 + anything else           -> REAL leak; the endpoint answered and
+#                                       told us we are not on Mullvad
+#      anything else (incl. 000)     -> INCONCLUSIVE; we learned nothing
+#
+#    Inconclusive is safe to tolerate, but only because of what sections 1 and
+#    2 already proved: every container is inside the jail and the jail's only
+#    route is wg0. Traffic that cannot be identified also cannot escape — it
+#    fails closed. What inconclusive is NOT is good news, so it is counted, and
+#    a run of them alerts: an identity check that can never succeed has stopped
+#    being a check, which is this repo's most-repeated failure.
+egress_body=$(mktemp 2>/dev/null || true)
+egress_code=000
+if [[ -n "$egress_body" ]]; then
+    egress_code=$(ip netns exec vpn curl -4 -s -o "$egress_body" -w '%{http_code}' \
+        --max-time 10 https://am.i.mullvad.net/connected 2>/dev/null || echo 000)
+    # Bounded and single-line: this string reaches an ntfy body and a log line,
+    # and an HTML error page would otherwise paste a screenful into both.
+    egress_text=$(tr -d '\r\n' < "$egress_body" 2>/dev/null | head -c 160)
+    rm -f "$egress_body"
+else
+    egress_text=""
 fi
 
-logger -t leak-canary "OK (egress=${egress:-tunnel-down/fail-closed})"
+if [[ "$egress_code" == "200" ]]; then
+    if [[ "$egress_text" == *"You are connected to Mullvad"* ]]; then
+        rm -f "$UNVERIFIED"
+        logger -t leak-canary "OK (egress verified Mullvad)"
+        exit 0
+    fi
+    fail_leak "egress endpoint answered 200 and does NOT report Mullvad: ${egress_text}"
+fi
+
+# Inconclusive. Count consecutive occurrences; alert once the run is long
+# enough that a transient upstream outage is no longer the likely explanation.
+# The timer fires every 15 minutes, so the default 8 is two hours — long
+# enough to ride out a status-page blip, short enough that a permanently
+# broken check surfaces the same day.
+unverified=$(( $(cat "$UNVERIFIED" 2>/dev/null || echo 0) + 1 ))
+if printf '%s\n' "$unverified" > "${UNVERIFIED}.tmp" 2>/dev/null; then
+    mv -f "${UNVERIFIED}.tmp" "$UNVERIFIED" 2>/dev/null || rm -f "${UNVERIFIED}.tmp"
+fi
+
+logger -t leak-canary \
+    "egress UNVERIFIED (http=${egress_code}, consecutive=${unverified}) — jail intact, identity unknown"
+
+if (( unverified >= UNVERIFIED_LIMIT )); then
+    alert high "download jail egress UNVERIFIED" \
+"The jail is intact — every container is in the vpn netns and wg0 is still the only route, so traffic cannot escape.
+What has stopped working is the check that proves WHOSE exit node we are using: ${unverified} consecutive runs could not reach a verdict (last HTTP ${egress_code}).
+This is not a leak. It is the leak check going blind. Verify by hand:
+  ip netns exec vpn curl -4 -sS -o /dev/null -w '%{http_code}\\n' https://am.i.mullvad.net/connected"
+    exit 1
+fi
+
 exit 0

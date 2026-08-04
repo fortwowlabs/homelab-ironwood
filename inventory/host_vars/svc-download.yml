@@ -46,3 +46,10 @@ mon_open_firewalld: false           # svc-download uses the nftables backstop (:
 onfailure_units_extra:
   - backup-dl-appdata.service
   - vpn-netns.service
+  # The leak canary alerts natively when it FINDS something. This drop-in is
+  # for the other case: the canary failing to run at all — a crash, or the
+  # TimeoutStartSec hang that leaves it `activating` rather than `failed`.
+  # Nothing noticed that before, which made the estate's safety canary the one
+  # unattended job whose death was invisible. A genuine leak now notifies
+  # twice; that is the accepted price. See tests/validate_onfailure.py.
+  - leak-canary.service
