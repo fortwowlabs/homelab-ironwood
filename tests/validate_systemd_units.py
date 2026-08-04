@@ -96,12 +96,40 @@ def main() -> int:
     timer = TIMER.read_text(encoding="utf-8")
     failures: list[str] = []
 
+    # NOT ConditionPathIsDirectory=/opt/homelab-iac/.venv, which is what this
+    # tuple required until 2026-08-03. That directive was deliberately REMOVED
+    # in the same window this gate was written: systemd treats an unmet
+    # condition as SUCCESS, so a missing virtualenv meant ExecStart never ran,
+    # Result=success, OnFailure= never fired and hc-ping.sh never sent its fail
+    # — nightly verification would have ended silently with every indicator
+    # green. ExecStartPre fails instead, which is a real failure.
+    #
+    # The gate did not notice the directive was gone, because
+    # `"ConditionPathIsDirectory=..." in service` is a substring test and the
+    # string still occurs — inside the comment on line 14 of the unit that
+    # explains why it was removed. So this asserted the presence of something
+    # that had been deleted, and passed on the prose describing the deletion.
+    # A gate that cannot fail is the exact defect CLAUDE.md catalogues, and it
+    # sat in the file whose job is checking these units.
+    #
+    # Require the replacement, and require the original to be absent as an
+    # ACTIVE directive — a comment mentioning it is fine and is checked for
+    # separately below, on line-anchored matching rather than substring.
     required_service = (
         "User=%i",
         "WorkingDirectory=/opt/homelab-iac",
         "ExecStart=/usr/local/sbin/homelab-verify-run.sh",
-        "ConditionPathIsDirectory=/opt/homelab-iac/.venv",
+        "ExecStartPre=/usr/bin/test -d /opt/homelab-iac/.venv",
     )
+    for unit_name, text in (("service", service), ("timer", timer)):
+        for line in text.splitlines():
+            if line.strip().startswith("ConditionPath"):
+                failures.append(
+                    f"nightly {unit_name} sets {line.strip()!r} as an active "
+                    f"directive. An unmet systemd condition is reported as "
+                    f"SUCCESS, so it cannot gate anything that must alert on "
+                    f"failure — use ExecStartPre, which fails."
+                )
     required_timer = (
         "Unit=homelab-verify@%i.service",
         "Persistent=true",
@@ -129,8 +157,8 @@ def main() -> int:
                 service.replace("User=%i", "User=root")
                 .replace("WorkingDirectory=/opt/homelab-iac", "WorkingDirectory=/")
                 .replace(
-                    "ConditionPathIsDirectory=/opt/homelab-iac/.venv",
-                    "ConditionPathIsDirectory=/",
+                    "ExecStartPre=/usr/bin/test -d /opt/homelab-iac/.venv",
+                    "ExecStartPre=/usr/bin/test -d /",
                 )
                 .replace(
                     "ExecStart=/usr/local/sbin/homelab-verify-run.sh",
