@@ -39,6 +39,24 @@ TEMPLATES = (
     "roles/svc_media/templates/heartbeat.sh.j2",
 )
 
+# Templates that render a DIFFERENT script depending on the host, rendered a
+# second time with the other context so ShellCheck sees every line that ships.
+#
+# credential-canary.sh.j2 is the one that matters: the base context above is a
+# media host, so only the Calibre-Web probe renders and the Grafana and Mealie
+# probes — a third of the file — were never checked by anything. Each override
+# is merged over the base context.
+EXTRA_RENDERS: tuple[tuple[str, dict], ...] = (
+    (
+        "roles/service_vm/templates/credential-canary.sh.j2",
+        {
+            "group_names": ["service_vms", "infra_vms"],
+            # Documentation-range address; the infra probes curl it by IP.
+            "ansible_host": "192.0.2.32",
+        },
+    ),
+)
+
 
 def main() -> int:
     shellcheck = os.environ.get("SHELLCHECK", "shellcheck")
@@ -119,9 +137,14 @@ def main() -> int:
         "inventory_hostname": "fixture-host",
     }
 
+    renders = [(name, context) for name in TEMPLATES]
+    renders += [
+        (name, {**context, **override}) for name, override in EXTRA_RENDERS
+    ]
+
     failures: list[str] = []
-    for template_name in TEMPLATES:
-        rendered = environment.get_template(template_name).render(**context)
+    for template_name, render_context in renders:
+        rendered = environment.get_template(template_name).render(**render_context)
         result = subprocess.run(
             [shellcheck, "--shell=bash", "-"],
             input=rendered,
@@ -137,7 +160,10 @@ def main() -> int:
         for failure in failures:
             print(failure, file=sys.stderr)
         return 1
-    print(f"Rendered shell templates: ShellCheck OK ({len(TEMPLATES)} templates)")
+    print(
+        f"Rendered shell templates: ShellCheck OK ({len(TEMPLATES)} templates, "
+        f"{len(renders)} renders)"
+    )
     return 0
 
 

@@ -53,25 +53,44 @@
   failed_when: false
 
 - name: Summarise the image scan
+  # `ok` means IMAGES WERE MEASURED, and the count it is derived from is the
+  # number that scanned, never the number that was attempted. The script is
+  # deliberately not `set -e` and its last statement is a `printf`, so its exit
+  # status is 0 essentially always — and it emits one entry per image whether or
+  # not Trivy managed to read that image. So a total registry outage produced 47
+  # entries, all ok=false, a non-empty list, and therefore `ok: true` with
+  # scanned=0 and critical=0. scan.yml then wrote 0 as the baseline and the next
+  # healthy run escalated "image criticals increased 0 -> 40", a finding that
+  # never happened. That is the same false alarm the errata baseline already
+  # learned from on 2026-07-30; see the long comment in scan.yml.
   ansible.builtin.set_fact:
     infra_image_scan: >-
-      {{ {'ok': ran and (parsed.images | default([]) | length) > 0,
-          'images': parsed.images | default([]),
-          'scanned': parsed.images | default([]) | selectattr('ok') | list | length,
-          'failed': parsed.images | default([]) | rejectattr('ok') | list | length,
-          'critical': parsed.images | default([]) | selectattr('ok')
+      {{ {'ok': ran and (scanned | int) > 0,
+          'images': images,
+          'scanned': scanned | int,
+          'failed': failed | int,
+          'critical': images | selectattr('ok')
                       | map(attribute='critical') | map('int') | sum,
-          'high': parsed.images | default([]) | selectattr('ok')
+          'high': images | selectattr('ok')
                   | map(attribute='high') | map('int') | sum,
-          'eosl': parsed.images | default([]) | selectattr('ok')
+          'eosl': images | selectattr('ok')
                   | selectattr('eosl') | map(attribute='ref') | list,
-          'detail': 'ok' if ran else 'image scan did not run'} }}
+          'detail': 'image scan did not run (rc='
+                    ~ (infra_image_scan_raw.rc | default('none')) ~ ')' if not ran
+                    else 'every one of ' ~ (images | length)
+                         ~ ' images failed to scan' if (scanned | int) == 0
+                    else 'ok, but ' ~ (failed | int) ~ ' of ' ~ (images | length)
+                         ~ ' images failed to scan' if (failed | int) > 0
+                    else 'ok'} }}
   vars:
     ran: "{{ (infra_image_scan_raw.rc | default(1)) == 0 }}"
     parsed: >-
       {{ (infra_image_scan_raw.stdout | default('') | from_json)
          if (infra_image_scan_raw.stdout | default('')) | trim | length > 0
          else {} }}
+    images: "{{ parsed.images | default([]) }}"
+    scanned: "{{ images | selectattr('ok') | list | length | int }}"
+    failed: "{{ images | rejectattr('ok') | list | length | int }}"
 
 - name: Mark the infra scan complete
   ansible.builtin.set_fact:

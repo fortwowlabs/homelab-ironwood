@@ -77,10 +77,19 @@
 
 # Default so the aggregation downstream never has to distinguish "absent
 # because it is not benchmark day" from "absent because something broke".
+#
+# Whether it was DUE is recorded here rather than re-derived in scan.yml,
+# because that is the distinction the aggregation needs and a second copy of
+# this weekday condition over there would be a copy free to drift. The block
+# below is gated on the fact, so the condition is written exactly once and the
+# fact cannot disagree with what actually happened.
 - name: Assume no benchmark ran on this host
   ansible.builtin.set_fact:
     service_vm_oscap: {}
     service_vm_oscap_ran: false
+    service_vm_oscap_due: >-
+      {{ (scan_oscap_force | default(false) | bool)
+         or (ansible_date_time.weekday_number == (scan_oscap_weekday | string)) }}
 
 # Isolated in its own rescue, NOT left to the caller's. scan.yml's per-host
 # rescue marks the whole host unscanned and zeroes its errata — so when the
@@ -89,9 +98,7 @@
 # hosts reported NOT SCANNED. The two findings are independent and their
 # failures must be too.
 - name: Evaluate the OpenSCAP benchmarks
-  when: >-
-    (scan_oscap_force | default(false) | bool)
-    or (ansible_date_time.weekday_number == (scan_oscap_weekday | string))
+  when: service_vm_oscap_due | bool
   block:
     - name: Run the benchmark evaluation
       ansible.builtin.include_tasks: scan-benchmark.yml
@@ -107,11 +114,16 @@
   ansible.builtin.set_fact:
     service_vm_exposure: []
     service_vm_exposure_ran: false
+    # Same reasoning as the benchmark's _due above. svc-download is a target
+    # twice over and nobody's scanner, so its exposure scan is legitimately
+    # absent every night — which must not read the same as svc-infra's dying.
+    service_vm_exposure_due: >-
+      {{ inventory_hostname in (scan_exposure_pairs | map(attribute='scanner') | list) }}
     service_vm_credentials: []
     service_vm_credentials_ran: false
 
 - name: Diff what is actually exposed against what the catalogs explain
-  when: inventory_hostname in (scan_exposure_pairs | map(attribute='scanner') | list)
+  when: service_vm_exposure_due | bool
   block:
     - name: Run the exposure scan
       ansible.builtin.include_tasks: scan-exposure.yml
@@ -130,6 +142,42 @@
       ansible.builtin.set_fact:
         service_vm_credentials: []
         service_vm_credentials_ran: false
+
+# The three rescues above are what stop one broken check from zeroing the other
+# two — but each of them leaves behind an EMPTY LIST, and an empty list is
+# exactly what a clean result looks like. Until this fact existed the *_ran
+# flags were written by every branch above and read by nothing at all: the
+# exposure scan could die on its own port-22 assert, service_vm_exposure would
+# be [], scan_unexpected_ports would compute 0, and the run would publish a
+# routine "all clear" for a port sweep that never happened.
+#
+# So every check that was DUE here and produced no result names itself, and
+# scan.yml escalates on the list. Due rather than merely absent: svc-download
+# scans nobody and the benchmark is weekly, and neither of those is a fault.
+- name: Name any check that was due on this host and produced no result
+  ansible.builtin.set_fact:
+    service_vm_checks_not_run: >-
+      {{ (exposure if ((service_vm_exposure_due | bool)
+                       and not (service_vm_exposure_ran | bool)) else [])
+         + (credentials if not (service_vm_credentials_ran | bool) else [])
+         + (benchmark if ((service_vm_oscap_due | bool)
+                          and not (service_vm_oscap_ran | bool)) else []) }}
+  vars:
+    # `check` is what the report templates filter on, `label` is what the alert
+    # title says out loud. Both, because a one-line ntfy title that says only
+    # "a check did not run" is a page nobody can act on.
+    exposure:
+      - check: exposure
+        host: "{{ inventory_hostname }}"
+        label: "exposure scan on {{ inventory_hostname }}"
+    credentials:
+      - check: credentials
+        host: "{{ inventory_hostname }}"
+        label: "credential canary on {{ inventory_hostname }}"
+    benchmark:
+      - check: benchmark
+        host: "{{ inventory_hostname }}"
+        label: "OpenSCAP benchmark on {{ inventory_hostname }}"
 
 - name: Mark the host scan complete
   ansible.builtin.set_fact:

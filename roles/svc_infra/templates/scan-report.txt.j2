@@ -13,6 +13,12 @@ SUMMARY
       A host that could not be asked is NOT a host with nothing pending.
       Treat the numbers above as a floor, not a total.
 {% endif %}
+{% if scan_not_run | default([]) | length > 0 %}
+  DID NOT RUN             : {{ scan_not_run | map(attribute='label') | join('; ') }}
+      Each of these was due tonight and produced no result. A check that did
+      not run reports nothing found, which is why it is named here rather than
+      left to show up as a zero further down.
+{% endif %}
 
   previous run total      : {{ scan_previous.total | default('none — first run') }}
   escalated to alerts     : {{ 'YES — ' ~ scan_escalation_reason if scan_escalate | bool else 'no' }}
@@ -60,9 +66,12 @@ CONTAINER IMAGE VULNERABILITIES
   patched is the same finding by another name.
 
 DEFAULT CREDENTIALS
-{% if scan_credentials | length > 0 %}
+{# Keyed off the hosts whose canary reported, never off the length of the
+   findings list: an empty list is what both "no service accepts a default" and
+   "the canary died" look like. #}
+{% if scan_credentials_ran_on | default([]) | length > 0 %}
 {%   for c in scan_credentials | sort(attribute='service') %}
-  {{ "%-14s %s" | format(c.service, 'STILL ACCEPTS ITS SHIPPED DEFAULT' if c.vulnerable else 'ok') }}
+  {{ "%-14s %s" | format(c.service, 'STILL ACCEPTS ITS SHIPPED DEFAULT' if c.vulnerable else 'INCONCLUSIVE — no verdict reached' if c.inconclusive | default(false) else 'ok') }}
       {{ c.detail }}
 {%   endfor %}
 {%   if scan_default_creds | length > 0 %}
@@ -71,12 +80,23 @@ DEFAULT CREDENTIALS
   is a login anybody on the LAN can find in the project's own documentation,
   and it takes a minute to change.
 {%   endif %}
+{%   if scan_inconclusive_creds | default([]) | length > 0 %}
+
+  An inconclusive probe is not an `ok`. It means the request never reached the
+  point where an accepted and a refused login look different — so nothing above
+  says whether that service still takes its shipped default. Fix the probe, then
+  read this section again.
+{%   endif %}
 {% else %}
-  Not run — no result recorded. A canary that did not run is not a clean estate.
+  Not run — no host's canary reported. A canary that did not run is not a clean
+  estate, and this section being empty is the same finding as a service failing
+  it.
 {% endif %}
 
 EXPOSED PORTS (scanned from another VM; loopback would bypass the firewall)
-{% if scan_exposure | length > 0 %}
+{# Same again: no scanner reporting and no port being open produce the same
+   empty list, so the branch turns on which hosts actually scanned. #}
+{% if scan_exposure_ran_on | default([]) | length > 0 %}
 {%   for e in scan_exposure | sort(attribute='target') %}
   {{ "%-14s %d open" | format(e.target, e.observed | length) }}
 {%     if e.unexpected | length > 0 %}
@@ -88,12 +108,19 @@ EXPOSED PORTS (scanned from another VM; loopback would bypass the firewall)
           Not a security finding — usually a service that is down.
 {%     endif %}
 {%   endfor %}
+  scanned from            : {{ scan_exposure_ran_on | join(', ') }}
 {% else %}
-  Not run — no result recorded. Zero ports found is not zero ports open.
+  Not run — no scanner reported a result. Zero ports found is not zero ports
+  open; a sweep that died on its own port-22 control produces exactly this
+  section.
 {% endif %}
 
 BENCHMARK (OpenSCAP / scap-security-guide)
-{% if scan_oscap | length > 0 %}
+{# Three states, not two. "No results" was previously rendered as "not
+   benchmark day" whatever the cause, so a Sunday on which the evaluation broke
+   on every host read as a Tuesday. #}
+{% set oscap_missing = scan_not_run | default([]) | selectattr('check', 'equalto', 'benchmark') | list %}
+{% if scan_oscap_ran_on | default([]) | length > 0 %}
 {% for host, profiles in scan_oscap | dictsort %}
 {%   for profile, counts in profiles | dictsort %}
 {%     set scored = (counts.pass | default(0) | int) + (counts.fail | default(0) | int) %}
@@ -111,6 +138,16 @@ BENCHMARK (OpenSCAP / scap-security-guide)
   classified audit rules. What matters is the trend: a score that drops means
   something changed on the host, and that is worth knowing even when the
   absolute number is not.
+{%   if oscap_missing | length > 0 %}
+
+  DID NOT RUN on {{ oscap_missing | map(attribute='host') | join(', ') }}. The
+  table above is a subset of the estate, and it is not this week's baseline.
+{%   endif %}
+{% elif oscap_missing | length > 0 %}
+  NOT RUN — the benchmark was due today and produced no result on
+  {{ oscap_missing | map(attribute='host') | join(', ') }}. That is a broken
+  evaluation, not a host with nothing to report; the previous week's numbers
+  stand and no baseline was written.
 {% else %}
   Not run today. The benchmark is weekly (Sunday), because it costs ~10 minutes
   of wall clock and ~30 of CPU across every VM to measure a property that only

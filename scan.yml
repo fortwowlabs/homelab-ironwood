@@ -38,6 +38,16 @@
             name: service_vm
             tasks_from: scan
       rescue:
+        # EVERY fact the reporting play extracts, not just the errata. The role
+        # sets the other five near the top of its own task file, but the errata
+        # query runs BEFORE them — so a host that failed there arrived here with
+        # service_vm_oscap and both canary facts unset, and
+        # `map('extract', hostvars, 'service_vm_oscap')` raises on a host that
+        # lacks the key rather than yielding something `select('defined')` can
+        # drop (ansible-core 2.21). One host failing its dnf query would have
+        # taken down the whole report — no findings for the other two, no ntfy,
+        # no HTML — which is the opposite of what any_errors_fatal: false above
+        # is here to buy.
         - name: Record that this host could not be scanned
           ansible.builtin.set_fact:
             service_vm_scanned: false
@@ -49,6 +59,17 @@
               low: 0
               total: 0
               detail: "scan tasks failed on {{ inventory_hostname }}"
+            service_vm_oscap: {}
+            service_vm_oscap_ran: false
+            service_vm_exposure: []
+            service_vm_exposure_ran: false
+            service_vm_credentials: []
+            service_vm_credentials_ran: false
+            # Empty rather than all three: this host is already named in
+            # scan_broken, which escalates on its own and says something more
+            # useful than three separate "did not run" lines about a host that
+            # could not be reached at all.
+            service_vm_checks_not_run: []
 
 - name: Publish the scan report
   hosts: infra_vms
@@ -131,7 +152,39 @@
              | map('extract', hostvars, 'service_vm_credentials')
              | select('defined') | list | flatten }}
 
-    - name: Reduce the canaries to the two numbers escalation needs
+    # An empty finding list has two causes and only one of them is good news.
+    # scan_exposure and scan_credentials above are [] both when a canary found
+    # nothing and when it died in its own rescue, so nothing below may treat
+    # emptiness as a clean result. These lists say which hosts positively
+    # reported, and scan_not_run says which checks were due tonight and did not.
+    #
+    # This is what the *_ran facts were always for. They were written by nine
+    # tasks and read by none, so a failed exposure scan produced [] , left
+    # service_vm_scanned true, kept scan_broken empty, computed 0 unexpected
+    # ports and published a routine all-clear for a scan that never happened.
+    - name: Establish which per-host checks actually reported a result
+      ansible.builtin.set_fact:
+        scan_exposure_ran_on: >-
+          {{ dict(hosts | zip(hosts | map('extract', hostvars, 'service_vm_exposure_ran') | list))
+             | dict2items | selectattr('value', 'defined')
+             | selectattr('value', 'equalto', true) | map(attribute='key') | list }}
+        scan_credentials_ran_on: >-
+          {{ dict(hosts | zip(hosts | map('extract', hostvars, 'service_vm_credentials_ran') | list))
+             | dict2items | selectattr('value', 'defined')
+             | selectattr('value', 'equalto', true) | map(attribute='key') | list }}
+        scan_oscap_ran_on: >-
+          {{ dict(hosts | zip(hosts | map('extract', hostvars, 'service_vm_oscap_ran') | list))
+             | dict2items | selectattr('value', 'defined')
+             | selectattr('value', 'equalto', true) | map(attribute='key') | list }}
+        # Each entry is {check, host, label}: `check` is what the report
+        # templates filter on, `label` is what the alert says out loud.
+        scan_not_run: >-
+          {{ hosts | map('extract', hostvars, 'service_vm_checks_not_run')
+             | select('defined') | list | flatten }}
+      vars:
+        hosts: "{{ groups['service_vms'] | sort }}"
+
+    - name: Reduce the canaries to the numbers escalation needs
       ansible.builtin.set_fact:
         # Ports open that no catalog explains. The security finding.
         scan_unexpected_ports: >-
@@ -140,6 +193,14 @@
         # always too many, and unlike a CVE count this is fixable in a minute.
         scan_default_creds: >-
           {{ scan_credentials | selectattr('vulnerable') | map(attribute='service') | list }}
+        # Services the canary could not reach a verdict on: no CSRF token, no
+        # HTTP response, a 5xx. Not a vulnerability and not an all-clear —
+        # the third state the canary grew after Calibre-Web's default was
+        # changed on 2026-08-03 left the probe with nothing that must come back
+        # vulnerable, so a broken canary now looks exactly like a working one.
+        scan_inconclusive_creds: >-
+          {{ scan_credentials | selectattr('inconclusive', 'defined')
+             | selectattr('inconclusive') | map(attribute='service') | list }}
 
     - name: Read the previous run's totals
       ansible.builtin.slurp:
@@ -172,6 +233,8 @@
         # failing to run at all.
         scan_escalate: >-
           {{ (scan_broken | length > 0)
+             or (scan_not_run | length > 0)
+             or (scan_inconclusive_creds | length > 0)
              or (not (infra_image_scan.ok | default(false) | bool))
              or ((scan_critical | int) > (scan_previous.critical | default(0) | int))
              or ((scan_important | int) > (scan_previous.important | default(0) | int))
@@ -192,7 +255,12 @@
              if ((scan_unexpected_ports | int) > 0)
              else (scan_broken | join(', ') ~ ' could not be scanned')
              if (scan_broken | length > 0)
-             else 'image scan did not run'
+             else ('did not run: ' ~ (scan_not_run | map(attribute='label') | join('; ')))
+             if (scan_not_run | length > 0)
+             else ('credential probe reached no verdict: '
+                   ~ (scan_inconclusive_creds | join(', ')))
+             if (scan_inconclusive_creds | length > 0)
+             else (infra_image_scan.detail | default('image scan did not run'))
              if (not (infra_image_scan.ok | default(false) | bool))
              else 'an image base OS reached end-of-life'
              if ((infra_image_scan.eosl | default([]) | length)
@@ -209,6 +277,11 @@
                       > (scan_previous.oscap_failed | default(scan_oscap_failed) | int)))
              else 'pending security errata increased ' ~
                   (scan_previous.total | default(0)) ~ ' -> ' ~ scan_total }}
+        # Every conditional clause below stays on ONE line. YAML's folded
+        # scalar keeps a literal newline wherever a continuation line is
+        # indented further than the first, so the wrapped form put two blank
+        # lines into the middle of every ntfy message on a night with nothing
+        # to add — and this is the message that gets read at a glance.
         scan_summary_line: >-
           {{ scan_total }} pending security errata across
           {{ scan_ok | length }}/{{ groups['service_vms'] | length }} hosts
@@ -217,10 +290,10 @@
           Images: {{ infra_image_scan.critical | default(0) }} critical,
           {{ infra_image_scan.high | default(0) }} high across
           {{ infra_image_scan.scanned | default(0) }} scanned
-          {{ ('; %d on an EOL base OS' | format(infra_image_scan.eosl | length))
-             if (infra_image_scan.eosl | default([]) | length > 0) else '' }}
-          {{ ('; NOT SCANNED: ' ~ (scan_broken | join(', ')))
-             if (scan_broken | length > 0) else '' }}
+          {{ ('; %d FAILED to scan' | format(infra_image_scan.failed | int)) if (infra_image_scan.failed | default(0) | int > 0) else '' }}
+          {{ ('; %d on an EOL base OS' | format(infra_image_scan.eosl | length)) if (infra_image_scan.eosl | default([]) | length > 0) else '' }}
+          {{ ('; NOT SCANNED: ' ~ (scan_broken | join(', '))) if (scan_broken | length > 0) else '' }}
+          {{ ('; DID NOT RUN: ' ~ (scan_not_run | map(attribute='label') | join('; '))) if (scan_not_run | length > 0) else '' }}
 
     - name: Write the scan report
       ansible.builtin.template:
@@ -269,7 +342,7 @@
                             else (scan_previous.image_high | default(0) | int),
               'image_eosl': (infra_image_scan.eosl | length) if images_measured
                             else (scan_previous.image_eosl | default(0) | int),
-              'oscap_failed': (scan_oscap_failed | int) if (scan_oscap | length > 0)
+              'oscap_failed': (scan_oscap_failed | int) if oscap_measured
                               else (scan_previous.oscap_failed | default(0) | int),
               'recorded': ansible_date_time.iso8601} | to_nice_json }}
         dest: "{{ scan_state_file }}"
@@ -281,7 +354,21 @@
         # finished. A partial result is reportable but must not become the
         # comparison point.
         errata_measured: "{{ scan_broken | length == 0 }}"
-        images_measured: "{{ infra_image_scan.ok | default(false) | bool }}"
+        # `ok` is not sufficient here, for the same reason. It now means at
+        # least one image scanned, which makes the numbers reportable — but a
+        # run where 46 of 47 images failed produces a critical count from one
+        # image, and recording that as the baseline would have the next healthy
+        # run escalate a forty-image increase that never happened.
+        images_measured: >-
+          {{ (infra_image_scan.ok | default(false) | bool)
+             and ((infra_image_scan.failed | default(1) | int) == 0) }}
+        # And again for the benchmark: scan_oscap drops hosts that produced
+        # nothing, so a week where two of three evaluations broke would write a
+        # third of the failure count as the baseline and alert on the recovery.
+        oscap_measured: >-
+          {{ (scan_oscap_ran_on | length > 0)
+             and (scan_not_run | selectattr('check', 'equalto', 'benchmark')
+                  | list | length == 0) }}
 
     # Published on EVERY run, to the muted informational topic. This is not
     # chatter: docs/automation-opportunities.md records as an accepted risk that
@@ -313,3 +400,37 @@
     - name: Mark the scan run complete
       ansible.builtin.set_fact:
         scan_completed: true
+
+# The gate verify.yml has had all along, which this playbook did not.
+#
+# scan_completed and svc_infra_scanned were set and never read, and the play
+# that sets them is the only one that reports anything: it scans the images,
+# aggregates every host's findings, writes both reports and publishes to ntfy.
+# If it does not run, ansible-playbook still exits 0 — a --limit that misses
+# svc-infra, or an infra host that is simply absent from the inventory, matches
+# no hosts and Ansible calls that a skip, not a failure. The nightly wrapper
+# then pings healthchecks.io green and the estate reports perfect health on a
+# scan that produced no report at all. That is this repo's oldest failure shape:
+# a clean result from a check that did not run.
+#
+# Separate localhost play, like verify.yml's, because a task inside the play
+# being asserted cannot notice the play was skipped. The nightly runner already
+# limits to `service_vms:localhost` so this is in scope there.
+- name: Refuse to end green on a scan that did not report
+  hosts: localhost
+  gather_facts: false
+  tasks:
+    - name: Assert the scan reached its reporting half
+      ansible.builtin.assert:
+        that:
+          - hostvars[infra_host].svc_infra_scanned | default(false) | bool
+          - hostvars[infra_host].scan_completed | default(false) | bool
+          # Every service VM is accounted for one way or the other. A host that
+          # failed is in scan_broken and reported as such; a host missing from
+          # the aggregation entirely is invisible, which is worse than broken.
+          - (hostvars[infra_host].scan_findings | default({}) | length)
+            == (groups['service_vms'] | length)
+        fail_msg: >-
+          Refusing success: the scan did not publish a report. Findings may
+          have been collected, but nothing wrote them down or escalated them,
+          so this run proves nothing about the estate.

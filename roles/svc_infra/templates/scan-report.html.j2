@@ -47,6 +47,15 @@
 </div>
 {% endif %}
 
+{% if scan_not_run | default([]) | length > 0 %}
+<div class="banner">
+  <strong>{{ scan_not_run | length }} check(s) were due tonight and did not run:
+  {{ scan_not_run | map(attribute='label') | join('; ') }}.</strong><br>
+  A check that did not run reports nothing found. Whatever those checks cover is
+  unmeasured on this page, not clean.
+</div>
+{% endif %}
+
 <div class="cards">
   <div class="card"><span class="n">{{ scan_total }}</span><span class="l">pending errata</span></div>
   <div class="card crit"><span class="n">{{ scan_critical }}</span><span class="l">critical</span></div>
@@ -133,8 +142,52 @@
 </div>
 {% endif %}
 
+{% if scan_inconclusive_creds | default([]) | length > 0 %}
+<div class="banner">
+  <strong>The credential canary reached no verdict on
+  {{ scan_inconclusive_creds | join(', ') }}.</strong><br>
+  The probe never got as far as telling an accepted login from a refused one, so
+  nothing here says whether those services still take their shipped default.
+  That is a broken probe, not a passing one.
+</div>
+{% endif %}
+
+<h2 style="font-size:1.05rem;margin:2rem 0 .5rem;">Default credentials</h2>
+{# Keyed off the hosts whose canary reported rather than off the length of the
+   findings list: [] is what "no service accepts a default" and "the canary
+   died" both look like, and only one of those is good news. #}
+{% if scan_credentials_ran_on | default([]) | length > 0 %}
+<table>
+  <thead><tr><th>service</th><th>verdict</th><th>detail</th></tr></thead>
+  <tbody>
+{% for c in scan_credentials | sort(attribute='service') %}
+    <tr>
+      <td>{{ c.service }}</td>
+{%   if c.vulnerable %}
+      <td class="bad">STILL ACCEPTS ITS SHIPPED DEFAULT</td>
+{%   elif c.inconclusive | default(false) %}
+      <td class="bad">INCONCLUSIVE &mdash; no verdict reached</td>
+{%   else %}
+      <td>ok</td>
+{%   endif %}
+      <td>{{ c.detail }}</td>
+    </tr>
+{% endfor %}
+  </tbody>
+</table>
+<p style="opacity:.75;font-size:.85rem;">Probed from {{ scan_credentials_ran_on | join(', ') }}. Each attempt uses the credentials in the project's own documentation &mdash; nothing here reads the vault.</p>
+{% else %}
+<div class="banner">
+  <strong>The credential canary did not run.</strong><br>
+  No host reported a result. An empty section here is the same finding as a
+  service failing the check, not the absence of one.
+</div>
+{% endif %}
+
 <h2 style="font-size:1.05rem;margin:2rem 0 .5rem;">Exposed ports</h2>
-{% if scan_exposure | default([]) | length > 0 %}
+{# Same again: no scanner reporting and no port being open produce the same
+   empty list. #}
+{% if scan_exposure_ran_on | default([]) | length > 0 %}
 <table>
   <thead><tr><th>target</th><th>open</th><th>unexplained</th><th>expected but shut</th></tr></thead>
   <tbody>
@@ -148,13 +201,21 @@
 {% endfor %}
   </tbody>
 </table>
-<p style="opacity:.75;font-size:.85rem;">Scanned from another VM &mdash; a host scanning itself goes over loopback and bypasses its own firewall entirely.</p>
+<p style="opacity:.75;font-size:.85rem;">Scanned from {{ scan_exposure_ran_on | join(', ') }} &mdash; a host scanning itself goes over loopback and bypasses its own firewall entirely.</p>
 {% else %}
-<div class="note">Not run &mdash; no result recorded. Zero ports found is not zero ports open.</div>
+<div class="banner">
+  <strong>The exposure scan did not run.</strong><br>
+  No scanner reported a result. Zero ports found is not zero ports open &mdash; a
+  sweep that died on its own port-22 control produces exactly this section.
+</div>
 {% endif %}
 
 <h2 style="font-size:1.05rem;margin:2rem 0 .5rem;">Benchmark (OpenSCAP)</h2>
-{% if scan_oscap | length > 0 %}
+{# Three states, not two: "no results" used to render as "not benchmark day"
+   whatever the cause, so a Sunday on which every evaluation broke read as a
+   Tuesday. #}
+{% set oscap_missing = scan_not_run | default([]) | selectattr('check', 'equalto', 'benchmark') | list %}
+{% if scan_oscap_ran_on | default([]) | length > 0 %}
 <table>
   <thead><tr><th>host</th><th>profile</th><th>pass</th><th>fail</th><th>n/a</th><th>score</th></tr></thead>
   <tbody>
@@ -179,6 +240,21 @@
   classified audit rules. What matters is the trend: a score that drops means
   something changed on the host. Full HTML report per host lives at
   <code>/var/lib/homelab-scan/oscap-&lt;profile&gt;.html</code>.
+</div>
+{% if oscap_missing | length > 0 %}
+<div class="banner">
+  <strong>The benchmark did not run on
+  {{ oscap_missing | map(attribute='host') | join(', ') }}.</strong><br>
+  The table above covers part of the estate, and it was not recorded as this
+  week's baseline.
+</div>
+{% endif %}
+{% elif oscap_missing | length > 0 %}
+<div class="banner">
+  <strong>The benchmark was due today and produced no result on
+  {{ oscap_missing | map(attribute='host') | join(', ') }}.</strong><br>
+  That is a broken evaluation rather than a host with nothing to report. The
+  previous week's numbers stand and no baseline was written.
 </div>
 {% else %}
 <div class="note">
