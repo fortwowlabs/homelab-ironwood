@@ -5,10 +5,49 @@
       - systemctl
       - "{{ item.1 }}"
       - "{{ item.0 }}"
-  loop: "{{ ['homelab-diskguard.timer', 'homelab-pve-health.timer'] | product(['is-active', 'is-enabled']) | list }}"
+  loop: >-
+    {{ ['homelab-diskguard.timer', 'homelab-nfsguard.timer', 'homelab-pve-health.timer']
+       | product(['is-active', 'is-enabled']) | list }}
   loop_control:
     label: "{{ item.1 }} {{ item.0 }}"
   changed_when: false
+
+# --- the storage guard's positive control --------------------------------
+# `--check` runs the guard's real probe path and prints its verdict without
+# alerting or writing state. Asserting it says `ok` while TrueNAS is up is a
+# genuine positive control: a typo'd port, a wrong VMID, a `qm` that moved or a
+# broken /dev/tcp connect all come back `inconclusive` or `down` and fail here,
+# rather than leaving a guard that has quietly stopped being able to notice an
+# outage.
+#
+# This is the property CLAUDE.md says the credential canary lacks — "a check
+# with no positive control is a check nobody can tell is broken". It works here
+# only because the healthy state is observable on demand: storage is normally
+# up, so `ok` is something that MUST be true if the probe really ran.
+#
+# It is not a test of the alert path. It proves the guard can measure, not that
+# ntfy delivers; delivery is exercised by the same notify-failure@ mechanism
+# every other unit on this host uses.
+- name: Run the storage guard's probe without alerting
+  ansible.builtin.command: /usr/local/sbin/pve-nfsguard.sh --check
+  register: pve_nfsguard_check
+  changed_when: false
+
+- name: Assert the storage guard can see NFS being served
+  ansible.builtin.assert:
+    that:
+      - (pve_nfsguard_check.stdout | default('') | trim) == 'ok'
+    fail_msg: >-
+      pve-nfsguard.sh --check reported
+      '{{ pve_nfsguard_check.stdout | default('(no output)') | trim }}'
+      rather than 'ok'
+      ({{ pve_nfsguard_check.stderr | default('') | trim }}).
+      Either storage really is down, or the guard has lost the ability to
+      measure it — in which case an outage would now pass unreported, which is
+      what happened on 2026-08-04.
+    success_msg: >-
+      Storage guard probes NFS successfully (verdict ok).
+    quiet: true
 
 # is-enabled as well as is-active: a daemon that is running but disabled passes
 # every liveness check and then vanishes at the next reboot, which for a

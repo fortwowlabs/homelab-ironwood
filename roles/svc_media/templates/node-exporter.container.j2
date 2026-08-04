@@ -6,6 +6,11 @@
 # Network=host). No writable state — nothing to persist. Scraped by
 # Prometheus on {{ infra_host }} ONLY: firewalld opens :9100 to that single
 # source address, not the whole LAN (see files.yml).
+# fs-types-exclude keeps the filesystem collector off NFS. Without it the
+# collector stats /srv/media each scrape and blocks in D-state when the NAS
+# is gone, taking every other metric for this host down with it. The regex
+# is node_exporter's own default plus nfs/nfs4; see the var's comment in
+# group_vars/all/main.yml and docs/plans/nfs-outage-resilience.md.
 [Unit]
 Description=Prometheus node exporter
 
@@ -20,7 +25,7 @@ SecurityLabelDisable=true
 Volume=/proc:/host/proc:ro
 Volume=/sys:/host/sys:ro
 Volume=/:/rootfs:ro
-Exec=--path.procfs=/host/proc --path.sysfs=/host/sys --path.rootfs=/rootfs --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run)($|/)
+Exec=--path.procfs=/host/proc --path.sysfs=/host/sys --path.rootfs=/rootfs --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run)($|/) --collector.filesystem.fs-types-exclude={{ node_exporter_fs_types_exclude }}
 
 [Service]
 Restart=on-failure

@@ -154,6 +154,28 @@ beszel_agent_enabled: >-
 # tag: latest
 node_exporter_image: "docker.io/prom/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0"
 
+# Filesystem types the collector must NOT stat. This is node_exporter's own
+# default list with `nfs` and `nfs4` appended — appended, not replaced, so the
+# pseudo-filesystem exclusions are not silently dropped along the way.
+#
+# WHY. The collector stats every mount point on every scrape. During the
+# 2026-08-04 TrueNAS outage it walked /srv/media, blocked in uninterruptible
+# D-state, and took the WHOLE scrape down with it — so Prometheus lost CPU,
+# memory, network and local-disk metrics for that host too, not just NFS
+# capacity. The observability layer went blind at the same moment, and for the
+# same reason, as the alerting layer. mount-points-exclude did not cover this:
+# it excluded /dev, /proc, /sys and /run, and /srv/media is none of those.
+#
+# The cost is that NFS free space no longer appears in Prometheus. That is
+# acceptable only because disk-alert.sh already covers it against
+# disk_alert_nfs_threshold — a bounded one-shot with TimeoutStartSec and an
+# OnFailure path, which is a very different risk profile from a process
+# scraped every 15 seconds. disk-alert.sh is deliberately left as it is.
+#
+# See docs/plans/nfs-outage-resilience.md.
+node_exporter_fs_types_exclude: >-
+  ^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nfs|nfs4|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$
+
 # --- Recyclarr (v6, download jail) -----------------------------------------
 # TRaSH-Guides sync for Sonarr/Radarr. Bespoke, not a download_apps entry:
 # the official image doesn't support PUID/PGID (needs Podman User= instead)

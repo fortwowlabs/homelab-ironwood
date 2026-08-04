@@ -1,0 +1,21 @@
+[Unit]
+Description=Storage VM NFS availability alarm (ntfy)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Every probe in this script is bounded by construction — `qm status`, a
+# `timeout`-wrapped /dev/tcp connect and a `ping -W2`. None of them touch an
+# NFS mount, so none can block in uninterruptible D-state. This timeout is a
+# backstop against a hung `qm` (it talks to pvedaemon over a socket), not the
+# load-bearing safety net that TimeoutStartSec is in homelab-diskalert.service.
+#
+# Worth stating: on the guests that net did NOT save the disk alarm during the
+# 2026-08-04 outage, because PID 1 could not start the unit in the first place
+# and a start that never happens cannot time out. That failure cannot reach
+# this unit — the hypervisor mounts nothing from TrueNAS and its systemd stayed
+# responsive throughout, which is the entire reason the guard lives here.
+TimeoutStartSec=120
+EnvironmentFile=/etc/homelab-notify.env
+ExecStart=/usr/local/sbin/pve-nfsguard.sh

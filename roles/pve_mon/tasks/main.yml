@@ -122,9 +122,22 @@
   loop:
     - homelab-diskguard.service
     - homelab-diskguard.timer
+    - homelab-nfsguard.service
+    - homelab-nfsguard.timer
     - homelab-pve-health.service
     - homelab-pve-health.timer
   register: pve_mon_units
+
+# -------------------------------------------------------------- nfsguard ---
+# The one watcher that CANNOT live on the host it watches over. See the header
+# of nfsguard.sh.j2 and docs/plans/nfs-outage-resilience.md.
+- name: Install the storage availability guard
+  ansible.builtin.template:
+    src: nfsguard.sh.j2
+    dest: /usr/local/sbin/pve-nfsguard.sh
+    owner: root
+    group: root
+    mode: "0750"
 
 - name: Install the daily PVE health check
   ansible.builtin.template:
@@ -148,6 +161,7 @@
     state: started
   loop:
     - homelab-diskguard.timer
+    - homelab-nfsguard.timer
     - homelab-pve-health.timer
 
 # --------------------------------------------------------------------- zed ---

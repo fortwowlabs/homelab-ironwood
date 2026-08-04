@@ -29,3 +29,15 @@ pve_hc_ping_var: vault_hc_ping_pve
 pve_onfailure_units:
   - homelab-diskguard.service
   - homelab-pve-health.service
+  # The storage guard publishes its own findings, so this drop-in is
+  # specifically for the guard failing to RUN — which is the failure that
+  # would look exactly like healthy storage. Same reasoning the repo already
+  # applied to scan.yml and, after 2026-08-04, to leak-canary.service.
+  - homelab-nfsguard.service
+
+# --- storage availability guard ------------------------------------------
+# Where the guard probes. The port is the NFS server's, reached over TCP from
+# the hypervisor — never through a mount, which would wedge (see
+# roles/pve_mon/templates/nfsguard.sh.j2).
+nfsguard_port: 2049
+nfsguard_connect_timeout: 5

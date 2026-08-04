@@ -60,6 +60,7 @@ ALERT_TEMPLATES = (
     "roles/mon/templates/disk-alert.sh.j2",
     "roles/mon/templates/failed-units-watch.sh.j2",
     "roles/pve_mon/templates/diskguard.sh.j2",
+    "roles/pve_mon/templates/nfsguard.sh.j2",
     "roles/pve_mon/templates/smartd-ntfy.sh.j2",
     "roles/pve_mon/templates/zed-ntfy.sh.j2",
     "roles/service_vm/templates/notify-failure.sh.j2",

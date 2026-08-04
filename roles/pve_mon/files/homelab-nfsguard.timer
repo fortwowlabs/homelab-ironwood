@@ -1,0 +1,18 @@
+[Unit]
+Description=Run the storage NFS availability alarm every 5 minutes
+
+[Timer]
+# Five minutes, not the fifteen the capacity guards use. A storage outage
+# wedges every client for as long as it lasts, so detection latency is the
+# whole value of this check; the 2026-08-04 outage lasted 13m29s and produced
+# no alert at all. The probes are three bounded network/API calls, so running
+# them three times as often costs nothing.
+OnBootSec=3min
+OnUnitActiveSec=5min
+# Deliberately NOT Persistent=true. A missed run matters only while the
+# condition persists, and the next run is at most five minutes away; replaying
+# a catch-up run after the hypervisor boots would alert about an outage that
+# has already ended.
+
+[Install]
+WantedBy=timers.target

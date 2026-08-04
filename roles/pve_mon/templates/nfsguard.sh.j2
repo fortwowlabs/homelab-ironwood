@@ -1,0 +1,168 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# pve-nfsguard.sh — ntfy alarm when the storage VM stops serving NFS.
+#
+# WHY THIS LIVES ON THE HYPERVISOR. On 2026-08-04 TrueNAS (VM {{ truenas_vmid }}) was
+# stopped for 13m29s with all three service VMs running. Every client wedged:
+# PID 1 stopped answering D-Bus, so `systemctl`, `sudo` and SSH login all hung,
+# and — the part that matters here — **no systemd timer on those hosts could
+# fire**. homelab-diskalert.service was due at ~15:30 on all three and did not
+# run until 15:38:31, the same second the kernel logged `nfs: server OK`.
+#
+# Its TimeoutStartSec=300 net never engaged, because the unit was never
+# started. Every watcher in this repo is a timer on the affected host, and
+# OnFailure= needs PID 1 to start a unit too, so the whole alerting
+# architecture is disarmed by exactly the event it should report. Thirteen
+# minutes of total storage outage produced zero alerts and every HTTP endpoint
+# returned its normal status code.
+#
+# The hypervisor mounts nothing from TrueNAS, so it cannot be wedged by this.
+# That is measured, not assumed: homelab-diskguard.timer fired normally at
+# 15:32:16, mid-outage, while all three guests' timers were frozen.
+#
+# NEVER TOUCH A MOUNT. Every probe below talks to the server or to Proxmox.
+# A `hard` NFS mount blocks in uninterruptible D-state that SIGKILL cannot
+# clear, so a guard that stat'ed /srv/media would become another casualty of
+# the outage it is supposed to report — and would do so permanently.
+#
+# See docs/plans/nfs-outage-resilience.md.
+#
+# Never exits nonzero for a push failure, but missing configuration fails.
+set -uo pipefail
+
+VMID="{{ truenas_vmid }}"
+NAS_IP="{{ truenas_ip }}"
+NFS_PORT="{{ nfsguard_port | default(2049) }}"
+CONNECT_TIMEOUT="{{ nfsguard_connect_timeout | default(5) }}"
+
+# --check runs the full probe path and prints the verdict WITHOUT alerting or
+# writing state. This is the positive control `make verify` asserts on: with
+# the NAS up it must print `ok`, so a typo'd port, a wrong VMID or a broken qm
+# invocation fails verification instead of silently making the guard blind.
+# The credential canary has no equivalent and the repo says so plainly; this
+# one does, because the healthy state is observable on demand.
+DRYRUN=0
+[[ "${1:-}" == "--check" ]] && DRYRUN=1
+
+if (( DRYRUN == 0 )); then
+    : "${NTFY_URL:?set NTFY_URL in /etc/homelab-notify.env}"
+    : "${NTFY_TOPIC:?set NTFY_TOPIC in /etc/homelab-notify.env}"
+fi
+topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC:-}}"
+host=$(hostname -s)
+
+STATE_DIR=/var/lib/homelab
+STATE="$STATE_DIR/nfsguard.state"
+REALERT_SECS=$(( {{ alert_realert_hours | default(6) }} * 3600 ))
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+auth=()
+[ -n "${NTFY_TOKEN:-}" ] && auth=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+
+alert() {  # $1=priority $2=tags $3=title $4=body
+    if curl -fsS --max-time 10 --retry 2 --retry-delay 5 "${auth[@]}" \
+        -H "Title: $3" -H "Priority: $1" -H "Tags: $2" \
+        -d "$4" "${NTFY_URL}/${topic}" >/dev/null 2>&1; then
+        return 0
+    fi
+    logger -t pve-nfsguard "ntfy push failed: $3"
+    return 1
+}
+
+# Same temp-file-and-rename contract as pve-diskguard.sh: `>` truncates before
+# it fails, and a half-written state file makes the dedupe re-alert forever.
+write_state() {  # $1=verdict-hash $2=timestamp
+    if printf '%s %s\n' "$1" "$2" > "${STATE}.tmp" 2>/dev/null \
+       && mv -f "${STATE}.tmp" "$STATE" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "${STATE}.tmp" 2>/dev/null || true
+    logger -t pve-nfsguard "could not write ${STATE}; alert dedupe is running blind"
+    return 1
+}
+
+# Bounded TCP connect. bash's /dev/tcp plus `timeout` cannot block the way a
+# filesystem call can — there is no mount and no uninterruptible sleep here,
+# so the worst case is CONNECT_TIMEOUT seconds.
+tcp_open() {  # $1=host $2=port
+    timeout "$CONNECT_TIMEOUT" bash -c "exec 3<>/dev/tcp/$1/$2" 2>/dev/null
+}
+
+# ------------------------------------------------------------------ probes ---
+# Three verdicts, following the credential canary's tri-state (commit 057e1e4):
+#   ok            — the VM is running and NFS answers
+#   down          — measured, and genuinely not serving
+#   inconclusive  — could not look; NEVER rendered as an all-clear
+verdict=""
+detail=""
+
+if ! command -v qm >/dev/null 2>&1; then
+    verdict="inconclusive"
+    detail="qm is not on PATH; cannot read the storage VM's state"
+elif ! vm_status=$(qm status "$VMID" 2>&1); then
+    verdict="inconclusive"
+    detail="qm status $VMID failed: ${vm_status}"
+elif [[ "$vm_status" != *running* ]]; then
+    verdict="down"
+    detail="storage VM $VMID is not running (${vm_status}). Every NFS client will
+wedge in uninterruptible I/O until it returns: systemctl, sudo and SSH login
+hang, and no timer on those hosts can fire."
+elif tcp_open "$NAS_IP" "$NFS_PORT"; then
+    verdict="ok"
+    detail="VM $VMID running and ${NAS_IP}:${NFS_PORT} accepting connections"
+elif ping -c1 -W2 "$NAS_IP" >/dev/null 2>&1; then
+    verdict="down"
+    detail="storage VM $VMID is running and ${NAS_IP} answers ICMP, but nothing is
+listening on ${NFS_PORT}. NFS is not being served; clients will wedge."
+else
+    verdict="down"
+    detail="storage VM $VMID is running but ${NAS_IP} answers neither ICMP nor
+${NFS_PORT}. The guest is up to Proxmox but unreachable on the network."
+fi
+
+if (( DRYRUN == 1 )); then
+    printf '%s\n' "$verdict"
+    [[ -n "$detail" ]] && printf '%s\n' "$detail" >&2
+    exit 0
+fi
+
+# ------------------------------------------------------------ alert/dedupe ---
+now=$(date +%s)
+prev_hash=""
+prev_alert=0
+if [[ -f "$STATE" ]]; then
+    read -r prev_hash prev_alert < "$STATE" || true
+    [[ "$prev_alert" =~ ^[0-9]+$ ]] || prev_alert=0
+fi
+
+# A failed measurement is not an all-clear. Say nothing, leave the state alone
+# so any pending alarm stays pending, and leave a journal record so the next
+# `make verify` can see the guard was running blind.
+if [[ "$verdict" == "inconclusive" ]]; then
+    logger -t pve-nfsguard "INCONCLUSIVE: ${detail}"
+    exit 0
+fi
+
+if [[ "$verdict" == "ok" ]]; then
+    if [[ -n "$prev_hash" && "$prev_hash" != "ok" ]]; then
+        alert default floppy_disk "Storage recovered on ${host}" \
+            "NFS on ${NAS_IP}:${NFS_PORT} is answering again. ${detail}" || exit 0
+    fi
+    write_state ok "$now" || true
+    exit 0
+fi
+
+# Hash the identity of the condition, never a changing measurement — the same
+# mistake pve-diskguard.sh documents, where a percentage inside the hash made
+# every run look like a brand new alarm and defeated the six-hour dedupe.
+hash=$(printf '%s' "down:${VMID}" | sha256sum | cut -d' ' -f1)
+if [[ "$hash" == "$prev_hash" ]] && (( now - prev_alert < REALERT_SECS )); then
+    exit 0
+fi
+
+logger -p daemon.err -t pve-nfsguard "STORAGE DOWN: ${detail}"
+if alert urgent rotating_light,floppy_disk "STORAGE DOWN: NFS on ${host}" \
+       "${detail}"; then
+    write_state "$hash" "$now" || true
+fi
+exit 0

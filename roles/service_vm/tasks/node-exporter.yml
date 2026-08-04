@@ -1,10 +1,35 @@
 ---
-- name: Verify node_exporter exposes host filesystem metrics
-  ansible.builtin.shell:
-    cmd: >-
-      set -o pipefail;
-      curl --fail --silent --show-error --max-time 5
-      http://127.0.0.1:9100/metrics
-      | awk '/^node_filesystem_size_bytes/{found=1} END{exit !found}'
-    executable: /bin/bash
+- name: Read node_exporter's filesystem metrics
+  ansible.builtin.command:
+    argv:
+      - curl
+      - --fail
+      - --silent
+      - --show-error
+      - --max-time
+      - "5"
+      - http://127.0.0.1:9100/metrics
+  register: service_vm_node_metrics
   changed_when: false
+
+# Two assertions in one place, and the order matters. The first proves the
+# collector produced filesystem metrics at all; only then does the ABSENCE of
+# an NFS mount point mean "excluded" rather than "the whole scrape failed".
+# An absence check on its own would pass just as happily against an exporter
+# that returned nothing, which is the failure shape this repo keeps finding.
+- name: Assert node_exporter reports local filesystems but not NFS
+  ansible.builtin.assert:
+    that:
+      - service_vm_node_metrics.stdout is search('(?m)^node_filesystem_size_bytes')
+      - not (service_vm_node_metrics.stdout
+             is search('node_filesystem_size_bytes.*mountpoint="/srv/'))
+    fail_msg: >-
+      node_exporter on {{ inventory_hostname }} either published no filesystem
+      metrics at all, or is still reporting an /srv/* NFS mount. The filesystem
+      collector stats every mount point it does not exclude, so an NFS mount
+      here means the next storage outage wedges the collector in D-state and
+      Prometheus loses EVERY metric for this host — not just NFS capacity.
+      See docs/plans/nfs-outage-resilience.md.
+    success_msg: >-
+      node_exporter reports local filesystems and excludes NFS.
+    quiet: true
