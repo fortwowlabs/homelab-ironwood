@@ -29,6 +29,24 @@ paths = [
   '''^\.venv/''',
   '''^\.ansible/''',
   '''__pycache__/''',
+  # Git worktrees. `gitleaks dir` walks the filesystem, not the index, so a
+  # worktree checked out INSIDE the repo root gets scanned as a second copy of
+  # this tree — and every path-scoped allowlist below is anchored at `^`, so
+  # none of them match the copy. The result is a findings count equal to the
+  # number of worktrees times the number of legitimately credential-shaped
+  # files, all of them duplicates of content already scanned at its real path.
+  #
+  # That is not hypothetical or rare: CLAUDE.md's change workflow says parallel
+  # work "gets a worktree", and the tooling puts them here. Three worktrees
+  # turned a passing `make validate` into three findings on 2026-08-03, all of
+  # them the credential canary allowlisted twenty lines below.
+  #
+  # Excluding the copy loses nothing. The real path is still scanned, every
+  # commit still passes through the history scan in tests/scan_history_secrets.py,
+  # and a worktree cannot reach a commit without its content existing at a
+  # tracked path first.
+  '''^\.claude/worktrees/''',
+  '''/\.claude/worktrees/''',
 ]
 
 [[allowlists]]

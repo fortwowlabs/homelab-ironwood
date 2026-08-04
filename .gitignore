@@ -24,6 +24,14 @@ collections/ansible_collections/
 # Claude Code local (machine-specific) settings
 .claude/settings.local.json
 
+# Git worktrees created inside the repo root. Step 5 of the change workflow
+# requires `git status --porcelain` to print nothing, and untracked files
+# count — so a worktree here makes the clean-tree check unsatisfiable while
+# any parallel work is in flight, which is precisely when the workflow says
+# to use one. Currently also listed in .git/info/exclude on this machine;
+# that file is local-only and does not survive a clone, so it belongs here.
+.claude/worktrees/
+
 # Editor / OS
 *.swp
 .DS_Store
