@@ -44,14 +44,21 @@ jobs:
           # Full history is required by tests/scan_history_secrets.py.
           fetch-depth: 0
 
+      # No `cache: pip`. It was configured here and failed the job on the post
+      # step with "Cache folder path is retrieved for pip but doesn't exist on
+      # disk: /home/runner/.cache/pip" — because nothing populates it. `make
+      # deps` builds its own virtualenv and installs through
+      # `.venv/bin/python -m pip`, so the runner's pip cache stays empty and
+      # the save step has nothing to save.
+      #
+      # Removed rather than repaired. The install is a handful of pinned wheels
+      # and takes seconds; wiring PIP_CACHE_DIR through both the action and the
+      # Makefile to save that is more machinery than the saving is worth, and
+      # this job is an after-the-fact advisory run, not a gate anyone waits on.
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.13"
-          cache: pip
-          cache-dependency-path: |
-            requirements.txt
-            requirements-dev.txt
 
       - name: Install ShellCheck
         run: sudo apt-get install --yes shellcheck
