@@ -89,6 +89,62 @@
       and run `make pve`; editing the vault alone changes nothing on the host.
   diff: false
 
+# --- Boot ordering -----------------------------------------------------------
+#
+# The storage server must start BEFORE the VMs that mount it and stop AFTER
+# them. In Proxmox that is one property: shutdown is the reverse of start
+# order, so `order=1` on TrueNAS buys both directions.
+#
+# This is asserted against the live hypervisor rather than against the repo
+# because the repo does not own it — TrueNAS is a hand-managed guest — and
+# because the previous mechanism was a COMMENT in svc-media.yml reading
+# "TrueNAS is order=1 (set once, out of band)". That comment was false. The VM
+# had no `startup` line at all, so Proxmox started it after every ordered VM
+# and stopped it first, and nothing anywhere noticed for months.
+#
+# The cost, measured on 2026-08-04: five of nine download services dead on
+# boot (their NFS mount timed out 26 seconds before it would have succeeded),
+# and nine SIGKILLed postgres processes on shutdown (the clients wedged in
+# uninterruptible NFS I/O once the server vanished under them).
+#
+# A restored-or-rebuilt PVE loses this silently, which is exactly why it is a
+# gate and not a runbook step.
+- name: Read the storage VM's Proxmox startup configuration
+  ansible.builtin.command: qm config {{ truenas_vmid }}
+  register: pve_truenas_config
+  changed_when: false
+  check_mode: false
+
+- name: Assert the storage VM boots before, and stops after, its clients
+  ansible.builtin.assert:
+    that:
+      # Two separate conditions so the failure message distinguishes them.
+      # "could not look" is a distinct outcome from "looked and it was wrong":
+      # an empty/failed qm read must not pass as a satisfied order.
+      - pve_truenas_config.stdout | length > 0
+      # `(,|$)` rather than a `\b` word boundary on purpose: Jinja parses the
+      # string as a Python literal first, so '\border=' becomes a BACKSPACE
+      # followed by "order=" and the pattern can never match. That produced a
+      # gate which failed against a correctly configured host — caught only
+      # because the fail_msg quotes the line it just rejected.
+      # `order=1(,|$)` also refuses to match `order=10,`.
+      - pve_truenas_config.stdout
+        is search('(?m)^startup:.*order=' ~ truenas_expected_startup_order ~ '(,|$)')
+    fail_msg: >-
+      VM {{ truenas_vmid }} (TrueNAS, the NFS server for every service VM) does
+      not report
+      `startup: order={{ truenas_expected_startup_order }}` on {{ inventory_hostname }}.
+      Proxmox starts VMs with no startup order AFTER all ordered VMs and stops
+      them FIRST, so the storage server would boot last and die first. Fix with:
+        qm set {{ truenas_vmid }} -startup order={{ truenas_expected_startup_order }},up=120,down=180
+      Observed startup line:
+      "{{ pve_truenas_config.stdout_lines | default([]) | select('match', '^startup:') | list | join(' ') | default('(none present)', true) }}"
+      See docs/plans/cold-start-resilience.md.
+    success_msg: >-
+      TrueNAS (VM {{ truenas_vmid }}) is order={{ truenas_expected_startup_order }};
+      it boots before its NFS clients and stops after them.
+    quiet: true
+
 - name: Mark PVE monitoring verification complete
   ansible.builtin.set_fact:
     pve_mon_verified: true

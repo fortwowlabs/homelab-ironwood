@@ -10,7 +10,10 @@ vm_disk_gb: 160
 # RAM bumped 6G->8G (2026-07-23) ahead of adding jdownloader to the jail —
 # archive extraction is memory-spiky. Cores bumped 4->6 to match
 # svc-infra/svc-media. thurgadin had ~20G free at resize time.
-vm_startup: "order=3,up=30"
+# `down=180`: this VM stopped inside the 180s default during the 2026-08-04
+# cold start, unlike svc-media/svc-infra, but the allowance is stated rather
+# than inherited. See docs/plans/cold-start-resilience.md.
+vm_startup: "order=3,up=30,down=180"
 service_guarded_egress: true
 service_repo_packages: [epel-release]
 service_packages:

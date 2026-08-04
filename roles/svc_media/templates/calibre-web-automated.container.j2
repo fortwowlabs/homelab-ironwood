@@ -1,6 +1,14 @@
 {{ ansible_managed | comment }}
 [Unit]
 Description=Calibre-Web Automated
+# Retry budget for the NFS guard in ExecStartPre below. A rootless USER unit
+# cannot order against srv-media.automount, so the guard plus this budget is
+# the only thing that makes a cold start survivable. The defaults (100ms
+# RestartSec, 5 attempts in 10s) are spent in under a second — no retry at all
+# against a TrueNAS that needs ~90s to serve NFS.
+# See docs/plans/cold-start-resilience.md.
+StartLimitIntervalSec=600
+StartLimitBurst=30
 
 [Container]
 Image={{ media_images.calibre_web_automated }}
@@ -25,6 +33,8 @@ Environment=NETWORK_SHARE_MODE=true
 # dir would silently divert the library off the share (same guard as Jellyfin).
 ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
 Restart=on-failure
+# Pairs with StartLimitBurst above; the 100ms default would spend it instantly.
+RestartSec=10
 
 [Install]
 WantedBy=default.target

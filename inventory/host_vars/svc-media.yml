@@ -9,7 +9,17 @@ vm_memory:  10240
 vm_disk_gb: 100
 # vm_cores bumped 4->6 (2026-07-23) to match svc-infra/svc-download after
 # thurgadin RAM/CPU headroom was freed up.
-vm_startup: "order=2,up=90"    # TrueNAS is order=1 (set once, out of band)
+# TrueNAS (convoker, VM 100) is order=1. That comment used to live here and was
+# FALSE — the VM had no `startup` line at all, so Proxmox started it *after*
+# every ordered VM and stopped it *first*. The 2026-08-04 cold start cost five
+# download services on boot and nine SIGKILLed postgres processes on shutdown
+# because of it. It is now genuinely set, and verify.yml asserts it against the
+# PVE API rather than against this comment. See docs/plans/cold-start-resilience.md.
+#
+# `down=` is the shutdown allowance. Stopping ~11 rootless containers took
+# 7m10s during that test — far past the 180s `qm shutdown` default — so a
+# host-initiated (or UPS-initiated) shutdown would have hard-killed this VM.
+vm_startup: "order=2,up=90,down=300"
 service_guarded_egress: false
 service_requires_subids: true
 service_repo_packages: [epel-release]

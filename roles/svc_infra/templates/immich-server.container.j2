@@ -5,6 +5,20 @@
 Description=Immich server
 Requires=immich-db.service immich-redis.service
 After=immich-db.service immich-redis.service
+# Retry budget for the NFS guard in ExecStartPre below. This is a ROOTLESS USER
+# unit, so it cannot order itself against srv-media.automount — that is a
+# system unit, and the user manager cannot see it. ExecStartPre plus a retry
+# budget is therefore the ONLY mechanism available here, which makes the budget
+# load-bearing rather than decorative.
+#
+# systemd's default is 5 attempts in 10s; with RestartSec=10 that gives up
+# after ~50s. A cold TrueNAS needs roughly 90s to serve NFS. This survived the
+# 2026-08-04 cold start only because the user session happens to start slowly
+# (immich-server went active one second after the mount landed) — luck, not
+# design. 30 attempts over 10 minutes outlasts a cold NAS, and still ends in
+# `failed` if the export is genuinely gone.
+StartLimitIntervalSec=600
+StartLimitBurst=30
 
 [Container]
 Image={{ immich_images.server }}

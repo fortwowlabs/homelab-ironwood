@@ -1,6 +1,15 @@
 ---
 service_guarded_egress: false
 service_requires_subids: false
+
+# How long systemd waits for the rootless user manager to stop its containers
+# before SIGKILLing the session. The default is 90s, which SIGKILLed nine
+# postgres processes during the 2026-08-04 cold start; svc-infra needed ~6m to
+# stop ~28 containers with the NFS server already gone. 5 minutes is comfortably
+# past what a healthy stack needs once the NFS ordering is fixed, and PVE's
+# per-VM `down=300` (host_vars) is set to match so the hypervisor does not pull
+# the plug first. Raise both together, or neither.
+service_user_manager_stop_timeout: 300
 service_repo_packages: []
 service_packages: []
 

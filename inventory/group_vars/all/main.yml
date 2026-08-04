@@ -19,6 +19,23 @@ timezone:        America/New_York
 # service VMs and `pve_api_host` for thurgadin).
 truenas_ip: 192.168.1.20
 
+# TrueNAS runs as VM `convoker` on thurgadin. Nothing here configures it — the
+# guest is hand-managed — but its BOOT ORDER is a hypervisor property that this
+# estate depends on absolutely, so it is named here and asserted in verify.yml.
+#
+# Why it is named at all: every service VM mounts /srv/media and /srv/backups
+# from it. Proxmox starts VMs with no `startup` order AFTER all ordered VMs and
+# stops them FIRST. This VM had no order for months while a comment in
+# svc-media.yml claimed it was `order=1`, so the storage server booted last and
+# died first. The 2026-08-04 cold start cost five download services on boot and
+# nine SIGKILLed postgres processes on shutdown.
+#
+# order=1 fixes both directions at once, because shutdown is the reverse of
+# start order. Do not remove the assert: the failure mode here is a comment
+# that claims a property nobody checks.
+truenas_vmid: 100
+truenas_expected_startup_order: 1
+
 # --- Service VM identity (v6) ---
 # `download_host`/`media_host`/`infra_host` resolve to whichever
 # inventory_hostname is a member of the download_vms/media_vms/infra_vms
@@ -51,7 +68,27 @@ gpu_host_online: false
 # verify with `showmount -e 192.168.1.20`).
 nfs_media_export:   "/mnt/sata_wd_14tb/tank/media"
 nfs_backups_export: "/mnt/sata_wd_14tb/tank/backups"
-nfs_opts: "hard,nofail,x-systemd.automount,x-systemd.mount-timeout=30"
+# `x-systemd.mount-timeout=120`, raised from 30 on 2026-08-04.
+#
+# 30s was shorter than the time TrueNAS needs to serve NFS from cold. The Rocky
+# VMs reach sshd about 8s after power-on; TrueNAS needs roughly another 90.
+# Measured during the cold-start test on svc-download:
+#
+#     09:55:29  srv-media.mount  Mounting...
+#     09:55:59  srv-media.mount  Mounting timed out (30s) — FAILED
+#     09:56:25  srv-media.mount  Mounted.
+#
+# The mount succeeded 26 seconds after giving up. This is the second line of
+# defence, not the first — TrueNAS now boots at order=1 with up=120, so the
+# mount should never be attempted against a NAS that is still starting. Both
+# exist because the ordering lives on the hypervisor, outside this repo's
+# reach, and a restored-from-backup PVE could lose it.
+#
+# `hard` is deliberate and stays: a soft mount returns EIO to a running
+# download or transcode. It is also why the shutdown ordering matters — a
+# `hard` mount whose server has vanished wedges processes in uninterruptible
+# I/O that SIGKILL cannot clear.
+nfs_opts: "hard,nofail,x-systemd.automount,x-systemd.mount-timeout=120"
 service_nfs_mounts:
   - { path: /srv/media, export: "{{ nfs_media_export }}" }
   - { path: /srv/backups, export: "{{ nfs_backups_export }}" }

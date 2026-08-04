@@ -7,7 +7,43 @@ After=vpn-netns.service
 BindsTo=vpn-netns.service
 PartOf=vpn-netns.service
 {% if item.value.media_mount %}
-RequiresMountsFor=/srv/media
+# The explicit `RequiresMountsFor=/srv/media` that used to sit here is gone,
+# but READ THIS BEFORE ASSUMING THE HARD DEPENDENCY IS GONE WITH IT — it is
+# not, and that was verified on the host rather than reasoned about:
+#
+#     systemctl show dl-sonarr.service -p Requires
+#     Requires=... vpn-netns.service srv-media.mount ...
+#
+# Quadlet DERIVES `RequiresMountsFor=` from the host path in `Volume=` below,
+# so the generated unit still hard-requires srv-media.mount. A drop-in cannot
+# undo it either: `Requires=` reset in a drop-in was tried and the mount
+# dependency came back, because RequiresMountsFor is applied as an implicit
+# dependency at unit-load time, after drop-ins are merged.
+#
+# Why that matters: a hard requirement turns a TRANSIENT mount failure into a
+# permanent one. On 2026-08-04 the mount timed out at boot, systemd marked the
+# dependency failed, and five units were left `inactive/dead` — 26 seconds
+# before the mount actually succeeded. Nothing retried them, because
+# `Restart=on-failure` has nothing to restart from when a unit never started.
+# Which five was a RACE: seven units require the mount and the two whose start
+# jobs were evaluated after the successful remount survived.
+#
+# So the real defence against that is NOT here. It is the boot ordering
+# (TrueNAS at order=1, asserted in roles/pve_mon/tasks/verify.yml) and the
+# 120s mount timeout (nfs_opts in group_vars/all/main.yml), which together
+# mean the mount should never be attempted against a NAS that is still
+# starting. See docs/plans/cold-start-resilience.md.
+#
+# What the two settings below DO buy is the other failure: the mount unit
+# succeeds but the export is not really usable, so the ExecStartPre guard
+# fails. That path does restart, and the default budget (5 attempts at 100ms)
+# would exhaust in half a second. 60 attempts at 5s covers ten minutes and
+# still ends in `failed`, which — unlike `inactive/dead` — is visible to
+# `systemctl --failed` and does fire OnFailure=.
+Wants=srv-media.automount
+After=srv-media.automount
+StartLimitIntervalSec=600
+StartLimitBurst=60
 {% endif %}
 
 [Container]

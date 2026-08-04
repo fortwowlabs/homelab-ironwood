@@ -14,7 +14,10 @@ vm_id:      132
 vm_cores:   6
 vm_memory:  16384
 vm_disk_gb: 120
-vm_startup: "order=4,up=60"
+# `down=300`: stopping ~28 rootless containers took 6m20s in the 2026-08-04
+# cold start, past the 180s `qm shutdown` default. See svc-media.yml and
+# docs/plans/cold-start-resilience.md.
+vm_startup: "order=4,up=60,down=300"
 service_guarded_egress: false
 service_requires_subids: true
 service_repo_packages: [epel-release]

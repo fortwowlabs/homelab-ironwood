@@ -15,6 +15,20 @@
 # 10G. If you see memory pressure during heavy transcodes, drop to 4g here.
 [Unit]
 Description=Jellyfin
+# Retry budget for the NFS guard in ExecStartPre below. A rootless USER unit
+# cannot order against srv-media.automount (a system unit the user manager
+# cannot see), so the guard plus this budget is the only mechanism that makes
+# a cold start survivable.
+#
+# The defaults were actively dangerous here: `Restart=on-failure` with no
+# RestartSec retries every 100ms, and the default StartLimitBurst=5 in 10s
+# means five attempts inside half a second and then permanent failure. Against
+# a TrueNAS that needs ~90s to serve NFS from cold, that is no retry at all.
+# This survived the 2026-08-04 cold start only because the user session starts
+# slowly enough that NFS had landed one second earlier. See
+# docs/plans/cold-start-resilience.md.
+StartLimitIntervalSec=600
+StartLimitBurst=30
 
 [Container]
 Image={{ media_images.jellyfin }}
@@ -32,6 +46,9 @@ Environment=JELLYFIN_PublishedServerUrl=http://{{ ansible_host }}:8096
 # findmnt proves real nfs4 is behind it.
 ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
 Restart=on-failure
+# Without this, Restart defaults to 100ms and the budget above is spent
+# instantly. 10s x 30 attempts covers a cold NAS.
+RestartSec=10
 
 [Install]
 WantedBy=default.target

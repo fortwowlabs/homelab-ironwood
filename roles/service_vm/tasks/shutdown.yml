@@ -1,0 +1,89 @@
+---
+# Give the rootless user manager long enough to stop its containers.
+#
+# WHY. `user@{{ svc_uid }}.service` is the systemd instance that owns every
+# rootless container on svc-media and svc-infra. It inherits systemd's default
+# TimeoutStopSec=90s, which is not enough to stop ~28 containers — so during
+# the 2026-08-04 cold start it timed out and SIGKILLed the entire session:
+#
+#     user@10001.service: State 'stop-sigterm' timed out. Killing.
+#     user@10001.service: Killing process 1799853 (postgres) with signal SIGKILL
+#     ... nine postgres processes across Immich, NetBox and Nextcloud ...
+#
+# They recovered — immich-db logged `database system was not properly shut
+# down; automatic recovery in progress`, replayed its WAL and came up clean.
+# That is postgres being crash-safe, not evidence that this is acceptable.
+#
+# This is the SECOND cause of that shutdown, not the first. The first was the
+# NFS server stopping before its clients (fixed by truenas_expected_startup_order
+# in group_vars/all/main.yml), which wedged processes in uninterruptible I/O
+# that SIGKILL cannot clear at all. With that fixed the containers can actually
+# stop, and this timeout is what gives them room to.
+#
+# Only meaningful where rootless containers run: svc-download's stack is system
+# units, which systemd stops through the ordinary unit path.
+
+- name: Create the rootless user manager drop-in directory
+  ansible.builtin.file:
+    path: "/etc/systemd/system/user@{{ svc_uid }}.service.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: service_requires_subids | bool
+
+- name: Allow the rootless user manager time to stop its containers
+  ansible.builtin.copy:
+    dest: "/etc/systemd/system/user@{{ svc_uid }}.service.d/10-timeout.conf"
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/service_vm/tasks/shutdown.yml).
+      # See docs/plans/cold-start-resilience.md.
+      [Service]
+      TimeoutStopSec={{ service_user_manager_stop_timeout }}
+  register: service_vm_stop_timeout_dropin
+  when: service_requires_subids | bool
+
+- name: Reload systemd after stop-timeout changes
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when:
+    - service_requires_subids | bool
+    - service_vm_stop_timeout_dropin is changed
+
+# Assert the RENDERED property, not the file. A drop-in with a typo'd section
+# header writes fine and is silently ignored, so the file existing proves
+# nothing about what systemd will do at shutdown — this is the same failure
+# shape as the boot-order comment that claimed order=1 for months.
+- name: Read the stop timeout systemd actually loaded
+  ansible.builtin.command: systemctl show user@{{ svc_uid }}.service -p TimeoutStopUSec --value
+  register: service_user_stop_timeout
+  changed_when: false
+  check_mode: false
+  when:
+    - service_requires_subids | bool
+    - not ansible_check_mode
+
+- name: Assert the rootless user manager will wait before SIGKILL
+  ansible.builtin.assert:
+    that:
+      # Non-empty distinguishes "took effect" from "could not look"; the two
+      # spellings of 90 seconds are what systemd reports for the untouched
+      # default, which is precisely the value that killed postgres.
+      - (service_user_stop_timeout.stdout | default('') | trim) | length > 0
+      - (service_user_stop_timeout.stdout | trim) not in ['90s', '1min 30s']
+    fail_msg: >-
+      user@{{ svc_uid }}.service reports
+      TimeoutStopUSec='{{ service_user_stop_timeout.stdout | default('(unread)') }}'.
+      Either the drop-in did not take effect or the property could not be read,
+      so a shutdown will SIGKILL the rootless containers — including postgres —
+      after 90 seconds. That is what happened on 2026-08-04.
+    success_msg: >-
+      Rootless user manager stop timeout is
+      {{ service_user_stop_timeout.stdout | default('') | trim }}.
+    quiet: true
+  when:
+    - service_requires_subids | bool
+    - not ansible_check_mode

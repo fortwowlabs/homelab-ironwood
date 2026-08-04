@@ -27,6 +27,10 @@
   ansible.builtin.import_tasks: onfailure.yml
   tags: [onfailure]
 
+- name: Configure clean shutdown for the rootless user manager
+  ansible.builtin.import_tasks: shutdown.yml
+  tags: [files, shutdown]
+
 - name: Verify shared VM invariants
   ansible.builtin.import_tasks: verify.yml
   when: not ansible_check_mode
