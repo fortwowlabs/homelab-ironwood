@@ -34,6 +34,65 @@ this was a test and not an outage:
   WAL and came up clean. So did netbox-db and nextcloud-db. This is crash
   safety doing its job, not evidence that hard-killing databases is fine.
 
+## Verified by a second cold start (2026-08-04, 11:18–11:28)
+
+The fixes were re-tested end to end. **Method matters here:** the first run
+used parallel `qm start`, which bypasses PVE's startup ordering entirely — so
+repeating it would never have exercised the fix. The verification run used
+`pvesh create /nodes/thurgadin/stopall` and `startall`, which is what
+`pve-guests.service` invokes on a real host shutdown and power-on, and which
+honours `order`/`up`/`down`.
+
+**Shutdown — 3 m 46 s total, against 12+ minutes.** Order was correct, and the
+`down=` values were picked up (`Stopping VM 132 (timeout = 300 seconds)`):
+
+    11:18:32  kunark            (no order)  first
+    11:21:24  w10-edgar         (no order)  forced after 180s — still no guest agent
+    11:21:39  svc-infra         (order=4)
+    11:21:51  svc-media         (order=2)
+    11:21:52  svc-download      (order=3)
+    11:22:03  convoker/TrueNAS  (order=1)   LAST
+
+| | before | after |
+|---|---|---|
+| svc-media stop | 7 m 10 s | ~12 s |
+| svc-infra stop | 6 m 20 s | ~15 s |
+| postgres SIGKILLed | 9 | **0** |
+| `nfs: server not responding` | present | **0** |
+| `user@10001.service` | timed out, entered failed mode | `Deactivated successfully` |
+
+immich-db came up with no `not properly shut down` line at all — it shut down
+cleanly rather than being crash-recovered.
+
+**Boot — TrueNAS first, with its full 120 s head start:**
+
+    11:23:15  convoker/TrueNAS (order=1)   then: Waiting for 120 seconds
+    11:25:10  svc-media    (order=2)       then: Waiting for 90 seconds
+    11:26:40  svc-download (order=3)       then: Waiting for 30 seconds
+    11:27:20  svc-infra    (order=4)
+
+The mount that started all of this now succeeds in the same second it is
+attempted, instead of timing out after 30:
+
+    11:26:49  Mounting srv-media.mount - /srv/media...
+    11:26:49  Mounted srv-media.mount - /srv/media.
+
+| | before | after |
+|---|---|---|
+| `dl-*` units up | 4 of 9 | **9 of 9** |
+| "Dependency failed" in journal | 5 | **0** |
+| endpoint probe mismatches | 0 | 0 |
+
+The only diff against the pre-test baseline was `/srv/backups` sitting at
+`active/waiting` — an automount nothing had touched yet. Confirmed benign
+rather than assumed: it mounted instantly on first access on both hosts.
+`make verify` green on all hosts.
+
+**Still true after the fix:** the two Windows guests (w10-edgar, w10-batsmores)
+have `agent: 1` configured with no guest agent running, ignore ACPI, and are
+force-stopped after their timeout. That is F6, unchanged and still out of
+scope — but it is why the shutdown takes 3 m rather than well under one.
+
 ## F1 (critical, root cause) — the NFS server has no boot order
 
 `convoker` (VM 100) is TrueNAS and serves `/srv/media` and `/srv/backups` to
