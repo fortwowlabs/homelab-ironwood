@@ -63,6 +63,38 @@
 #   the target; `git log -p` on this file is the full history. If the old
 #   image is still local the restart is immediate, and if it has been pruned
 #   the deploy re-pulls it — pruning costs rollback time, never the ability.
+#
+#   WHICH IMAGES CARRY A `# tag:`, AND WHICH DELIBERATELY DO NOT.
+#   A recorded tag is what `make image-check` follows, so recording `latest`
+#   on a service whose major version migrates its data ONE WAY turns the
+#   report into a standing recommendation to do the one thing step 4 warns
+#   against. image-check would print
+#       bump:  make image-bump REF=ghcr.io/authelia/authelia:latest
+#   with nothing distinguishing that from bumping a static file server.
+#
+#   So the tag is recorded only where a major bump cannot cost data:
+#   jdownloader, homepage, static-web-server (scan-reports), node-exporter
+#   and the Beszel AGENT — stateless, or config-file-only.
+#
+#   Deliberately untracked, because `latest` crossing a major migrates a
+#   store that cannot be migrated back: Sonarr (v3 -> v4), Jellyfin and
+#   Calibre-Web-Automated (library databases), Syncthing (v2 moved LevelDB
+#   to SQLite), the Beszel HUB and Grafana (embedded DBs), Authelia (config
+#   schema + SQLite storage), Open WebUI (DB migrations), plus the shared
+#   postgres and valkey pins.
+#
+#   Sonarr is the instructive one: LinuxServer publishes no major-version
+#   line to follow — only `latest`, `develop` and full build tags like
+#   4.0.15.2941-ls286 — so there is no tag that means "newest v4". Untracked
+#   is therefore the only honest option for it, and a build tag would have
+#   to be re-recorded on every bump to stay meaningful.
+#
+#   These read as UNTRACKED in `make image-check`, which is the honest
+#   answer: they are unmeasured, not up to date. Recording a version-line
+#   tag (`4`, `v4`, `11`) is the way to measure them without inviting a
+#   major jump — do that per image, only after confirming the tag resolves
+#   to the digest currently pinned. Never record `latest` here to silence
+#   the untracked count.
 # =========================================================================
 #
 # Download-stack source of truth. Every consumer (Quadlet, socket proxy,
@@ -91,7 +123,6 @@ download_apps:
     proxy: true
 
   sonarr:
-    # tag: latest
     image: "lscr.io/linuxserver/sonarr@sha256:24acea2956a0ccb11f103877d9f4f8576600fb34bff34820ed749c2256dab89f"
     ui_port: 8989
     volumes:
@@ -167,6 +198,7 @@ download_apps:
   # env so the container actually runs as svc_uid/svc_gid and can
   # write the host-owned /config and /output binds.
   jdownloader:
+    # tag: latest
     image: "docker.io/jlesage/jdownloader-2@sha256:47ee6c64917ca5326516ebe868714709c6bdd2e08ca0e33f6e80a943ef2019d2"
     ui_port: 5800
     volumes:
@@ -225,6 +257,7 @@ media_images:
   romm_db: "docker.io/library/mariadb@sha256:efb4959ef2c835cd735dbc388eb9ad6aab0c78dd64febcd51bc17481111890c4"
   seerr: "ghcr.io/seerr-team/seerr@sha256:c92d2dc117f62185e7bcb88cd56efd374ea79210eaf433275449e8d5988eb5a8"
   ntfy: "docker.io/binwiederhier/ntfy@sha256:a6d335064ae927c4dbef118e1fa39656b3d2e01472b2a82af5915d5cebfe815f"
+  # tag: latest
   homepage: "ghcr.io/gethomepage/homepage@sha256:a0b71c8e757298d02560186bab9fbe3fc2d375c523a62cc1019177b37e48aa28"
   # Calibre-Web Automated (crocodilestick) — LSIO-based ebook library +
   # auto-ingest. Pinned to v4.0.6.

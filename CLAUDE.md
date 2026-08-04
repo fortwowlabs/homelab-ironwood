@@ -81,6 +81,54 @@ Do not describe a change as "CI validated". Either add a `push:` trigger for
   was being attempted and why. Do not look for a way around it.
 - **Push after committing** without waiting to be asked.
 
+## Updating container images
+
+Never hand-edit a digest. Three commands do it, and the middle one exists so the
+mechanical steps cannot be done wrong:
+
+```bash
+make image-check                                       # which pins have fallen behind
+make image-bump REF=docker.io/louislam/uptime-kuma:1   # resolve + rewrite + record
+make image-digest REF=ghcr.io/owner/image:tag          # just resolve, no edit
+```
+
+`image-bump` **edits only**. It never validates, deploys or restarts — those
+stay deliberate. Follow it with `make validate`, then one VM (`make dl` /
+`make media` / `make infra`), then `make scan` to confirm the CVE count actually
+moved. The full procedure is the `BUMP PROCEDURE` block at the top of
+`inventory/group_vars/all/apps.yml`.
+
+Four things that will bite:
+
+- **`image-bump` refuses a digest pinned in more than one place.** Three
+  services share one valkey pin and two share one postgres pin, deliberately.
+  That is a decision about all of them, so it is never a mechanical edit.
+- **`image-check` only sees images with a recorded `# tag:`.** A digest carries
+  no memory of the tag it came from, and it cannot be inferred — uptime-kuma
+  publishes 376 tags and the postgres library 1385. Untracked pins are reported
+  separately because an unbumped pin is *unmeasured*, not up to date. Coverage
+  accrues as images are bumped; do not backfill by guessing.
+- **A guessed tag is worse than no tag.** If `latest` does not resolve to the
+  pinned digest, that does not mean the image is behind — it may be pinned to a
+  version line on purpose (postgres `18-alpine`, Immich `v3.0.3`). Recording
+  `latest` there would invite a major-version jump. Only record a tag you have
+  confirmed resolves to the digest currently pinned.
+- **`latest` resolving correctly is not sufficient either.** A recorded tag is
+  what `image-check` follows, so `# tag: latest` on a service whose major
+  version migrates its data one way makes the report a standing recommendation
+  to do the thing the next bullet warns about — and it prints the same
+  one-line `make image-bump REF=…:latest` for Authelia as for a static file
+  server. Record a tag only where a major bump cannot cost data, or where a
+  version line exists to follow. Sonarr, Jellyfin, Calibre-Web, Syncthing,
+  Grafana, Authelia, Open WebUI and the Beszel hub are deliberately untracked
+  for this reason; the full list and the reasoning are in the `BUMP PROCEDURE`
+  block at the top of `apps.yml`. Untracked reads as *unmeasured*, which is
+  the honest answer — never record `latest` to make the untracked count fall.
+- **A bad digest is safe; a bad *version* is not.** The pre-pull means an
+  unreachable digest aborts the deploy with the old container still serving. It
+  does not protect you from an image that starts fine and migrates a database
+  one way. Check what the service persists before bumping it.
+
 ## Verification means the application works
 
 A container that is `up`, a unit that is `active`, and a Caddy smoke test

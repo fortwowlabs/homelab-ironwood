@@ -98,6 +98,7 @@ mullvad_dns: "10.64.0.1"
 # monitoring setup". Until filled in, every agent skips itself with a
 # WARNING instead of failing the deploy (matching the ntfy_url pattern).
 # Bumping this follows the BUMP PROCEDURE at the top of apps.yml.
+# tag: latest
 beszel_agent_image: "docker.io/henrygd/beszel-agent@sha256:8874e2c53f9de5e063a6a80d6b617e20fa593ac5dc4eb4c6ce1f912f510f38f8"
 beszel_agent_enabled: >-
   {{ (vault_beszel_token | default('')) | length > 0
@@ -113,6 +114,7 @@ beszel_agent_enabled: >-
 # prometheus.yml.j2). Each exporter is reachable ONLY from svc-infra's IP
 # (firewalld single-source rule on media/infra, an nftables input rule on
 # download's host backstop).
+# tag: latest
 node_exporter_image: "docker.io/prom/node-exporter@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0"
 
 # --- Recyclarr (v6, download jail) -----------------------------------------

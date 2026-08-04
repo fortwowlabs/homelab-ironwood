@@ -39,7 +39,8 @@
 infra_apps:
   uptime-kuma:
     # tag: 1
-    image: "docker.io/louislam/uptime-kuma@sha256:91e963bfda569ba115206e843febb446f473ab525add4e08b2b9e3beffa16985"
+    # was 2026-08-03: sha256:91e963bfda569ba115206e843febb446f473ab525add4e08b2b9e3beffa16985
+    image: "docker.io/louislam/uptime-kuma@sha256:3d632903e6af34139a37f18055c4f1bfd9b7205ae1138f1e5e8940ddc1d176f9"
     ui_port: 3001
     volumes:
       - /opt/homelab/appdata/uptime-kuma/data:/app/data:Z
@@ -206,7 +207,9 @@ infra_apps:
   # reports are written homelab-owned under a 0700 /opt/homelab.
   # The mount is :ro because nothing here should ever write to it.
   scan-reports:
-    image: "ghcr.io/static-web-server/static-web-server@sha256:6acea6260b14e08dda986361e42640082fbfaab8d88c327de532bb13a3b22994"
+    # tag: latest
+    # was 2026-08-03: sha256:6acea6260b14e08dda986361e42640082fbfaab8d88c327de532bb13a3b22994
+    image: "ghcr.io/static-web-server/static-web-server@sha256:2c1a7c3e0feaea5859307403b74e1c575f3ec1499094fc077344173d11abaae2"
     ui_port: 8085
     container_port: 8080
     user: "0"
