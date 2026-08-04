@@ -785,6 +785,16 @@
                       | selectattr('value', 'match', '\$argon2')
                       | map(attribute='key') | list)
          | sort }}
+    # A SHA-256 of each account's argon2 hash, truncated. Safe to print: it is
+    # a digest of a digest, and the argon2 hash is already not the password.
+    # Printing them is the point — a bare "two accounts share a hash" leaves
+    # the operator diffing the vault by eye, while these name the pair.
+    infra_authelia_hash_fingerprints: >-
+      {{ dict(authelia_users | map(attribute='name') | list
+              | zip(authelia_users | map(attribute='name')
+                    | map('extract', vault_authelia_password_hashes | default({}))
+                    | map('string') | map('hash', 'sha256')
+                    | map('regex_replace', '^(.{12}).*$', '\1') | list)) }}
   no_log: true
   diff: false
 
@@ -800,6 +810,35 @@
       would create accounts that cannot log in.
     success_msg: >-
       All {{ authelia_users | length }} Authelia accounts have a password hash.
+    quiet: true
+
+# "Every account has a hash" is not the same claim as "every account has its
+# OWN hash", and the gap between them was live for five days. `admin` and
+# `brandon` shared a single placeholder hash from 2026-07-30 to 2026-08-04:
+# both are in `admins`, the only group with an access_control rule, so two
+# accounts with full access to thirteen protected services — including two
+# remote shells — held one credential between them. The assert above passed
+# the whole time, because a shared hash satisfies it perfectly.
+#
+# A shared hash is never deliberate here. authelia-users.yml.j2 renders one
+# account per entry and Authelia has no notion of a shared login, so identical
+# hashes mean either a copy-paste or a vault edit that was started and not
+# finished — both of which end with one password opening two accounts.
+- name: Require every Authelia account to have its own distinct hash
+  ansible.builtin.assert:
+    that:
+      - (infra_authelia_hash_fingerprints.values() | unique | length)
+        == (authelia_users | length)
+    fail_msg: >-
+      Authelia accounts share a password hash — one password would open more
+      than one account. Fingerprints (SHA-256 of each argon2 hash, truncated;
+      matching values are the accounts that share one):
+      {{ infra_authelia_hash_fingerprints | dictsort | map('join', '=') | join(', ') }}.
+      Give each account its own hash in {{ authelia_hashes_var }} with
+      `make vault-edit`, then re-deploy — editing the vault alone changes
+      nothing on this host, because Authelia reads the rendered users.yml.
+    success_msg: >-
+      All {{ authelia_users | length }} Authelia accounts have distinct hashes.
     quiet: true
 
 # no_log/diff:false + 0600: this template embeds every account's password
