@@ -216,6 +216,60 @@ seconds. `disk-alert.sh` is deliberately left alone.
   (`WARN: no efidisk configured! Using temporary efivars disk`), carried over
   from `cold-start-resilience.md`.
 
+## Verification
+
+Deployed 2026-08-04. All four targets report `changed=0` on a re-run from a
+clean tree (`make pve` / `media` / `dl` / `infra`), and `make verify` is green
+on all five hosts.
+
+**The probe, in all four directions**, exercised against the live hypervisor
+*before* the guard was deployed — a guard only ever observed in the healthy
+state is a guard nobody can tell is broken:
+
+| scenario | verdict | bounded at |
+|---|---|---|
+| storage healthy | `ok` | 0.6s |
+| port closed, host answers ICMP | `down` | 0.6s |
+| bogus VMID 999 | **`inconclusive`** | 0.5s |
+| unroutable IP | `down` | 7.6s |
+
+The third row is the one worth keeping: a VMID the guard cannot read comes
+back `inconclusive`, not `down` and not `ok`. Worst case is 7.6s against
+`TimeoutStartSec=120`.
+
+**The alert path, read back out of ntfy** rather than inferred from an exit
+code — the rule CLAUDE.md sets for alerting. The deployed script was run with
+two constants changed (probe port, to force a verdict without touching
+TrueNAS; state dir, so live dedupe state stayed clean) and both transitions
+were then read back off the topic:
+
+```
+[16:36:56] priority=5 tags=rotating_light,floppy_disk
+  TITLE: STORAGE DOWN: NFS on thurgadin
+  storage VM 100 is running and 192.168.1.20 answers ICMP, but nothing is
+  listening on 2050. NFS is not being served; clients will wedge.
+
+[16:36:59] priority=3 tags=floppy_disk
+  TITLE: Storage recovered on thurgadin
+  NFS on 192.168.1.20:2049 is answering again.
+```
+
+The live state file was confirmed untouched by the exercise.
+
+**node_exporter**, measured from each host's own loopback:
+
+| host | filesystem series | `/srv` NFS series |
+|---|---|---|
+| svc-media | 3 (`/`, `/boot`, `/boot/efi`) | **0** |
+| svc-download | 16 (incl. container overlays) | **0** |
+| svc-infra | 3 | **0** |
+
+A caution earned the hard way during this very check: measuring `:9100` from
+the *hypervisor* returns zero series for everything, because firewalld admits
+only svc-infra. That reads exactly like a successful exclusion and is in fact
+"could not look". Scrape node_exporter from the host itself or from svc-infra,
+never from a third machine.
+
 ## Reproducing this test
 
 ```bash
