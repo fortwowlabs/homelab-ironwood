@@ -1,7 +1,23 @@
 ---
 name: Validate
 
+# This repository ff-merges locally and pushes straight to `main`, so a
+# `pull_request` trigger alone meant CI had never run — not once, zero workflow
+# runs, zero PRs. Every gate that claimed to be enforced was in fact enforced
+# only by whoever remembered to type `make validate`.
+#
+# `push` to main is what makes it real. It runs AFTER the merge rather than
+# before, so it cannot block a bad change from landing — local `make validate`
+# is still the gate that fires first and most often. What it adds is a second
+# opinion from a machine that is not the author's workstation, and one thing
+# the workstation physically cannot do: `systemd-analyze verify` against the
+# unit files. tests/validate_systemd_units.py downgrades itself to static
+# checks on macOS, so until now no systemd had ever parsed a unit in this repo.
+#
+# The `pull_request` trigger stays for the day this repo starts using them.
 on:
+  push:
+    branches: [main]
   pull_request:
 
 permissions:
@@ -39,6 +55,13 @@ jobs:
 
       - name: Install ShellCheck
         run: sudo apt-get install --yes shellcheck
+
+      # systemd-analyze is what this job can do that the macOS workstation
+      # cannot. tests/validate_systemd_units.py detects it via shutil.which and
+      # switches from static text checks to actually parsing the units; without
+      # it, the run here would be identical to the local one and buy nothing.
+      - name: Install systemd-analyze
+        run: sudo apt-get install --yes systemd
 
       # Not in Ubuntu's archive, so it comes from the upstream release —
       # pinned by version and verified by checksum, the same treatment the

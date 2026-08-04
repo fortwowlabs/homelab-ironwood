@@ -59,16 +59,33 @@ Twenty-two merged branches accumulated because the workflow had no delete step.
 They cost nothing but they hide whether anything is genuinely in flight. Delete
 the branch as part of merging, not as an occasional cleanup.
 
-## CI does not gate anything right now
+## CI runs after the merge, not before it
 
-`.github/workflows/validate.yml` triggers on `pull_request` only. This repo
-ff-merges locally and pushes straight to `main`, so **CI has never run** — zero
-workflow runs, zero PRs. `make validate` on the workstation is the only gate
-that has ever fired.
+`.github/workflows/validate.yml` triggers on `push` to `main` as well as on
+`pull_request` (added 2026-08-04). Until then it triggered on `pull_request`
+only, and because this repo ff-merges locally and pushes straight to `main`, CI
+had **never run** — zero workflow runs, zero PRs, every gate enforced only by
+whoever remembered to type `make validate`.
 
-Do not describe a change as "CI validated". Either add a `push:` trigger for
-`main`, or route changes through PRs — until one of those happens, local
-`make validate` is the whole story.
+Be precise about what this does and does not buy.
+
+**It does not gate.** The run happens after the merge, so it cannot stop a bad
+change from landing on `main`. Local `make validate` is still the gate that
+fires first and most often, and it is still the one to run before committing —
+"CI will catch it" is not a reason to skip it.
+
+**What it adds** is a second opinion from a machine that is not the author's
+workstation, and one check the workstation physically cannot perform:
+`systemd-analyze verify` against the unit files. `tests/validate_systemd_units.py`
+switches from static text matching to real parsing when `systemd-analyze` is on
+PATH, which on macOS it never is — so before this, no systemd had ever parsed a
+unit in this repo. A unit that is syntactically wrong in a way text matching
+cannot see would have deployed and failed on the host.
+
+So: a red CI run on `main` means something already merged is broken and needs a
+follow-up commit. Treat it as an alarm, not as a gate — and if it stays red,
+that is the same "nobody looks at it" failure this repo worries about
+everywhere else.
 
 ## Standing rules
 
