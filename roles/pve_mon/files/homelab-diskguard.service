@@ -5,5 +5,9 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# See homelab-diskalert.service for the reasoning. `zpool list` blocks in the
+# kernel while a pool is resilvering, suspended or waiting on a failing disk —
+# which is precisely when this alarm is supposed to fire.
+TimeoutStartSec=300
 EnvironmentFile=/etc/homelab-notify.env
 ExecStart=/usr/local/sbin/pve-diskguard.sh

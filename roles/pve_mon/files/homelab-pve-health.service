@@ -5,5 +5,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# See homelab-diskalert.service for the reasoning. This one is the hypervisor's
+# dead-man's switch: healthchecks.io only alarms when the daily ping stops, so a
+# run wedged in `activating` on zpool/systemctl is the one hang that produces
+# neither a local failure nor a missed ping in time to matter. The timeout turns
+# it into a real failure, which both OnFailure= and the missed ping then report.
+TimeoutStartSec=300
 EnvironmentFile=/etc/homelab-healthchecks.env
 ExecStart=/usr/local/sbin/pve-health.sh

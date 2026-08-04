@@ -5,5 +5,11 @@ After=vpn-netns.service
 
 [Service]
 Type=oneshot
+# See homelab-diskalert.service for why Type=oneshot needs this: a unit stuck
+# in `activating` is not `failed`, so nothing alerts on it. Here that would be
+# worse than elsewhere — a hung canary is the jail's leak detector reporting
+# nothing while looking fine. `podman inspect` blocks indefinitely against a
+# wedged podman socket, and the script calls it once per catalog container.
+TimeoutStartSec=300
 EnvironmentFile=/etc/homelab-notify.env
 ExecStart=/usr/local/sbin/leak-canary.sh

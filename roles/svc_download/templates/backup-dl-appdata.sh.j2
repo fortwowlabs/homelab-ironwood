@@ -11,7 +11,14 @@ set -euo pipefail
 
 DEST=/srv/backups/{{ inventory_hostname }}
 STAMP=$(date +%F)
-NTFY="${NTFY_URL}/${NTFY_TOPIC}"
+# NTFY_ALERT_TOPIC, not NTFY_TOPIC. This script publishes exactly one message —
+# on_err's "backup FAILED" at priority high — and nothing on the success path
+# (that is a logger line). So the whole URL moves to the alert topic rather than
+# only a failure branch: there is no routine traffic here to keep on the muted
+# homelab-deploy feed. The fallback covers a host whose notify.env predates
+# NTFY_ALERT_TOPIC.
+topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC}}"
+NTFY="${NTFY_URL}/${topic}"
 AUTH=()
 if [[ -n "${NTFY_TOKEN:-}" ]]; then
     AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")

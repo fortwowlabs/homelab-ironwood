@@ -12,6 +12,13 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# See homelab-diskalert.service for the reasoning. Short because nothing here
+# should be slow: bringing wg0 up needs no connectivity (WireGuard handshakes
+# lazily) and the veth setup is local. A wedged `ip`/`wg` netlink call would
+# otherwise leave this `activating` indefinitely, and every dl-* container
+# BindsTo= it — so the whole download stack would hang waiting on a unit that
+# systemd does not consider failed.
+TimeoutStartSec=120
 RemainAfterExit=yes
 ExecStart=/usr/local/sbin/vpn-netns-up.sh
 ExecStop=/usr/local/sbin/vpn-netns-down.sh

@@ -76,6 +76,30 @@
       loop_control:
         label: "{{ item.item.key }}"
 
+    # THE POSITIVE CONTROL for the fail-closed assertion further down.
+    #
+    # That assertion is "every dl-* unit is not active after the namespace
+    # stops", and on its own it is satisfied by a stack that was already down,
+    # or by unit names that do not exist — systemd reports an unknown unit as
+    # inactive, so a renamed catalog entry would pass the drill while proving
+    # nothing propagated. The claim only means something for units that were
+    # demonstrably running a moment ago.
+    #
+    # Checked here rather than after the fact so a meaningless drill does not
+    # get to disrupt anything first.
+    - name: Require the drill to have workloads to take down
+      ansible.builtin.assert:
+        that:
+          - >-
+            download_pre_drill_state.results
+            | selectattr('stdout', 'equalto', 'active') | list | length > 0
+        fail_msg: >-
+          No catalog dl-* unit was active before the drill, so stopping the VPN
+          namespace cannot demonstrate fail-closed propagation — the assertion
+          would pass over an empty set. Start the download stack and re-run, or
+          find out why it is down.
+        quiet: true
+
     - name: Stop the VPN namespace
       ansible.builtin.systemd:
         name: vpn-netns.service
@@ -87,7 +111,13 @@
       loop_control:
         label: "{{ item.key }}"
       register: download_stopped_state
-      failed_when: download_stopped_state.rc == 0
+      # Empty stdout as well as rc 0: `systemctl is-active` always names a state
+      # when it ran at all, so nothing on stdout means the command itself never
+      # ran (missing binary, broken argv) and its nonzero exit says nothing about
+      # whether the workload stopped. Same fail-open shape as bare `rc != 0`.
+      failed_when: >-
+        download_stopped_state.rc == 0
+        or (download_stopped_state.stdout | trim) == ''
       changed_when: false
 
     - name: Inject a drill failure for recovery testing

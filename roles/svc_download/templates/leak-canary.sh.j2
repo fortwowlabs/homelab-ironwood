@@ -29,7 +29,15 @@ set -uo pipefail
 
 STATE_DIR=/var/lib/leak-canary
 FLAG="$STATE_DIR/tripped"
-NTFY="${NTFY_URL}/${NTFY_TOPIC}"
+# NTFY_ALERT_TOPIC, not NTFY_TOPIC. NTFY_TOPIC is homelab-deploy — the routine
+# feed that carries every deploy notice and is subscribed muted. This script
+# publishes the loudest message in the estate ("LEAK: download jail — download
+# stack STOPPED", priority urgent) and it was going to the muted topic: ntfy
+# would return 200, the journal would record a successful send, and the phone
+# would stay silent. The fallback exists only so a host whose
+# /etc/homelab-notify.env predates NTFY_ALERT_TOPIC still delivers somewhere.
+topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC}}"
+NTFY="${NTFY_URL}/${topic}"
 AUTH=()
 if [[ -n "${NTFY_TOKEN:-}" ]]; then
     AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")

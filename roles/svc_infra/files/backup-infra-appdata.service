@@ -6,6 +6,12 @@ RequiresMountsFor=/srv/backups
 
 [Service]
 Type=oneshot
+# See homelab-diskalert.service for the reasoning. tar and pg_dumpall write into
+# /srv/backups, a `hard` NFS mount: a NAS reboot mid-write parks them in
+# uninterruptible sleep and the unit sits in `activating` forever, so backups
+# stop with `systemctl --failed` still empty. Generous next to
+# homelab-backups-fresh's 600s because that unit only WALKS this tree.
+TimeoutStartSec=900
 # Run as the homelab user (uid = svc_uid = 10001), like backup-media.service:
 # `podman unshare` maps any container-subuid-owned appdata, and `podman exec`
 # for pg_dumpall needs the homelab rootless runtime (XDG_RUNTIME_DIR), which

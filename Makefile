@@ -115,6 +115,10 @@ validate-provisioning:
 validate-systemd:
 	$(PYTHON) tests/validate_systemd_units.py
 	$(PYTHON) tests/validate_onfailure.py
+# Sits with the OnFailure gate because it guards the same thing from the other
+# end: validate_onfailure.py checks that a failure reaches the alerter, and this
+# checks that what the alerter publishes reaches a topic somebody reads.
+	$(PYTHON) tests/validate_alert_topics.py
 
 validate-secrets:
 	$(PYTHON) tests/validate_secrets.py

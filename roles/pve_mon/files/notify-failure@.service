@@ -7,5 +7,11 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
+# See homelab-diskalert.service for the reasoning. This is the alerter itself,
+# so a hang here is the worst version of that failure: every OnFailure= on the
+# host routes through this unit, and one wedged instance in `activating` means
+# the failure it was reporting is never reported. Short because the script's own
+# curl caps at 10s with two retries and journalctl is local.
+TimeoutStartSec=60
 EnvironmentFile=/etc/homelab-notify.env
 ExecStart=/usr/local/sbin/notify-failure.sh %i

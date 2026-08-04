@@ -5,6 +5,13 @@ RequiresMountsFor=/srv/backups
 
 [Service]
 Type=oneshot
+# See homelab-diskalert.service for the reasoning. The largest of the three
+# backup units — mariadb-dump plus every appdata and Minecraft world tar — all
+# written to /srv/backups over a `hard` NFS mount, where a NAS reboot mid-write
+# parks the process in uninterruptible sleep and leaves the unit `activating`
+# rather than `failed`. Triple homelab-backups-fresh's 600s: that unit only
+# WALKS this tree, and this one writes the bulk of what is in it.
+TimeoutStartSec=1800
 User=homelab
 Group=homelab
 Environment=XDG_RUNTIME_DIR=/run/user/{{ svc_uid }}

@@ -6,5 +6,11 @@ RequiresMountsFor=/srv/backups
 
 [Service]
 Type=oneshot
+# See homelab-diskalert.service for the reasoning. tar writes into /srv/backups,
+# a `hard` NFS mount: a NAS reboot mid-archive parks tar in uninterruptible
+# sleep and the unit sits in `activating` forever — backups silently stop while
+# `systemctl --failed` stays empty. Generous next to homelab-backups-fresh's
+# 600s because that unit only WALKS this tree and this one writes to it.
+TimeoutStartSec=900
 EnvironmentFile=/etc/homelab-notify.env
 ExecStart=/usr/local/sbin/backup-dl-appdata.sh

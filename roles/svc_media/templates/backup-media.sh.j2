@@ -22,7 +22,12 @@ set -euo pipefail
 STAMP=$(date +%F)
 DB_DEST=/srv/backups/{{ inventory_hostname }}/romm-db
 APP_DEST=/srv/backups/{{ inventory_hostname }}/appdata
-NTFY="${NTFY_URL}/${NTFY_TOPIC}"
+# NTFY_ALERT_TOPIC, not NTFY_TOPIC. The only curl in this script is on_err's
+# "backup FAILED" at priority high; success is a logger line and publishes
+# nothing. With no routine traffic to keep on the muted homelab-deploy feed the
+# URL moves wholesale. Mirrors backup-dl-appdata.sh and backup-infra-appdata.sh.
+topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC}}"
+NTFY="${NTFY_URL}/${topic}"
 AUTH=()
 if [[ -n "${NTFY_TOKEN:-}" ]]; then
     AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")

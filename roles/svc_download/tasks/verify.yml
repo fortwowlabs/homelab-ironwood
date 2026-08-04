@@ -25,6 +25,69 @@
   changed_when: false
   failed_when: download_dnf_makecache_timer.stdout != "masked"
 
+# THE POSITIVE CONTROL for the egress fence below, and the reason it needs one.
+#
+# The fence asserts `rc != 0` on a curl to 1.1.1.1, and reads that as proof the
+# nftables backstop dropped it. But EVERY nonzero exit satisfies that: curl not
+# installed (127), a flag this curl build does not know (2), the argv wrong, the
+# module erroring before it ever ran. "curl is missing" would read as "the
+# firewall works" — the same shape as the port sweep that reported one open port
+# where eleven were open, and it fails in the safe-looking direction.
+#
+# The control is the LAN ntfy on the media host. host-backstop.nft opens exactly
+# that host and port in the output chain, deliberately, so the leak canary's
+# alert can leave the init namespace — it is the one destination the init ns is
+# SUPPOSED to reach, and ntfy answers /v1/health unauthenticated. Same binary,
+# same flags, same namespace as the fence; only the URL differs. If this cannot
+# get out, the fence's silence means nothing.
+#
+# The fence's own 1.1.1.1 stays numeric for a related reason: the resolver is
+# dnsmasq on the media host and this table drops DNS, so a hostname there would
+# fail to resolve and pass the fence without the firewall doing anything.
+- name: Probe a permitted destination with the egress fence's own curl
+  ansible.builtin.command:
+    argv:
+      - timeout
+      - --kill-after=2
+      - "10"
+      - curl
+      - -4
+      - --insecure
+      - --silent
+      - --show-error
+      - --output
+      - /dev/null
+      - --connect-timeout
+      - "2"
+      - --max-time
+      - "5"
+      - "{{ ntfy_url }}/v1/health"
+  register: download_host_egress_control
+  changed_when: false
+  # Never fail here: the assert below owns the message, so "curl exited 127"
+  # arrives as an explanation rather than a bare nonzero rc.
+  failed_when: false
+  # Read-only, and the assert below dereferences its rc — under --check a
+  # skipped command would leave that undefined and take the assert with it.
+  check_mode: false
+
+- name: Require the egress probe to reach what the backstop permits
+  ansible.builtin.assert:
+    that:
+      # The accept for this destination is only rendered when ntfy_url points at
+      # the media host (see host-backstop.nft.j2). Pointed anywhere else it is
+      # not a permitted destination and cannot serve as the control.
+      - (ntfy_url | urlsplit('hostname')) == hostvars[media_host].ansible_host
+      - download_host_egress_control.rc == 0
+    fail_msg: >-
+      The egress probe could not reach {{ ntfy_url }}/v1/health
+      (rc={{ download_host_egress_control.rc | default('unknown') }}), which the
+      host backstop explicitly permits so the leak canary can alert. Either that
+      path is broken — in which case leak alerts are not leaving this host — or
+      curl/timeout is missing and the fence below proves nothing about the
+      firewall. Fix this before believing the next task.
+    quiet: true
+
 - name: Verify numeric HTTPS egress from the host remains fenced
   ansible.builtin.command:
     argv:
@@ -46,6 +109,36 @@
   register: download_host_egress
   changed_when: false
   failed_when: download_host_egress.rc == 0
+
+# Three call sites open a temporary hole in the backstop for DNS and 80/443 —
+# service_vm packages.yml, service_vm scan.yml, svc_download images.yml — and
+# each closes it from an `always:` block. That covers a task failing. It does not
+# cover the process being killed: homelab-scan@.service carries
+# TimeoutStartSec=3600, and when systemd hits it ansible-playbook takes SIGTERM
+# and no always: block runs. The window then stays open with the state file as
+# the only trace, and nothing looked at it.
+#
+# So `make verify` looks. The state file lives on /run (tmpfs), so a reboot
+# clears it and this cannot report a stale window from a previous boot — the
+# corollary being that a reboot also silently closes a hole nobody noticed.
+- name: Check whether a maintenance egress window was left open
+  ansible.builtin.stat:
+    path: /run/homelab-maintenance-egress.open
+  register: download_maintenance_egress_window
+  check_mode: false
+
+- name: Assert the maintenance egress window is closed
+  ansible.builtin.assert:
+    that:
+      - not download_maintenance_egress_window.stat.exists
+    fail_msg: >-
+      /run/homelab-maintenance-egress.open exists: the download jail's nftables
+      backstop is still carrying the temporary DNS and 80/443 accepts that
+      maintenance opens. The init namespace has general internet egress right
+      now, which is the exact condition the backstop exists to prevent. Close it
+      with `/usr/local/sbin/homelab-maintenance-egress close` and find out which
+      run was interrupted — a killed scan or package task is the usual cause.
+    quiet: true
 
 - name: Verify every catalog container is in the VPN namespace
   ansible.builtin.shell: |
