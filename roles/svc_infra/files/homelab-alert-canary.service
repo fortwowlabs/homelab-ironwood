@@ -1,0 +1,18 @@
+[Unit]
+Description=Weekly delivery canary for the homelab-alerts ntfy topic
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Type=oneshot disables the start timeout by default; see
+# homelab-diskalert.service. It matters here as much as anywhere: this unit
+# curls a remote HTTP service twice, and a canary wedged in `activating` is not
+# `failed` — so OnFailure= would never fire, `systemctl --failed` would stay
+# empty, and the topic would go quiet with every indicator green. That is the
+# precise failure this whole unit exists to make impossible, so it must not be
+# the way the unit itself breaks. Two curls at --max-time 15 and --max-time 10,
+# plus retries and three 2s sleeps, is well under a minute of real work.
+TimeoutStartSec=120
+EnvironmentFile=/etc/homelab-notify.env
+ExecStart=/usr/local/sbin/homelab-alert-canary.sh

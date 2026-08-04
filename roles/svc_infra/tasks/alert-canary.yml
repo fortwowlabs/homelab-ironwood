@@ -1,0 +1,54 @@
+---
+# The weekly proof that homelab-alerts still delivers.
+#
+# It lives on svc-infra rather than svc-media for three reasons, and the first
+# is the one that matters:
+#
+#   1. svc-media IS the ntfy host. A canary published there would succeed over
+#      loopback even if svc-media's firewall stopped accepting ntfy traffic
+#      from the rest of the estate — that is, in the exact scenario where every
+#      OTHER host's alerts have gone silent. Publishing from svc-infra crosses
+#      the LAN the same way a real disk or unit-failure alert from svc-infra
+#      does, so the path under test is a path something else depends on.
+#   2. svc-infra is where the unattended work runs (nightly verify at 04:00,
+#      backup freshness at 04:40, the scan at 05:30). Every one of those
+#      reports a failure by publishing to the alert topic from this host, so
+#      this canary covers the delivery path those three already rely on.
+#   3. If svc-media or ntfy is dead the canary simply never arrives, which is
+#      the signal we want. That case is separately covered from outside the
+#      house by svc-media's healthchecks.io heartbeat.
+#
+# Failure handling is deliberately three-layered, because the alerter cannot be
+# trusted to report its own alerter being down: the script logs to syslog (the
+# durable record), exits nonzero so the unit lands in `failed` — which
+# homelab-failedunits.service and `make verify` both see locally without
+# needing ntfy at all — and the OnFailure drop-in (svc-infra's
+# onfailure_units_extra) tries ntfy as well, on the chance that only the topic
+# and not the server is broken.
+- name: Render the alert-topic delivery canary
+  ansible.builtin.template:
+    src: alert-canary.sh.j2
+    dest: /usr/local/sbin/homelab-alert-canary.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the alert-topic canary units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - homelab-alert-canary.service
+    - homelab-alert-canary.timer
+  register: infra_alert_canary_units
+
+- name: Arm the weekly alert-topic canary
+  ansible.builtin.systemd:
+    name: homelab-alert-canary.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ infra_alert_canary_units is changed }}"
+  when: not ansible_check_mode

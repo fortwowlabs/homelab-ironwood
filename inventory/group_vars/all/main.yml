@@ -483,9 +483,11 @@ caddy_services:
 #
 # calibre-web is excluded for a different reason and it is not a good one: it
 # is loopback-only on svc-media, so unlike every name below it has no direct
-# IP:port escape hatch if forward-auth misbehaves. Its default admin/admin123
-# is still live and still a manual first-login fix — see
-# docs/automation-opportunities.md.
+# IP:port escape hatch if forward-auth misbehaves. Its shipped admin/admin123
+# stays a manual first-login fix on any rebuild — automating it means writing
+# into its SQLite app.db at deploy time. On THIS instance the password was
+# changed by hand on 2026-08-03 and the nightly credential canary confirms the
+# default is rejected. See docs/automation-opportunities.md §2.3.
 #
 # Machine-to-machine traffic is unaffected: every such path in this estate
 # already bypasses Caddy entirely (ntfy publishers, Beszel agents, Prometheus

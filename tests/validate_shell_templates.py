@@ -37,6 +37,7 @@ TEMPLATES = (
     "roles/pve_mon/templates/zed-ntfy.sh.j2",
     "roles/svc_media/templates/certwatch.sh.j2",
     "roles/svc_media/templates/heartbeat.sh.j2",
+    "roles/svc_infra/templates/alert-canary.sh.j2",
 )
 
 # Templates that render a DIFFERENT script depending on the host, rendered a

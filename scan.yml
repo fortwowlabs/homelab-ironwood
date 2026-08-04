@@ -371,12 +371,27 @@
                   | list | length == 0) }}
 
     # Published on EVERY run, to the muted informational topic. This is not
-    # chatter: docs/automation-opportunities.md records as an accepted risk that
-    # no scheduled job publishes to ntfy at all, so a broken delivery path —
-    # wrong topic, an ACL, a rejected token — produces silence indistinguishable
-    # from good news. The heartbeat only probes ntfy's /v1/health, which proves
-    # its HTTP server answers, not that a message can be published. This does,
-    # nightly, and its absence is therefore itself a signal.
+    # chatter: it is the nightly canary for delivery to ntfy_topic
+    # (homelab-deploy) specifically. The heartbeat only probes ntfy's
+    # /v1/health, which proves its HTTP server answers, not that a message can
+    # be published; this proves publishing to that topic works, so its absence
+    # is itself a signal.
+    #
+    # NARROWED 2026-08-04. This comment used to claim it closed the accepted
+    # risk in docs/automation-opportunities.md about no scheduled job
+    # publishing to ntfy at all. It does not, and the gap is the entire reason
+    # there are two topics: this line posts to ntfy_topic, which is subscribed
+    # MUTED. Only the escalation below routes to ntfy_alert_topic
+    # (homelab-alerts), and an escalation by definition happens only when
+    # something is already wrong — so nothing scheduled ever exercised the one
+    # topic that is allowed to wake somebody.
+    #
+    # It looked covered because it accidentally was: Calibre-Web accepted its
+    # shipped default, so the escalation below fired every single night. That
+    # was a symptom being read as a heartbeat. The password was changed on
+    # 2026-08-03 and homelab-alerts went to zero scheduled traffic the same
+    # night. It has its own canary now, weekly and independent of this play —
+    # roles/svc_infra/files/homelab-alert-canary.timer.
     - name: Publish the routine scan summary
       ansible.builtin.include_role:
         name: notify

@@ -21,6 +21,10 @@
   ansible.builtin.import_tasks: verify-runner.yml
   tags: [verifyrunner]
 
+- name: Install the weekly alert-topic delivery canary
+  ansible.builtin.import_tasks: alert-canary.yml
+  tags: [alertcanary]
+
 - name: Verify infra services
   ansible.builtin.import_tasks: verify.yml
   when: not ansible_check_mode

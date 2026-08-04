@@ -67,6 +67,15 @@ ALERT_TEMPLATES = (
     "roles/svc_download/templates/leak-canary.sh.j2",
     "roles/svc_infra/templates/backup-infra-appdata.sh.j2",
     "roles/svc_media/templates/backup-media.sh.j2",
+    # Publishes at `min`, so the severity rules below pass it without looking
+    # at its topic — and yet it is the one script whose entire purpose is the
+    # alert topic. It is listed because the discovery sweep at the bottom of
+    # main() would otherwise fail it for setting a Priority header while
+    # unregistered, and because an alerter absent from this list is an alerter
+    # whose routing nobody is checking. Its own routing is enforced in the
+    # script instead: it refuses to fall back to NTFY_TOPIC, which every other
+    # template here is allowed to do.
+    "roles/svc_infra/templates/alert-canary.sh.j2",
 )
 
 # Where the discovery sweep looks for an alerter nobody registered above.

@@ -92,16 +92,24 @@ instead.
 **Risk: low.** Env-var only. **Recommendation: do it**, and it closes a small
 security hole rather than merely saving a click.
 
-### 2.3 Calibre-Web's `admin` / `admin123`
+### 2.3 Calibre-Web's `admin` / `admin123` — CHANGED BY HAND 2026-08-03
 
-Same shape, worse: this default is live right now and widely known. Calibre-Web
-has no env-var override, so automating it means writing to its SQLite `app.db`
-at deploy time.
+Same shape, worse: this default was live and widely known, and for a long time
+it was the most exposed default in the estate. Calibre-Web has no env-var
+override, so automating it means writing to its SQLite `app.db` at deploy time.
 
 **Risk: medium** — direct DB manipulation is fragile across upgrades.
-**Recommendation: change it by hand** at first login (it is one step), and do
-*not* automate. Flagged here because it is the most exposed default in the
-estate, not because it should be scripted.
+**Recommendation, unchanged and still correct: change it by hand** at first
+login (it is one step), and do *not* automate. That reasoning does not expire
+with the fix — a rebuilt Calibre-Web ships the same default again, and the
+right answer will still be 30 seconds in its own UI rather than a deploy-time
+write into SQLite.
+
+**Done on 2026-08-03**, by hand, in the UI. Confirmed independently rather than
+assumed: the nightly credential canary now reports
+`default rejected (HTTP 200, login form re-rendered)` for calibre-web, which is
+the measured rejection signature and not merely the absence of an acceptance.
+See `roles/service_vm/templates/credential-canary.sh.j2`.
 
 ### 2.4 Syncthing GUI password — RESOLVED 2026-07-28
 
@@ -190,9 +198,9 @@ That would take the walkthrough from ~20 manual steps to ~12, and every one
 remaining would be a genuine human decision rather than a chore.
 
 Deferred deliberately: Calibre-Web's password (change by hand — automating it
-is more fragile than the problem) and Uptime Kuma monitors (no supported
-provisioning path). Syncthing was on this list too, until SSO removed the need
-to touch its config at all — see 2.4.
+is more fragile than the problem; done by hand 2026-08-03, see 2.3) and Uptime
+Kuma monitors (no supported provisioning path). Syncthing was on this list too,
+until SSO removed the need to touch its config at all — see 2.4.
 
 ---
 
@@ -231,10 +239,13 @@ Unchanged from the analysis above:
 
 - **Calibre-Web** `admin` / `admin123` — no env-var override; automating means
   writing to its SQLite `app.db`, which is more fragile than the 30-second
-  manual change. **Still live — change it early.** Note the SSO work of
-  2026-07-28 did *not* cover this: Calibre-Web is loopback-only on svc-media,
-  so unlike every service that went behind forward-auth it would have had no
-  direct `IP:port` escape hatch. It is now the most exposed default left.
+  manual change. That stays the decision. **The password itself was changed by
+  hand on 2026-08-03** and the nightly credential canary confirms the default
+  is rejected, so this is no longer an open exposure — it is a rebuild step.
+  Note the SSO work of 2026-07-28 did *not* cover this service: Calibre-Web is
+  loopback-only on svc-media, so unlike every service that went behind
+  forward-auth it would have had no direct `IP:port` escape hatch. That is
+  still true, and is why the manual first-login change matters on any rebuild.
 - **Syncthing** GUI password — no longer urgent: the web UI is behind SSO as of
   2026-07-28 (see 2.4). Its own GUI password is still unset, which only matters
   on the direct `192.168.1.32:8384` path.
@@ -295,12 +306,38 @@ compromise; all are things that make a future mistake more expensive.
   rootful and mounting `/`.** The justifying comment was copied from the
   rootless svc-media/svc-infra copies, where it is accurate. The narrower fix
   is `SecurityLabelType=spc_t`, which keeps a label.
-- **No scheduled canary publishes to `homelab-alerts`.** Every alert path is
+- **~~No scheduled canary publishes to `homelab-alerts`.~~ Largely closed
+  2026-08-04 — read what it does and does not cover.** Every alert path is
   exercised only when something breaks, so a broken delivery path — wrong topic
-  subscription, an ACL, a rejected token — produces silence that is
+  subscription, an ACL, a rejected token — produced silence that was
   indistinguishable from good news. The heartbeat only probes ntfy's
   `/v1/health`, which proves its HTTP server answers, not that a message can be
-  published.
+  published, and `scan.yml`'s nightly summary publishes to `homelab-deploy`,
+  which is a different topic and the muted one.
+
+  Worth recording why this looked covered when it was not: until 2026-08-03 the
+  alert topic *did* get nightly traffic, but only because Calibre-Web still
+  accepted its shipped default and the scan escalated it every night. That was
+  a symptom being read as a heartbeat. Fixing the password took the topic to
+  zero scheduled messages, which is how the gap became visible.
+
+  **Now covered:** `homelab-alert-canary.timer` on svc-infra publishes one
+  `min`-priority message to `ntfy_alert_topic` every Monday at 08:00, through
+  the same `/etc/homelab-notify.env` topic resolution every shell alerter uses,
+  and then reads the message back off the topic — so a 200 from ntfy is not
+  mistaken for the message having landed where it was addressed. It runs from
+  svc-infra rather than svc-media on purpose: svc-media *is* the ntfy host, so
+  a canary there would succeed over loopback in exactly the scenario where
+  every other host's alerts have gone silent. Failure is reported three ways
+  that do not all depend on ntfy: syslog, a `failed` unit that
+  `homelab-failedunits.service` and `make verify` both see locally, and an
+  `OnFailure` push.
+
+  **Not covered, and not coverable server-side:** that a phone is still
+  subscribed, and that anybody reads it. The canary bounds how long delivery
+  can be broken without anyone knowing at one week — it does not enforce that
+  the week's message is looked at. If these stop arriving, the alert path is
+  down and every quiet night since the last one proved nothing.
 - **`pve_mon_verified` is never asserted** by the final play in `verify.yml`, so
   a `pve_mon_hosts` play that matched nothing still yields a green run. Left
   alone because the nightly runner legitimately excludes that play by `--limit`,

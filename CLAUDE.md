@@ -155,9 +155,30 @@ password. Every one passed `make validate`.
 
 So when adding or changing a check here: make it distinguish "none found" from
 "could not look", and give it something that must be true if it ran. The port
-scan fails outright if it cannot see the sshd port Ansible is connected over;
-the credential canary is trusted only because it catches Calibre-Web's live
-default. A check with no positive control is a check nobody can tell is broken.
+scan fails outright if it cannot see the sshd port Ansible is connected over.
+A check with no positive control is a check nobody can tell is broken.
+
+**The credential canary no longer has one, and that is worth stating plainly.**
+It used to be trusted because it caught Calibre-Web's live `admin`/`admin123` —
+one probe that *had* to come back `vulnerable`, so a broken run showed up as
+that probe going quiet. The password was changed on 2026-08-03, all three
+probes now report clean, and a working canary and a completely dead one would
+produce byte-identical JSON. What keeps it trustworthy instead is commit
+`057e1e4`, which gave every probe a **three-state verdict** — `vulnerable`,
+`ok`, `inconclusive`. A missing CSRF token, a connection refused, a curl
+timeout or a 5xx used to emit `false` and render as the word `ok`; they now
+emit `inconclusive`, and `scan.yml` escalates on it. So "could not look" is a
+state of its own rather than an all-clear.
+
+That is weaker than a live positive control and should not be described as
+equivalent. Tri-state catches a probe that *failed*; it cannot catch a probe
+that succeeds at asking the wrong question — a changed login route that still
+returns 200, say, would read as `ok` forever. Restoring a real positive control
+means a synthetic one: a throwaway service, or a disposable account on an
+existing one, deliberately left on a known default so exactly one finding must
+come back `vulnerable` every night. That was considered and deliberately not
+done — it means standing up a genuinely insecure thing to prove a check works.
+If the canary is ever extended to more services, revisit it.
 
 ### Alerting counts as an application
 

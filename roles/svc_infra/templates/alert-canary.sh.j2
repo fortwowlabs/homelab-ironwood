@@ -1,0 +1,133 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# alert-canary.sh — publish one deliberately boring message to the topic that
+# carries real alerts, so that silence on that topic means something.
+#
+# WHY THIS EXISTS
+#
+# ntfy_alert_topic (homelab-alerts) is the only topic in this estate that is
+# allowed to wake somebody, which means it is also the only one that is
+# normally empty. Every path that writes to it — disk-alert, failed-units-watch,
+# leak-canary, notify-failure@, zed, smartd, scan.yml's escalation — fires only
+# when something is already wrong. So a broken delivery path (a topic renamed
+# in /etc/homelab-notify.env, an ntfy ACL, a rejected token, a subscription
+# removed from the phone) is indistinguishable from an estate with nothing
+# wrong. Both are silence. docs/automation-opportunities.md carried that as an
+# accepted risk.
+#
+# Until 2026-08-03 the topic did get nightly traffic, but only because
+# Calibre-Web still accepted its shipped default and scan.yml escalated it
+# every single night. That was a symptom being mistaken for a heartbeat: the
+# day the password was fixed, the alert topic went to zero scheduled messages.
+#
+# The heartbeat on svc-media does not cover this either. It probes ntfy's
+# /v1/health, which proves the HTTP server answers — not that a message
+# published to a named topic reaches a subscriber.
+#
+# WHAT IT PROVES, AND WHAT IT DOES NOT
+#
+# It publishes through the same idiom the shell alerters use — topic resolved
+# out of /etc/homelab-notify.env, same URL shape, same optional bearer token —
+# and then READS THE MESSAGE BACK off the topic. That readback is the point: a
+# POST returning 200 proves the server accepted a request, while finding the
+# nonce again on ${topic} proves the message actually landed on the topic this
+# host thinks it is alerting to. A wrong topic name and an ACL that silently
+# drops both return 200 and both fail the readback.
+#
+# It does NOT prove a phone is subscribed, or that anybody looks. Nothing
+# server-side can prove that. That last hop is the human's: if these stop
+# arriving weekly, the alert path is broken and every quiet night since the
+# last one meant nothing.
+set -uo pipefail
+
+# systemd passes these via EnvironmentFile=, but source them anyway: this is
+# the pattern the zed and smartd hooks got wrong, where the variables were
+# assumed to be inherited and were not, and every alert died on `set -u`.
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-notify.env ]] && . /etc/homelab-notify.env
+
+# The house idiom, deliberately: a real alerter resolves its topic exactly this
+# way, and a canary that resolved it differently would be testing a path
+# nothing else uses.
+topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC:-}}"
+
+# But the fallback is not acceptable HERE, and this is the one script where it
+# is not. For disk-alert the fallback means "deliver somewhere rather than to
+# an empty topic name" on a host whose notify.env predates NTFY_ALERT_TOPIC.
+# For this script, falling back means the alert topic is not configured on this
+# host at all — which is precisely the fault it exists to detect. Reporting a
+# successful delivery to homelab-deploy while homelab-alerts is unconfigured is
+# the exact "clean result because it never ran" failure CLAUDE.md catalogues.
+if [[ -z "${NTFY_ALERT_TOPIC:-}" ]]; then
+    echo "NTFY_ALERT_TOPIC is unset in /etc/homelab-notify.env; the alert topic is not configured on this host, so this canary would have tested the wrong topic" >&2
+    logger -p daemon.err -t alert-canary "NTFY_ALERT_TOPIC unset — alert topic unconfigured"
+    exit 1
+fi
+if [[ -z "${NTFY_URL:-}" ]]; then
+    echo "NTFY_URL is unset in /etc/homelab-notify.env; nothing to publish to" >&2
+    logger -p daemon.err -t alert-canary "NTFY_URL unset — cannot publish"
+    exit 1
+fi
+
+AUTH=()
+if [[ -n "${NTFY_TOKEN:-}" ]]; then
+    AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+fi
+
+host=$(hostname -s)
+# A nonce, so the readback below is matching THIS run's message and not last
+# week's still sitting in ntfy's 12-hour cache. Nothing secret: a timestamp and
+# this process's pid.
+nonce="canary-$(date -u +%Y%m%dT%H%M%SZ)-$$"
+
+# Priority min, and the wording is doing real work. Somebody who glances at
+# this on a phone at 08:00 must know in one line that nothing is on fire —
+# a canary that reads like an alert trains people to ignore the topic, which
+# would cost more than the silence it was added to fix.
+read -r -d '' body <<EOF
+NOT AN ALERT. Nothing is wrong.
+
+Weekly delivery test for the "${topic}" ntfy topic, published from ${host}.
+Its only job is to prove that a message sent down the real alert path still
+arrives, because every other message on this topic means something is broken.
+
+If more than a week goes by without one of these, the alert path itself is
+down and the quiet since the last one proved nothing. Check, in this order:
+ntfy on svc-media, /etc/homelab-notify.env on ${host}, and this device's
+subscription to "${topic}".
+
+id=${nonce}
+EOF
+
+if ! curl -fsS --max-time 15 --retry 2 --retry-delay 5 "${AUTH[@]}" \
+    -H "Title: homelab CANARY — weekly alert-path test, not an alert" \
+    -H "Priority: min" \
+    -H "Tags: test_tube" \
+    -d "$body" \
+    "${NTFY_URL}/${topic}" >/dev/null 2>&1; then
+    echo "could not publish the canary to ${NTFY_URL}/${topic}" >&2
+    logger -p daemon.err -t alert-canary "publish FAILED to ${topic} — the alert path is down"
+    exit 1
+fi
+
+# Read it back. ntfy holds messages in memory for ~12h, so poll immediately;
+# `poll=1` returns the cached messages and closes rather than streaming. The
+# retry loop is for the cache write racing the response, not for an outage —
+# three quick attempts, then this is a failure.
+#
+# If this ever fails while the publish above succeeded, suspect ntfy's message
+# cache being disabled before suspecting the topic: with caching off there is
+# nothing to poll and no readback is possible on any topic.
+for _ in 1 2 3; do
+    if curl -fsS --max-time 10 "${AUTH[@]}" \
+        "${NTFY_URL}/${topic}/json?poll=1&since=10m" 2>/dev/null \
+        | grep -qF "$nonce"; then
+        echo "canary ${nonce} published to ${topic} and read back from ntfy"
+        exit 0
+    fi
+    sleep 2
+done
+
+echo "published ${nonce} to ${topic} but could not read it back; ntfy accepted the request without the message landing on the topic" >&2
+logger -p daemon.err -t alert-canary "readback FAILED for ${nonce} on ${topic} — publish returned 200 but the message is not on the topic"
+exit 1

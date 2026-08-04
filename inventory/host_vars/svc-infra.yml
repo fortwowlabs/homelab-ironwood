@@ -63,3 +63,9 @@ onfailure_units_extra:
   # this drop-in is specifically for the scan failing to RUN — which is the
   # failure that would otherwise look exactly like a clean estate.
   - homelab-scan@.service
+  # The weekly canary on ntfy_alert_topic. The drop-in is a best-effort second
+  # try, not the primary report: if the canary failed because the alert path is
+  # down, notify-failure@ publishes into the same broken path. What actually
+  # carries the news is the unit sitting in `failed`, which
+  # homelab-failedunits.service and `make verify` both see without ntfy.
+  - homelab-alert-canary.service

@@ -1,0 +1,40 @@
+[Unit]
+Description=Publish the weekly homelab-alerts delivery canary
+
+[Timer]
+# WEEKLY, and Monday 08:00 specifically. Both halves are deliberate.
+#
+# Weekly, not nightly, because the value of this topic is that it is normally
+# empty. Seven boring messages a week is how a topic that is allowed to wake
+# somebody becomes one nobody reads, and a topic nobody reads is the same
+# outage this canary was added to prevent, arriving by a different route. One
+# a week is enough to bound "how long could delivery have been broken without
+# anyone knowing" at seven days.
+#
+# 08:00 collides with nothing. The estate's scheduled work is 03:05/03:10/03:40
+# (per-VM appdata backups), 04:00 (nightly verify), 04:40 (backup freshness),
+# 05:30 (security scan, which on Sundays also runs the OpenSCAP benchmark and
+# takes ~10 minutes longer), 06:30 (PVE health) and 07:00 (svc-media's
+# healthchecks.io heartbeat, +600s jitter). 09:15 is certwatch. 08:00 sits in
+# the gap after the heartbeat and before certwatch.
+#
+# Monday, not Sunday, for two reasons. Sunday 05:30 already carries the other
+# weekly signal — the OpenSCAP benchmark — and two weekly checks on one day
+# means one bad night can take out both. And a missing canary is only useful
+# if somebody notices it; Monday morning is when this estate actually gets
+# looked at, whereas a Saturday message goes unread until the following week.
+OnCalendar=Mon *-*-* 08:00:00
+# Persistent, so a host that was powered off at 08:00 Monday publishes when it
+# comes back rather than skipping the week entirely. That matters more than the
+# punctuality: a skipped week is indistinguishable from broken delivery, which
+# is the exact ambiguity this unit removes. A late canary says "the host was
+# down"; no canary says "the alert path is down".
+Persistent=true
+# No RandomizedDelaySec, unlike the heartbeat. Jitter is for spreading load,
+# and one curl a week has none to spread — while a fixed arrival time is what
+# makes "it has not come" a judgement anyone can make without checking a
+# schedule. No OnBootSec either: a reboot must not mint extra canaries, or the
+# weekly cadence stops carrying information.
+
+[Install]
+WantedBy=timers.target

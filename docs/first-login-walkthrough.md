@@ -173,15 +173,21 @@ Creates the root user on first visit. Library path `/srv/media/audiobooks`.
 First-run admin account. Its database credentials are already in the vault
 (`vault_romm_*`) and are not the same as the web login.
 
-### 3.5 Calibre-Web — https://calibre-web.fortwow.dev ⚙️
-Ships with a **default account `admin` / `admin123`**. Log in and change it
-immediately — this is the only service with a publicly-known default.
+### 3.5 Calibre-Web — https://calibre-web.fortwow.dev ✅
+Ships with a **default account `admin` / `admin123`**. On a fresh build, log in
+and change it immediately — this is the only service with a publicly-known
+default, and unlike every other service here it is loopback-only on svc-media,
+so it is not behind SSO either. It stays a manual step on purpose: automating
+it means writing into Calibre-Web's SQLite `app.db` at deploy time, which is
+more fragile than the 30 seconds it takes in the UI. See
+[automation-opportunities.md §2.3](automation-opportunities.md).
 
-As of 2026-07-31 this is still unchanged, and the nightly credential canary
-now escalates it to `homelab-alerts` on every run until it is fixed (see
-[Security](security.md#scanning)). The canary reports it as
-`STILL ACCEPTS ITS SHIPPED DEFAULT`; that alert stops the moment the password
-is changed, and nothing else needs doing.
+**Done on this instance, 2026-08-03.** The nightly credential canary confirms
+it: calibre-web reports `default rejected (HTTP 200, login form re-rendered)`,
+which is the measured rejection signature rather than merely the absence of an
+acceptance (see [Security](security.md#scanning)). Nothing further to do here
+unless Calibre-Web is rebuilt from scratch, in which case the paragraph above
+applies again.
 
 ---
 
