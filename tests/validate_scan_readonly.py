@@ -49,6 +49,16 @@ SCAN_PATHS = (
     "roles/svc_infra/templates/scan-run.sh.j2",
     "roles/svc_infra/templates/scan-images.sh.j2",
     "roles/svc_infra/tasks/scan.yml",
+    # The weekly release report is report-only by exactly the same construction,
+    # and the temptation to make it "helpful" is stronger here than anywhere
+    # else in the repo: it already knows which images are behind and what the
+    # new digest would be. Bumping one is a decision about what a service
+    # persists, not a mechanical edit. See docs/plans/release-report.md.
+    "release.yml",
+    "scripts/release_check.py",
+    "scripts/release-check.sh",
+    "scripts/image-release.sh",
+    "roles/svc_infra/templates/release-run.sh.j2",
 )
 
 # Jinja comment blocks, which shell templates use for the managed-file header.

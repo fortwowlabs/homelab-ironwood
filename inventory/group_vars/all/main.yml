@@ -267,6 +267,74 @@ scan_state_file: "{{ scan_report_dir }}/state.json"
 trivy_image: "docker.io/aquasec/trivy@sha256:cffe3f5161a47a6823fbd23d985795b3ed72a4c806da4c4df16266c02accdd6f"
 trivy_cache_dir: /opt/homelab/appdata/trivy-cache
 
+# --- weekly release report -------------------------------------------------
+# Where release.yml writes its output, beside the scan reports and served by
+# the same static-web-server at https://scan.<domain>. Full design, measured
+# label coverage and the deliberate non-goals: docs/plans/release-report.md.
+release_report_dir: "{{ scan_report_dir }}"
+# The last upstream release seen per image. The report headlines what is NEW
+# against this, not the standing behind-count — an image that has been three
+# versions behind for a month is not news, and repeating it weekly is how a
+# report becomes wallpaper.
+release_state_file: "{{ release_report_dir }}/release-state.json"
+# The checkout release.yml reads the catalogs from. Restated here rather than
+# reused from roles/svc_infra/defaults/main.yml (verify_runner_root, the same
+# path) for the same reason scan_report_dir is: release.yml does not apply that
+# role, and role defaults are only in scope for a play that does.
+#
+# The consequence is worth knowing before it surprises someone: running
+# `make release-report` from a workstation with uncommitted catalog edits
+# reports on the revision deployed to svc-infra, not on the working tree.
+# `make release-check` is the one that reads the tree in front of you.
+release_checkout: /opt/homelab-iac
+# Where roles/svc_infra installs the check itself. Separate from the checkout
+# above because they update on different schedules: the script arrives with a
+# deploy, the catalogs it reads arrive with the nightly runner's archive sync.
+release_check_bin: /usr/local/sbin/homelab-release-check.py
+
+# Upstream release feeds that the image's own OCI labels get wrong or omit.
+#
+# The report derives the feed from `org.opencontainers.image.source` and needs
+# no configuration for 33 of 48 pins. This map is for the rest, and it exists
+# because a LABEL IS A DEFAULT, NOT A SOURCE OF TRUTH. Three failure modes were
+# observed in the coverage run on 2026-08-05:
+#
+#   - calibre-web-automated labels its source as linuxserver/docker-baseimage-
+#     ubuntu — the BASE IMAGE. Followed naively the report would announce Ubuntu
+#     base-image releases under Calibre-Web's name, indefinitely, while looking
+#     perfectly healthy. Confidently wrong is worse than empty.
+#   - jellyfin points at the packaging repo rather than the project, so the
+#     release NOTES — the entire reason to read this report — would be missing.
+#   - seven images carry no source label at all.
+#
+# A GUESSED FEED IS WORSE THAN NO FEED, for the same reason apps.yml says a
+# guessed tag is worse than no tag, and more sharply: a plausible-looking
+# repository that is not the upstream reports somebody else's releases as yours
+# forever. Every entry below was confirmed against the GitHub API on 2026-08-05
+# to exist and to publish releases. Anything unconfirmed stays out of this map
+# and reports as `no-feed`, which reads as UNMEASURED — the same vocabulary,
+# and the same honesty, as `make image-check`'s UNTRACKED.
+#
+# An EMPTY value is a deliberate "there is no feed for this", recorded so the
+# same dead end is not re-derived every year. It is not a TODO.
+release_feed_overrides:
+  # Wrong feed in the label.
+  ghcr.io/crocodilestick/calibre-web-automated: crocodilestick/Calibre-Web-Automated
+  docker.io/jellyfin/jellyfin: jellyfin/jellyfin
+  # No source label at all.
+  ghcr.io/corentinth/it-tools: CorentinTh/it-tools
+  ghcr.io/maziggy/bambuddy: maziggy/BamBuddy
+  ghcr.io/static-web-server/static-web-server: static-web-server/static-web-server
+  docker.io/jlesage/jdownloader-2: jlesage/docker-jdownloader-2
+  docker.io/louislam/uptime-kuma: louislam/uptime-kuma
+  docker.io/library/nextcloud: nextcloud/server
+  # Confirmed to have no release feed, rather than not yet looked for. The
+  # postgres GitHub repository is a read-only git mirror that publishes no
+  # releases, and immich's base-images repository publishes none either — its
+  # tags are build identifiers. Both would otherwise be retried weekly forever.
+  docker.io/library/postgres: ""
+  ghcr.io/immich-app/postgres: ""
+
 # How long a superseded image is kept before `podman image prune` may reclaim
 # it. Only images no container references are ever eligible. 30 days keeps a
 # recent bump's predecessor local so a rollback is a restart rather than a

@@ -1,0 +1,194 @@
+---
+# Weekly upstream release report. Sibling to scan.yml, driven the same two ways:
+# `make release-check` from the workstation, and homelab-release@svcops.timer on
+# svc-infra at 08:30 on Mondays.
+#
+# It answers a question nothing else here answers: WHAT HAS UPSTREAM SHIPPED.
+# `make image-check` answers whether a pin has drifted from the tag it follows,
+# which it can only do for the 13 images carrying a recorded `# tag:` — and the
+# 35 it cannot see are the ones apps.yml deliberately leaves untracked precisely
+# because they are the dangerous ones to bump blind. Those are exactly the
+# releases somebody needs to READ about. See docs/plans/release-report.md.
+#
+# The same two rules that govern scan.yml govern this.
+#
+#  1. REPORT ONLY. Nothing here pulls, bumps, deploys or restarts, and it never
+#     prints a `make image-bump` line for an untracked image — doing that would
+#     turn a report into the standing recommendation that the BUMP PROCEDURE
+#     block was written to prevent. tests/validate_scan_readonly.py enforces the
+#     first half at build time; the second is a judgement, stated here so it can
+#     be held to.
+#
+#  2. NO vault_ REFERENCES. This runs from the nightly runner's checkout at
+#     /opt/homelab-iac, which is a `git archive`, and the vault is gitignored —
+#     so every vault_ variable is undefined there. b77f27f is the cautionary
+#     tale. GITHUB_TOKEN, if it is ever used, comes from the rendered
+#     environment file on the host, never from a vault lookup at run time.
+- name: Report what upstream has released
+  hosts: infra_vms
+  gather_facts: true
+  become: true
+  tasks:
+    # Runs on one host by construction: this reads registries and a release
+    # feed, and which VM holds the checkout is an implementation detail. Nothing
+    # about it is per-host, unlike the security scan.
+    - name: Check every pinned image against its upstream release feed
+      ansible.builtin.command:
+        # The INSTALLED script, not the one in the checkout. /opt/homelab-iac is
+        # a `git archive` of the deployed revision, so scripts/ only exists
+        # there after the commit that adds it — a playbook pointing into the
+        # checkout works on a workstation and fails on the runner, which is the
+        # more important of the two. The role installs the script; only the
+        # catalogs are read from the checkout, via --root.
+        cmd: >-
+          {{ release_check_bin }}
+          --json
+          --root {{ release_checkout }}
+          --previous {{ release_state_file }}
+          --state-out {{ release_state_file }}.next
+      register: release_raw
+      changed_when: false
+      # Never fails the play on a nonzero exit. The script exits 1 when its own
+      # positive control trips — no version resolved, or no feed answered — and
+      # that is a finding to publish loudly, not a reason to abort before
+      # publishing it. The escalation below is what carries the news.
+      failed_when: false
+      # It is a report, not a gate: no vault, no secrets, nothing to redact.
+      no_log: false
+
+    - name: Establish the report, distinguishing a bad run from a quiet week
+      ansible.builtin.set_fact:
+        # A parse failure is its own state. Reading an unparseable result as an
+        # empty report would publish "nothing new upstream" for a run that never
+        # produced a report at all — the exact shape of every failure this repo
+        # has written down.
+        release: >-
+          {{ (release_raw.stdout | from_json)
+             if (release_raw.stdout | default('') | trim | length > 0
+                 and (release_raw.stdout | trim).startswith('{'))
+             else {'images': [], 'new': [], 'still_behind': [], 'seeded': false,
+                   'summary': {'ok': false, 'counts': {},
+                               'images_examined': 0, 'versions_resolved': 0,
+                               'feeds_answered': 0,
+                               'detail': 'the release check produced no parseable output (rc='
+                                         ~ (release_raw.rc | default('?')) ~ ')'}} }}
+
+    - name: Summarise the run
+      ansible.builtin.set_fact:
+        release_ok: "{{ release.summary.ok | default(false) | bool }}"
+        release_new: "{{ release.new | default([]) }}"
+        release_behind: "{{ release.still_behind | default([]) }}"
+        release_counts: "{{ release.summary.counts | default({}) }}"
+        release_unmeasured: >-
+          {{ release.images | default([])
+             | selectattr('verdict', 'in', ['error', 'no-feed', 'unknown-version'])
+             | list }}
+
+    - name: Decide what is worth publishing to the alert topic
+      ansible.builtin.set_fact:
+        # Escalation is for the CHECK being broken, never for the estate being
+        # behind. This estate deliberately runs behind on versions — that is the
+        # whole premise of the BUMP PROCEDURE — so alerting on a number that is
+        # expected to be non-zero is how a channel becomes background noise.
+        # Only two things here are worth waking somebody: the report could not
+        # measure anything, or enough of it errored that the result is a floor
+        # rather than a total.
+        release_escalate: >-
+          {{ (not release_ok)
+             or ((release_counts.error | default(0) | int) > 0) }}
+        release_escalation_reason: >-
+          {{ release.summary.detail
+             if (not release_ok)
+             else ((release_counts.error | default(0)) ~ ' image(s) could not be '
+                   ~ 'checked at all — the release counts below are a floor, not a total') }}
+        # One line, and every conditional clause stays on ONE line. YAML's
+        # folded scalar keeps a literal newline wherever a continuation indents
+        # further than the first, which put blank lines into the middle of every
+        # ntfy message the scan sent until it was fixed there.
+        # The DEGRADED prefix leads, and it is not decoration. Read back off
+        # ntfy during the first live test, a broken run's routine message said
+        # "0 new upstream release(s) ... 0 up to date across 0 pinned images" —
+        # which on the muted topic, at a glance, is indistinguishable from a
+        # quiet week. The escalation on the alert topic carried the truth, but
+        # the two messages disagreed and only one of them gets read casually.
+        release_summary_line: >-
+          {{ ('DEGRADED — this run measured nothing: ' ~ release.summary.detail ~ '. ') if (not release_ok) else '' }}
+          {{ release_new | length }} new upstream release(s) since the last report;
+          {{ release_behind | length }} still behind,
+          {{ release_counts.current | default(0) }} up to date across
+          {{ release.summary.images_examined | default(0) }} pinned images
+          ({{ release_unmeasured | length }} unmeasured).
+          {{ (release_new | map(attribute='name') | join(', ')) if (release_new | length > 0) else '' }}
+          {{ ('; SEEDED — this run had no baseline, so nothing is reported as new') if (release.seeded | default(false)) else '' }}
+          {{ ('; ' ~ (release_counts.error | default(0)) ~ ' COULD NOT BE CHECKED') if ((release_counts.error | default(0) | int) > 0) else '' }}
+
+    - name: Write the release report
+      ansible.builtin.template:
+        # Explicit path, not a bare filename: this play does not apply the
+        # svc_infra role, so the role's templates/ is not on the search path.
+        # It stays under roles/svc_infra/templates/ anyway, because that is the
+        # tree tests/validate_secret_tasks.py globs when deciding which
+        # templates are secret-bearing.
+        src: roles/svc_infra/templates/release-report.txt.j2
+        dest: "{{ release_report_dir }}/releases.txt"
+        owner: "{{ svc_uid }}"
+        group: "{{ svc_gid }}"
+        mode: "0644"
+
+    - name: Write the browsable release report
+      ansible.builtin.template:
+        src: roles/svc_infra/templates/release-report.html.j2
+        dest: "{{ release_report_dir }}/releases.html"
+        owner: "{{ svc_uid }}"
+        group: "{{ svc_gid }}"
+        mode: "0644"
+
+    # THE BASELINE MOVES ONLY AFTER THE REPORT IS WRITTEN, and only if the run
+    # measured something. scan.yml learned this from a real false alarm on
+    # 2026-07-30, where a run in which everything failed wrote its zeroes as the
+    # baseline and made the next healthy run report an increase that had not
+    # happened. Here the failure would be quieter and worse: a broken run that
+    # recorded its own empty state would make every genuinely-old release
+    # resurface as NEW next week, and a report that cries wolf once has spent
+    # the only credibility it had.
+    - name: Promote this run's state to the baseline for the next
+      ansible.builtin.command:
+        cmd: mv -f {{ release_state_file }}.next {{ release_state_file }}
+      changed_when: true
+      when: release_ok
+
+    - name: Discard the state from a run that measured nothing
+      ansible.builtin.file:
+        path: "{{ release_state_file }}.next"
+        state: absent
+      when: not release_ok
+
+    # Published on EVERY run, to the muted informational topic. The report is
+    # news, not an alarm — a new Jellyfin is not something to be woken for.
+    - name: Publish the routine release summary
+      ansible.builtin.include_role:
+        name: notify
+      vars:
+        ntfy_title: "homelab releases ({{ release_new | length }} new)"
+        ntfy_result: "{{ release_summary_line }}"
+        ntfy_tags: package
+
+    # ...and only a broken CHECK reaches the topic that is allowed to wake
+    # somebody. See the reasoning on release_escalate above.
+    - name: Escalate a release check that could not measure what it claims to
+      ansible.builtin.include_role:
+        name: notify
+      vars:
+        ntfy_topic_override: "{{ ntfy_alert_topic }}"
+        ntfy_title: "homelab release check DEGRADED"
+        ntfy_priority: high
+        ntfy_tags: warning
+        ntfy_result: >-
+          {{ release_escalation_reason }}. A release report that could not look
+          is not a week with no new releases. Full report at
+          https://scan.{{ service_domain }}/releases.txt
+      when: release_escalate
+
+    - name: Show the report in the play output
+      ansible.builtin.debug:
+        msg: "{{ release_summary_line }}"

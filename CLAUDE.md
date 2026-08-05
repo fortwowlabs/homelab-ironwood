@@ -115,6 +115,34 @@ stay deliberate. Follow it with `make validate`, then one VM (`make dl` /
 moved. The full procedure is the `BUMP PROCEDURE` block at the top of
 `inventory/group_vars/all/apps.yml`.
 
+### Deciding *what* to bump: `make release-check`
+
+`image-check` answers "has my pin drifted from the tag it follows", which it can
+only do for the 13 images carrying a `# tag:`. `make release-check` answers
+"what has upstream released", which it answers for **29 of 48** — including the
+untracked ones, whose release notes are the ones actually worth reading before a
+decision. It reads the version out of each pinned digest's OCI labels, so it
+needs no recorded tag.
+
+It runs weekly on svc-infra (Mon 08:30) and publishes to ntfy and
+`https://scan.<domain>/releases.txt`. Three things to know:
+
+- **It deliberately prints no bump command.** For an untracked image that would
+  be the exact standing recommendation `BUMP PROCEDURE` exists to prevent. Read
+  the notes, decide, bump by hand.
+- **`behind` means "the pinned version is not the newest upstream release"** and
+  nothing more. No ordering is claimed — nothing sensibly orders
+  `cd80d60b-ls59`, `2026.7.28-8372f5d85` and `4.0.19.2979-ls320`. A pin held
+  deliberately to an older line reads as behind for as long as that decision
+  stands, which is correct.
+- **A full run costs ~45 of the 60 unauthenticated GitHub requests/hour.** Two
+  runs in one hour is one too many; the second reports `error`, and the report
+  prints the remaining quota so that is diagnosable rather than mysterious.
+
+`make image-release REF=<repo>` asks the same question about one image, which is
+the cheap way to check before bumping. Full design in
+`docs/plans/release-report.md`.
+
 Four things that will bite:
 
 - **`image-bump` refuses a digest pinned in more than one place.** Three

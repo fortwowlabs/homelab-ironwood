@@ -1,0 +1,33 @@
+# Instantiated weekly upstream release report. The instance is the unprivileged
+# Linux account that owns the checkout and its credentials:
+#   systemctl start homelab-release@svcops.service
+#
+# Rides the same runner as homelab-verify@ and homelab-scan@ — same checkout,
+# same venv, same account. A separate unit rather than more work bolted onto the
+# scan, because the two answer different questions and a red one means different
+# things: a red scan means the estate may be unsafe, a red release report means
+# nobody will hear about new versions this week. Collapsing them would make a
+# report outage look like a security finding.
+[Unit]
+Description=homelab-iac weekly upstream release report for %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=%i
+WorkingDirectory=/opt/homelab-iac
+ExecStartPre=/usr/bin/test -d /opt/homelab-iac/.venv
+ExecStart=/usr/local/sbin/homelab-release-run.sh
+# Type=oneshot disables the start timeout by default, and this unit makes about
+# ninety network round trips to registries and api.github.com. Without a bound,
+# one hung TLS handshake leaves it in `activating` forever — which is not
+# `failed`, so OnFailure= would never fire, `systemctl --failed` would stay
+# empty and the report would simply stop arriving with every indicator green.
+# That is the same trap homelab-alert-canary.service documents.
+#
+# 600s against a measured 63s for the whole run on 2026-08-05 (48 images, 44
+# feeds, from a workstation on the same LAN). Nearly ten times the measurement,
+# because the ceiling is there to catch a hang, not to police a slow week.
+TimeoutStartSec=600
+UMask=0077

@@ -1,0 +1,151 @@
+{#- Browser view of the same data as release-report.txt.j2. Deliberately one
+    self-contained file with no external CSS, JS, font or image, matching
+    scan-report.html.j2: this page is served by a static file server with no
+    network access of its own. -#}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>homelab upstream releases</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font: 15px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+         margin: 0 auto; max-width: 62rem; padding: 2rem 1.25rem 4rem; }
+  h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+  h2 { font-size: 1rem; margin: 2rem 0 .5rem; text-transform: uppercase;
+       letter-spacing: .06em; opacity: .8; }
+  .sub { opacity: .7; margin: 0 0 1.75rem; font-size: .9rem; }
+  .cards { display: flex; flex-wrap: wrap; gap: .75rem; margin-bottom: 1.75rem; }
+  .card { border: 1px solid currentColor; border-radius: .5rem; padding: .7rem 1rem;
+          min-width: 8rem; opacity: .95; }
+  .card .n { font-size: 1.8rem; font-weight: 700; display: block; line-height: 1.1; }
+  .card .l { font-size: .75rem; text-transform: uppercase; letter-spacing: .06em; opacity: .75; }
+  .new .n { color: #1e8449; }
+  .unk .n { color: #b9770e; }
+  table { border-collapse: collapse; width: 100%; margin: .5rem 0 1rem; }
+  th, td { text-align: left; padding: .4rem .6rem; border-bottom: 1px solid rgba(128,128,128,.35);
+           vertical-align: top; }
+  th { font-size: .75rem; text-transform: uppercase; letter-spacing: .05em; opacity: .75; }
+  .rel { display: block; opacity: .75; font-size: .85rem; }
+  .note { border-left: 3px solid rgba(128,128,128,.5); padding: .1rem 0 .1rem 1rem;
+          margin: 1rem 0 2rem; opacity: .85; font-size: .9rem; }
+  .banner { border: 1px solid #c0392b; border-radius: .5rem; padding: .75rem 1rem;
+            margin-bottom: 1.5rem; }
+  .seed { border: 1px solid rgba(128,128,128,.6); border-radius: .5rem;
+          padding: .75rem 1rem; margin-bottom: 1.5rem; }
+  a { color: inherit; }
+  .scroll { overflow-x: auto; }
+</style>
+</head>
+<body>
+
+<h1>homelab upstream releases</h1>
+<p class="sub">{{ ansible_date_time.iso8601 }} &middot; report-only &mdash; this run pulled, bumped and restarted nothing</p>
+
+{% if not release_ok %}
+<div class="banner">
+  <strong>This run did not measure what it claims to.</strong><br>
+  {{ release.summary.detail }}<br>
+  Everything below is a floor, not a total. A release report that could not look
+  is not a week with no new releases.
+</div>
+{% endif %}
+
+{% if release.seeded | default(false) %}
+<div class="seed">
+  <strong>First run — no baseline existed.</strong> Nothing is reported as new;
+  the images already behind are listed as such rather than announced as this
+  week's news. Next week's report is the first real one.
+</div>
+{% endif %}
+
+<div class="cards">
+  <div class="card new"><span class="n">{{ release_new | length }}</span><span class="l">new this week</span></div>
+  <div class="card"><span class="n">{{ release_counts.behind | default(0) }}</span><span class="l">behind</span></div>
+  <div class="card"><span class="n">{{ release_counts.current | default(0) }}</span><span class="l">up to date</span></div>
+  <div class="card unk"><span class="n">{{ release_unmeasured | length }}</span><span class="l">unmeasured</span></div>
+</div>
+
+<h2>New since the last report</h2>
+{% if release_new | length > 0 %}
+<div class="scroll">
+<table>
+  <tr><th>service</th><th>pinned</th><th>upstream</th><th>released</th></tr>
+  {% for r in release_new | sort(attribute='published', reverse=true) %}
+  <tr>
+    <td>{{ r.name }}<span class="rel">{{ r.image }}</span></td>
+    <td>{{ r.version }}</td>
+    <td><a href="{{ r.url }}">{{ r.latest }}</a><span class="rel">{{ r.latest_name }}</span></td>
+    <td>{{ r.published[:10] }}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+{% else %}
+<p class="note">Nothing new upstream since the last report.</p>
+{% endif %}
+
+{% if release_behind | length > 0 %}
+<h2>Still behind ({{ release_behind | length }})</h2>
+<div class="scroll">
+<table>
+  <tr><th>service</th><th>pinned</th><th>upstream</th></tr>
+  {% for r in release_behind | sort(attribute='name') %}
+  <tr>
+    <td>{{ r.name }}</td>
+    <td>{{ r.version }}</td>
+    <td><a href="{{ r.url }}">{{ r.latest }}</a></td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+<p class="note">
+  Some of these are permanent and correct. A pin held deliberately to an older
+  line reads as behind for as long as that decision stands, because
+  <em>behind</em> here means exactly &ldquo;the pinned version is not the newest
+  upstream release&rdquo; and nothing more. No ordering is claimed &mdash; the
+  version strings in this estate have no single scheme that could order them.
+</p>
+{% endif %}
+
+{% if release_unmeasured | length > 0 %}
+<h2>Could not check ({{ release_unmeasured | length }})</h2>
+<div class="scroll">
+<table>
+  <tr><th>service</th><th>verdict</th><th>why</th></tr>
+  {% for r in release_unmeasured | sort(attribute='name') %}
+  <tr><td>{{ r.name }}</td><td>{{ r.verdict }}</td><td>{{ r.detail }}</td></tr>
+  {% endfor %}
+</table>
+</div>
+<p class="note">
+  These are <strong>unmeasured</strong>, not up to date &mdash; the same
+  distinction <code>make image-check</code> draws with UNTRACKED, and the reason
+  this section is never folded into the counts at the top.
+</p>
+{% endif %}
+
+<h2>What to do with this</h2>
+<p class="note">
+  Nothing automatically. This report deliberately prints no bump command: for
+  the images <code>apps.yml</code> leaves untracked on purpose, a one-line
+  <code>make image-bump</code> is precisely the standing recommendation the
+  BUMP PROCEDURE block exists to prevent. Read the notes, decide, then follow
+  that procedure by hand.<br><br>
+  A bad digest is safe &mdash; the pre-pull aborts the deploy with the old
+  container still serving. A bad <em>version</em> is not: an image can start
+  cleanly and migrate a database one way while every health check stays green.
+</p>
+
+<p class="sub">
+  {{ release.summary.versions_resolved | default(0) }}/{{ release.summary.images_examined | default(0) }}
+  images resolved a version from their OCI labels &middot;
+  {{ release.summary.feeds_answered | default(0) }} upstream feeds answered
+  {%- if release.summary.quota_remaining is defined and release.summary.quota_remaining is not none %}
+  &middot; GitHub quota {{ release.summary.quota_remaining }}/{{ release.summary.quota_limit }}
+  {%- endif %}
+</p>
+
+</body>
+</html>

@@ -1,0 +1,378 @@
+# Weekly release report
+
+**Status:** implemented 2026-08-05.
+
+A weekly report of which upstream projects have shipped a new version since the
+last report, for every container image this estate pins.
+
+It answers a question nothing here answers today, and it is deliberately *not*
+the same question `make image-check` answers.
+
+---
+
+## Why `make image-check` is not this
+
+`image-check` resolves a recorded `# tag:` to the digest that tag points at
+today, and reports the pin as BEHIND when they differ. That is a **digest**
+question. Three consequences make it unable to be a release report:
+
+1. **It covers 13 of 48 pinned images.** A pin with no `# tag:` comment is
+   invisible to it. That is by design — the `BUMP PROCEDURE` block at the top
+   of `apps.yml` argues at length that recording `latest` on a service whose
+   major version migrates data one way turns the report into a standing
+   recommendation to destroy a database.
+
+2. **The 35 it cannot see are the interesting ones.** Sonarr, Jellyfin,
+   Authelia, Grafana, Syncthing, Open WebUI, Immich, Home Assistant — every
+   image deliberately left untracked is one where you actually want to *read
+   about* the release before deciding, which is precisely what a report is for
+   and precisely what a bump recommendation is not.
+
+3. **A moved digest is not a new version.** LinuxServer rebuilds on base-image
+   changes; `4.0.19.2979-ls320` becoming `4.0.19.2979-ls321` moves the digest
+   without Sonarr having released anything. Conversely a pin can sit on an old
+   version for months with its tag unmoved, and `image-check` calls that "up to
+   date".
+
+So this is a sibling, not a replacement. `image-check` says *your pin has
+drifted from the tag you follow*. This says *upstream shipped 2.1.3 on Tuesday,
+here are the notes, you are on 2.1.2*.
+
+---
+
+## How the current version is discovered without a recorded tag
+
+This is the part that makes the whole thing possible, and it was verified
+against the live registries before any of it was designed.
+
+An image's config blob carries OCI labels. Two of them matter:
+
+```
+org.opencontainers.image.version   4.0.19.2979-ls320
+org.opencontainers.image.source    https://github.com/linuxserver/docker-sonarr
+```
+
+Both are readable **from the pinned digest**, over the same read-only registry
+manifest API `scripts/image-digest.sh` already speaks — no pull, no local state,
+no recorded tag. The digest that carries no memory of its tag does carry a
+memory of its version, and that is a strictly better fact: a tag is where the
+image came from, a version is what it *is*.
+
+`.source` gives the upstream GitHub repository, so the release feed is
+discoverable too, with no configuration.
+
+### Measured coverage, 2026-08-05
+
+Across all 48 distinct pins in the four catalogs:
+
+| | count | what it means |
+|---|---:|---|
+| version **and** feed usable | 29 | fully comparable |
+| feed known, version not usable | 15 | upstream release reportable, local version unknown |
+| no feed at all | 4 | unmeasured, and says so |
+
+29/48 comparable with almost no configuration, against `image-check`'s 13/48
+with a hand-recorded tag each. That gap is the argument for building this.
+
+The first draft of this document said 33. That was the count before the
+version-shape rule below rejected four labels that are not versions, and it was
+wrong in the direction that matters — it counted four images as measured that
+would have reported a permanent false "behind". The lower number is the true one.
+
+### The four ways a label lies, all of them observed
+
+None of these are hypothetical. Each was seen in the coverage run above.
+
+- **A version that is not a version.** `open-webui` labels `main`;
+  `itzg/minecraft-server` labels `java25`. Branch and variant names.
+- **A version that is a commit.** Three LinuxServer images label the upstream
+  commit they built from: `cd80d60b-ls59`, `a7c70e36-ls311`, `15bc101c-ls308`.
+  These look far more like versions than `main` does, which is exactly why they
+  slipped through the first implementation and reported as behind.
+- **A source that points at the wrong project.** `calibre-web-automated`
+  labels its source as `linuxserver/docker-baseimage-ubuntu` — the *base
+  image*. Followed naively, the report would announce Ubuntu base-image
+  releases under Calibre-Web's name. This is the worst of the four because it
+  is confidently wrong rather than empty, and nothing about it looks broken.
+- **No labels at all.** The Docker official images (`postgres`, `nextcloud`)
+  and several others carry neither.
+
+So the labels are a default, not a source of truth. Every one is overridable
+per image, and a version must look like a version — a digit and a dot — before
+it is compared to anything. Where that rule is wrong it is wrong in the safe
+direction: a project versioning as a bare `v5` reads as `unknown-version`,
+which means unmeasured and says so, rather than as a permanent false `behind`.
+
+### A guessed feed is worse than no feed
+
+The same rule `apps.yml` states for tags applies here, for the same reason and
+more sharply. An override that points at a plausible-looking repository which
+is not actually the upstream will report someone else's releases as yours,
+indefinitely, and it will look completely healthy doing it.
+
+So an override is recorded only after confirming the repository exists and
+publishes releases. Anything unconfirmed stays unmapped and reports as
+`no-feed`, which reads as **unmeasured** — the same vocabulary, and the same
+honesty, as `image-check`'s UNTRACKED.
+
+---
+
+## Verdicts
+
+Five states per image, never a boolean. The repo has been bitten four times by
+a check whose empty result meant "could not look" and rendered as "all clear";
+`scan.yml` escalates on `inconclusive` for exactly this reason.
+
+| verdict | meaning |
+|---|---|
+| `current` | local version equals the newest upstream release |
+| `behind` | upstream has shipped a newer release |
+| `unknown-version` | feed resolved, but no usable local version to compare |
+| `no-feed` | no upstream feed known — **unmeasured**, not current |
+| `error` | the lookup itself failed: registry down, rate limit, 5xx |
+
+`error` and `no-feed` are counted and printed separately in every output. They
+never fold into "nothing new".
+
+---
+
+## What the report actually says
+
+The user-facing question is *what is new since last week*, not *what is behind*.
+Those differ: an image that has been 3 versions behind for a month is not news,
+and repeating it weekly is how a report becomes wallpaper.
+
+So state is carried in `release_state_file` (beside `scan_state_file`), holding
+the last observed upstream release per image. Each run splits into:
+
+- **NEW SINCE LAST REPORT** — the headline. Upstream release that was not in
+  last week's state. Name, date, and a link to the notes.
+- **STILL BEHIND** — carried forward, one line each, no notes. Present so a
+  deferred upgrade cannot quietly become invisible.
+- **COULD NOT CHECK** — the `error` and `no-feed` sets, always shown.
+
+First run has no state and would otherwise report all 48 images as "new". It
+seeds the baseline and says so, exactly as `scan.yml` does for its first-night
+totals.
+
+---
+
+## Positive control
+
+Per the standing rule — *a check with no positive control is a check nobody can
+tell is broken* — the run fails loudly rather than reporting a quiet all-clear
+when:
+
+- **zero images resolved a version**, or
+- **zero feeds returned a release**.
+
+Both are impossible if the thing ran. 48 images cannot all lose their labels in
+one week, and 30-odd active projects cannot all stop publishing. Either result
+means the parser broke, the network is gone, or the GitHub API is refusing —
+not that the world stopped shipping software.
+
+This is a real positive control, not the weaker tri-state substitute the
+credential canary had to fall back on: there is a fact that *must* be true if
+the check ran, and it is asserted.
+
+### GitHub rate limiting is the likeliest way this breaks
+
+Unauthenticated, the GitHub API allows **60 requests/hour per IP**. Measured, a
+full run costs **45**: 43 distinct upstream repositories after deduplicating
+shared upstreams — beszel and beszel-agent are one repo, immich-server and
+immich-machine-learning are one repo — plus a second call owed by the two that
+404 on `/releases/latest`.
+
+45 of 60 fits a weekly run and nothing else. Running the report twice within an
+hour exhausts the budget, and the second run reports `error`, loudly, rather
+than an all-clear.
+
+**A conditional-request scheme was built for this and then removed, because the
+premise was false.** The design sent last week's `ETag` and claimed GitHub does
+not charge quota for a 304. Measured directly against `/rate_limit` before and
+after: a run in which **40 of 44 feeds answered 304 still consumed 45 requests**.
+The machinery was deleted rather than left in place under a comment explaining
+that it does not do what it says — a caching layer that saves nothing is worse
+than none, because the next person reads the comment instead of the meter.
+
+What is actually done about it:
+
+1. Deduplicate by repository before querying, not per image.
+2. A 403/429 is `error`, never `current`. Exhaustion is visible, not silent.
+3. Every response's `X-RateLimit-Remaining` header is read and the remaining
+   quota is printed in the report and on the console — free, because asking
+   `/rate_limit` would itself be a request. Below 15 remaining, the report says
+   outright that another run within the hour will not complete, since the
+   symptom otherwise is a page of `error` verdicts with no obvious cause.
+4. `GITHUB_TOKEN`, if present in the environment file, raises the limit to
+   5000/hour and makes the whole question go away. Optional, absent by default,
+   and read from the **rendered env file on the host** (`/etc/homelab-release.env`)
+   — never as a `vault_` variable, because the nightly runner executes from a
+   `git archive` where the vault does not exist. That is the mistake `b77f27f`
+   fixed and it is not going to be made again here.
+
+The timer carries `RandomizedDelaySec=600` for the same reason: 45 requests
+against a 60/hour budget is worth keeping away from anything else that might
+share the address.
+
+---
+
+## Where it runs
+
+**svc-infra, weekly, Monday 08:30**, on the same runner as the nightly scan —
+same checkout, same venv, same account (`svcops`).
+
+Verified reachable from svc-infra before choosing it: `api.github.com` returns
+200 and `ghcr.io/v2/` returns its 401 auth challenge, both in ~0.14s. Registry
+egress was already proven by Trivy, which scans every image from this host.
+
+**Monday 08:30** sits in the gap between the alert canary (Mon 08:00) and
+certwatch (09:15), and lands when the estate actually gets looked at — the same
+reasoning the alert canary records for choosing Monday morning.
+
+The counter-argument, from that same file, is that "two weekly checks on one day
+means one bad night can take out both". It is accepted here rather than dodged:
+the two share only the host and ntfy, they are 30 minutes apart, and unlike the
+canary this report is informational — a missed week costs a week of reading, not
+a week of undetected silence. Arriving on the morning it gets read is worth more
+than the independence.
+
+Runnable by hand as `make release-check`, identically to `make scan`.
+
+---
+
+## Report-only, and gated as such
+
+Nothing in this path pulls, bumps, deploys or restarts. It reads registry
+metadata and a release feed, and writes a report.
+
+The new paths are added to `SCAN_PATHS` in `tests/validate_scan_readonly.py`,
+which fails the build if `--remediate`, an upgrade invocation, `state: latest`
+or `podman pull` appears under any of them. Per CLAUDE.md: add the path to the
+gate, never work around it.
+
+**It also does not print `make image-bump` for untracked images.** That
+restraint is the entire point. For the images the `BUMP PROCEDURE` deliberately
+leaves untracked, printing a one-line bump command is the exact harm that block
+was written to prevent. The report links the release notes and stops there —
+*decide*, then bump by hand.
+
+---
+
+## Deliverables
+
+| file | purpose |
+|---|---|
+| `scripts/release_check.py` | the engine: catalogs → labels → feeds → verdicts |
+| `scripts/release-check.sh` | wrapper; `make release-check` |
+| `scripts/image-release.sh` | one image; `make image-release REF=…` |
+| `release.yml` | the playbook; `make release-report` |
+| `roles/svc_infra/templates/release-run.sh.j2` | runner wrapper, mirrors `scan-run.sh.j2` |
+| `roles/svc_infra/templates/release-report.txt.j2` | text report |
+| `roles/svc_infra/templates/release-report.html.j2` | browsable report at `scan.<domain>` |
+| `roles/svc_infra/files/homelab-release@.service/.timer` | the weekly unit |
+| `inventory/group_vars/all/main.yml` | `release_*` vars and `release_feed_overrides` |
+| `inventory/host_vars/svc-infra.yml` | the `OnFailure` drop-in registration |
+| `tests/validate_release_overrides.py` | new gate (below) |
+
+### The new gate
+
+`release_feed_overrides` is a hand-maintained map, which makes it the part most
+likely to rot: an image gets removed from a catalog and its override lingers,
+pointing the report at a project this estate no longer runs. The gate fails the
+build when an override names an image that no pin references — the same shape as
+`validate_scan_image_coverage.py`.
+
+It does not check that the repositories exist. That needs the network, and
+`make validate` is offline by construction.
+
+---
+
+## What this does not do
+
+Stated plainly, so none of it reads as an oversight later.
+
+- **It does not bump anything.** No `image-bump` invocation, no PR, no
+  automation. See above — this is deliberate, not a missing feature.
+- **It does not read release notes for breaking changes.** It links them. The
+  judgement about whether Sonarr v5 migrates a database one way is exactly the
+  judgement `BUMP PROCEDURE` step 4 reserves for a person.
+- **It does not cover non-container software.** Host packages are `dnf` errata,
+  already reported nightly by `scan.yml`; the hypervisor's patch posture is
+  reported by the PVE checks. Overlapping them here would be a second number
+  that disagrees with the first.
+- **It does not track projects that publish no GitHub release.** Some tag
+  without releasing; those read as `no-feed`. Adding tag-listing as a fallback
+  is possible and deliberately deferred — tags are noisier (release candidates,
+  nightly builds, per-arch tags) and getting that filter wrong produces
+  confident nonsense, which is worse than an honest gap.
+- **It does not verify the override targets are the right project.** Only that
+  the image still exists. Correctness of a mapping is a human judgement made
+  once, when it is recorded.
+
+---
+
+## Verification, 2026-08-05
+
+Four things were checked, in this order, because each one only means something
+if the previous one held.
+
+**1. The label read works against live registries.** 48 pins, 47 resolved their
+config blob; 29 yielded a usable version. Verified on ghcr.io, lscr.io and
+docker.io, which authenticate and redirect differently — the blob fetch needs
+the same bearer token as the manifest on ghcr.io, and returns 401 rather than a
+redirect without it, which is how the first implementation failed silently
+across every image at once.
+
+**2. The whole report ran end to end.** 63 seconds, 48 images, 44 feeds
+answered, zero errors. It found 18 images genuinely behind, including Immich
+v3.0.3 → v3.1.0, paperless-ngx 2.20.15 → v3.0.5 and Home Assistant
+2026.7.3 → 2026.8.0.
+
+**3. The degraded path was exercised for real, not simulated.** The quota was
+already exhausted by the measurements above, so the first live run on svc-infra
+had nothing to spend. It produced no parseable output, and:
+
+- the check exited non-zero and the playbook carried on rather than aborting,
+- the state file was **not** promoted (`when: release_ok`), so a broken run
+  could not poison next week's baseline,
+- `homelab release check DEGRADED` was published to `homelab-alerts` and read
+  back off ntfy.
+
+That last point found a real defect. The routine message on the muted topic
+read *"0 new upstream release(s) … 0 up to date across 0 pinned images"* — at a
+glance, indistinguishable from a quiet week. The two messages disagreed, and
+only one of them gets read casually. The summary line now leads with
+`DEGRADED — this run measured nothing`, on both topics.
+
+The same run also caught `{{ domain }}` where the variable is `service_domain`,
+which failed the escalation task outright. Both defects were in the reporting
+path, which is the part no offline gate can see and the part that only matters
+when something is already wrong.
+
+**4. `make validate` passes**, 25 gates including the new
+`validate_release_overrides.py`, and `make infra` reports `changed=0` on a
+second run.
+
+### What is not yet proven
+
+**The timer has not fired on its own schedule.** It is enabled and next due
+Monday 2026-08-10 08:31. Everything below the timer has been run by hand and by
+`make release-report`, so what remains unverified is specifically systemd
+starting the unit — the same gap the NFS guard closed by waiting a week, and it
+will close the same way.
+
+**No `NEW SINCE THE LAST REPORT` section has ever rendered with content.** The
+first successful run seeds the baseline and deliberately reports nothing as new.
+The delta logic is exercised by the `still_behind` split, but the headline
+section stays theoretical until upstream ships something next week.
+
+## Reproducing the coverage measurement
+
+```bash
+scripts/release-check.sh --coverage     # label coverage only, no feed queries
+scripts/image-release.sh lscr.io/linuxserver/sonarr@sha256:24acea…
+```
+
+Both are read-only and safe to run at any time. `--coverage` makes no GitHub
+requests at all, so it cannot consume the rate limit.

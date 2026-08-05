@@ -1,0 +1,86 @@
+{#- Text view of the weekly release report. The HTML sibling renders the same
+    facts; neither derives anything the other does not. -#}
+homelab upstream release report
+{{ ansible_date_time.iso8601 }}
+
+Report-only. This run pulled nothing, bumped nothing and restarted nothing.
+{% if not release_ok %}
+
+*** THIS RUN DID NOT MEASURE WHAT IT CLAIMS TO ***
+{{ release.summary.detail }}
+
+    Everything below is a floor, not a total. A release report that could not
+    look is not a week with no new releases.
+{% endif %}
+{% if release.seeded | default(false) %}
+
+FIRST RUN — no baseline existed, so nothing is reported as new. All
+{{ release_behind | length }} images already behind are listed below rather
+than announced as this week's news. Next week's report is the first real one.
+{% endif %}
+{% if release_new | length > 0 %}
+
+NEW SINCE THE LAST REPORT ({{ release_new | length }})
+{{ '=' * 60 }}
+{% for r in release_new | sort(attribute='published', reverse=true) %}
+{{ r.name }}  {{ r.version }} -> {{ r.latest }}
+    released  {{ r.published[:10] | default('unknown', true) }}   {{ r.latest_name }}
+    notes     {{ r.url }}
+    image     {{ r.image }}
+{% endfor %}
+{% else %}
+
+NEW SINCE THE LAST REPORT: none.
+{% endif %}
+{% if release_behind | length > 0 %}
+
+STILL BEHIND ({{ release_behind | length }}) — reported before, unchanged
+{{ '=' * 60 }}
+{% for r in release_behind | sort(attribute='name') %}
+{{ "%-30s %-26s -> %s" | format(r.name, r.version, r.latest) }}
+{% endfor %}
+
+    Some of these are permanent and correct. A pin held deliberately to an
+    older line — postgres on 18-alpine, Immich on a release its database
+    migration can be reasoned about — reads as behind for as long as that
+    decision stands, because "behind" here means exactly "the pinned version is
+    not the newest upstream release" and nothing more.
+{% endif %}
+{% if release_unmeasured | length > 0 %}
+
+COULD NOT CHECK ({{ release_unmeasured | length }})
+{{ '=' * 60 }}
+{% for r in release_unmeasured | sort(attribute='name') %}
+{{ "%-30s %-16s" | format(r.name, r.verdict) }} {{ r.detail }}
+{% endfor %}
+
+    These are UNMEASURED, not up to date. The distinction is the same one
+    `make image-check` draws with UNTRACKED, and it is the reason this section
+    is never folded into the totals above.
+{% endif %}
+
+TOTALS
+{{ '=' * 60 }}
+up to date  {{ release_counts.current | default(0) }}
+behind      {{ release_counts.behind | default(0) }}
+no feed     {{ release_counts['no-feed'] | default(0) }}
+no version  {{ release_counts['unknown-version'] | default(0) }}
+errors      {{ release_counts.error | default(0) }}
+
+{{ release.summary.versions_resolved | default(0) }}/{{ release.summary.images_examined | default(0) }} pinned images resolved a version from their OCI labels.
+{{ release.summary.feeds_answered | default(0) }} upstream feeds answered.
+{% if release.summary.quota_remaining is defined and release.summary.quota_remaining is not none %}
+GitHub API quota left: {{ release.summary.quota_remaining }}/{{ release.summary.quota_limit }}{{ '' if release.summary.authenticated | default(false) else '  (unauthenticated)' }}
+{% endif %}
+
+WHAT TO DO WITH THIS
+{{ '=' * 60 }}
+Nothing automatically. This report deliberately prints no bump command: for
+the images apps.yml leaves untracked on purpose, a one-line `make image-bump`
+is precisely the standing recommendation the BUMP PROCEDURE block exists to
+prevent. Read the release notes, decide, then follow that procedure by hand.
+
+Before bumping anything, check what the service persists. A bad digest is safe
+— the pre-pull aborts the deploy with the old container still serving — but a
+bad VERSION is not, and an image that starts fine can migrate a database one
+way while every health check stays green.

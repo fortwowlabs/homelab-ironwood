@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# homelab-release-run.sh — run the weekly upstream release report.
+#
+# Mirrors scan-run.sh.j2 in shape and for the same reasons, with one deliberate
+# difference: THERE IS NO HEALTHCHECKS.IO PING HERE.
+#
+# That is a judgement, not an omission. A dead-man's switch answers "did this
+# run at all", and it is worth an external account for the nightly verify and
+# scan because their silence hides a broken estate. This report's silence hides
+# a week of unread release notes. It publishes to ntfy on every run, which
+# bounds the same question at one week from inside the house, and adding a
+# fifth external check for a report costs an account and a page of noise for a
+# failure nobody needs to be woken by.
+#
+# The PVE host is excluded the same way the other runners exclude it — this
+# account holds no SSH key for root and should not have one. Nothing in this
+# playbook touches a hypervisor anyway; it reads registries and a release feed.
+set -uo pipefail
+
+ROOT={{ verify_runner_root | quote }}
+SECRET_FILE={{ verify_runner_secret_file | quote }}
+RUNNER={{ verify_runner_user | quote }}
+
+# The GitHub token, if one is configured, is read from the rendered environment
+# file on the host — NEVER as a vault variable. This playbook runs out of a
+# `git archive` checkout in which the vault does not exist, so a vault lookup
+# would be undefined exactly where it is needed. b77f27f is that mistake, made
+# once already, by an assert that passed on the workstation and failed on all
+# three hosts at 04:01.
+#
+# Absent is the normal case and is fine: unauthenticated GitHub allows 60
+# requests an hour and a full run costs about 45. That fits a weekly run and
+# nothing else, which is why the report prints the remaining quota and why
+# running it twice in an hour produces errors rather than an all-clear.
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-release.env ]] && . /etc/homelab-release.env
+export GITHUB_TOKEN="${GITHUB_TOKEN:-}"
+
+if [[ ! -r "$SECRET_FILE" ]]; then
+    # The report itself needs no secret, but the playbook is reached through
+    # the same ansible-playbook invocation as the others and inventory
+    # rendering pulls vault-backed variables. Say why rather than failing on a
+    # decrypt error twenty lines into the run.
+    echo "$SECRET_FILE is missing — the one-time manual step in docs/operations.md has not been done, so the weekly release report cannot run" >&2
+    exit 1
+fi
+
+# Ansible writes control sockets, temp files and a fact cache; point all of them
+# inside the runner's own tree so nothing depends on a writable HOME or a
+# shared /tmp.
+export ANSIBLE_CONFIG="${ROOT}/ansible.cfg"
+export ANSIBLE_HOME="${ROOT}/.ansible"
+export ANSIBLE_LOCAL_TEMP="${ROOT}/.ansible/tmp"
+export XDG_CACHE_HOME="${ROOT}/.ansible/cache"
+mkdir -p "$ANSIBLE_LOCAL_TEMP" "$XDG_CACHE_HOME"
+
+rev=$(cat "${ROOT}/.deployed-rev" 2>/dev/null || echo unknown)
+echo "reporting releases against revision ${rev}"
+
+cd "$ROOT" || exit 1
+"${ROOT}/.venv/bin/ansible-playbook" release.yml \
+    --vault-password-file "$SECRET_FILE" \
+    --limit 'infra_vms'
+rc=$?
+
+# A nonzero rc means the PLAY failed — not that images are behind. Being behind
+# is normal and expected here, and release.yml absorbs the check script's own
+# exit code rather than letting it reach this wrapper: the script exits 1 when
+# its positive control trips, and that is a finding to publish, not a run to
+# abort. So anything arriving here is Ansible itself having failed, which
+# OnFailure= reports.
+if (( rc == 0 )); then
+    echo "release report completed (revision ${rev}, runner ${RUNNER})"
+    exit 0
+fi
+
+echo "release report FAILED to complete with rc=${rc} (revision ${rev})" >&2
+exit 1

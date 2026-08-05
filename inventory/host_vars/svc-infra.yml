@@ -72,3 +72,9 @@ onfailure_units_extra:
   # carries the news is the unit sitting in `failed`, which
   # homelab-failedunits.service and `make verify` both see without ntfy.
   - homelab-alert-canary.service
+  # The weekly release report. Like the scan drop-in above, this covers the run
+  # FAILING TO HAPPEN — release.yml publishes its own findings to ntfy and
+  # escalates its own degraded runs, so the only failure left uncovered is the
+  # wrapper dying before Ansible starts. Without it a report that stopped
+  # arriving would look exactly like a quiet week upstream.
+  - homelab-release@.service

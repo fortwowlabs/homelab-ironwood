@@ -277,3 +277,46 @@
     enabled: true
     state: started
     daemon_reload: "{{ scan_runner_units is changed }}"
+
+# ------------------------------------------- weekly release report ---
+# Reuses the checkout, venv and account above. Its report goes to the same
+# directory the scan writes to, served by the same static-web-server, because
+# the two are read in the same sitting. See docs/plans/release-report.md.
+- name: Install the release check
+  ansible.builtin.copy:
+    src: "{{ playbook_dir }}/scripts/release_check.py"
+    dest: "{{ release_check_bin }}"
+    owner: root
+    group: root
+    # 0755 for the same reason as the scan wrapper: the unit runs as svcops,
+    # and a script it cannot execute fails in a way that looks like the check
+    # failing rather than the permissions being wrong. That is the trap that
+    # made hc-ping.sh silently permission-denied for the verify runner.
+    mode: "0755"
+
+- name: Install the release report wrapper
+  ansible.builtin.template:
+    src: release-run.sh.j2
+    dest: /usr/local/sbin/homelab-release-run.sh
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the weekly release report units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - homelab-release@.service
+    - homelab-release@.timer
+  register: release_runner_units
+
+- name: Arm the weekly release report timer
+  ansible.builtin.systemd:
+    name: "homelab-release@{{ verify_runner_user }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: "{{ release_runner_units is changed }}"

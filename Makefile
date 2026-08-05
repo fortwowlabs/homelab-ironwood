@@ -12,6 +12,7 @@ PREFLIGHT_PLAYBOOK := preflight.yml
 VERIFY_PLAYBOOK := verify.yml
 DISRUPTIVE_PLAYBOOK := verify-disruptive.yml
 SCAN_PLAYBOOK := scan.yml
+RELEASE_PLAYBOOK := release.yml
 FIXTURE_INVENTORY := tests/fixtures/inventory.yml
 
 VENV := .venv
@@ -56,7 +57,8 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 .PHONY: help deps deps-dev validate validate-tools validate-syntax \
 	validate-ansible validate-yaml validate-shell validate-links \
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
-	check check-diff verify verify-disruptive scan image-digest image-check image-bump drift reconcile access ping lint \
+	check check-diff verify verify-disruptive scan image-digest image-check image-bump \
+	release-check release-report image-release drift reconcile access ping lint \
 	vault-edit clean
 
 help: ## Show this help
@@ -87,9 +89,10 @@ validate-syntax:
 	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE) --inventory $(FIXTURE_INVENTORY) --syntax-check $(VERIFY_PLAYBOOK)
 	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE) --inventory $(FIXTURE_INVENTORY) --syntax-check $(DISRUPTIVE_PLAYBOOK)
 	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE) --inventory $(FIXTURE_INVENTORY) --syntax-check $(SCAN_PLAYBOOK)
+	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE) --inventory $(FIXTURE_INVENTORY) --syntax-check $(RELEASE_PLAYBOOK)
 
 validate-ansible:
-	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE_LINT) --offline --profile min $(PLAYBOOK) $(PREFLIGHT_PLAYBOOK) $(VERIFY_PLAYBOOK) $(DISRUPTIVE_PLAYBOOK) $(SCAN_PLAYBOOK)
+	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE_LINT) --offline --profile min $(PLAYBOOK) $(PREFLIGHT_PLAYBOOK) $(VERIFY_PLAYBOOK) $(DISRUPTIVE_PLAYBOOK) $(SCAN_PLAYBOOK) $(RELEASE_PLAYBOOK)
 
 validate-yaml:
 	$(YAMLLINT) $(YAML_FILES)
@@ -108,6 +111,7 @@ validate-catalog:
 	$(PYTHON) tests/validate_sso.py
 	$(PYTHON) tests/validate_scan_image_coverage.py
 	$(PYTHON) tests/validate_image_provenance.py
+	$(PYTHON) tests/validate_release_overrides.py
 
 validate-provisioning:
 	$(PYTHON) tests/validate_pve_states.py
@@ -187,6 +191,16 @@ image-digest: ## Resolve REF=<image:tag> to the pinnable @sha256 digest
 
 scan: ## Run the report-only security scan (never remediates)
 	$(ANSIBLE) $(SCAN_PLAYBOOK) $(VAULT) $(ARGS)
+
+release-check: ## Report what upstream has released, against the tree in front of you
+	@scripts/release-check.sh $(ARGS)
+
+release-report: ## Run the weekly release report on svc-infra (publishes + records state)
+	$(ANSIBLE) $(RELEASE_PLAYBOOK) $(VAULT) --limit infra_vms $(ARGS)
+
+image-release: ## What version is REF, and what has upstream released since?
+	@test -n "$(REF)" || { echo 'usage: make image-release REF=lscr.io/linuxserver/sonarr' >&2; exit 64; }
+	@scripts/image-release.sh "$(REF)"
 
 verify-disruptive: ## Explicitly run the fail-closed recovery drill
 	$(ANSIBLE) $(DISRUPTIVE_PLAYBOOK) $(VAULT) $(ARGS)
