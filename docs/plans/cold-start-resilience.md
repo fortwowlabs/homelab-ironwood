@@ -88,10 +88,15 @@ The only diff against the pre-test baseline was `/srv/backups` sitting at
 rather than assumed: it mounted instantly on first access on both hosts.
 `make verify` green on all hosts.
 
-**Still true after the fix:** the two Windows guests (w10-edgar, w10-batsmores)
-have `agent: 1` configured with no guest agent running, ignore ACPI, and are
-force-stopped after their timeout. That is F6, unchanged and still out of
-scope — but it is why the shutdown takes 3 m rather than well under one.
+**True as of this test (2026-08-04):** the two Windows guests (w10-edgar,
+w10-batsmores) had `agent: 1` configured with no guest agent running, ignored
+ACPI, and were force-stopped after their timeout. That is F6 — and it is why
+the shutdown took 3 m rather than well under one.
+
+> **Superseded for w10-edgar on 2026-08-05:** its guest agent is now installed
+> and answering. See the F6 section below for what was verified and what was
+> not. Whether that actually shortens the shutdown has not been retested, so
+> the 3 m figure above stands until a cold start measures otherwise.
 
 ## F1 (critical, root cause) — the NFS server has no boot order
 
@@ -334,6 +339,8 @@ Per the standing rule in CLAUDE.md: a gate that cannot fail is not a gate, and
 
 - **F5, TrueNAS EFI disk.** Adding one to a running TrueNAS VM is an
   out-of-band change with its own risk, and it caused nothing observed here.
-- **F6, w10-edgar's guest agent.** Not managed by this repo.
+- **F6, w10-edgar's guest agent.** Not managed by this repo. Resolved out of
+  band on 2026-08-05 and verified live (`qm agent 108 ping`); w10-batsmores
+  remains unmeasured because it was powered off at the time.
 - **The test itself is not automated.** Re-running it means real downtime, so
   it stays a deliberate act. The findings above are what the gates now defend.
