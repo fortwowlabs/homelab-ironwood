@@ -293,3 +293,17 @@ vault_hc_ping_heartbeat: ""
 # verify gate rejects any empty HC_PING_* value, and svc-media renders the same
 # file while never running the scan. See healthchecks.env.j2 for the full note.
 vault_hc_ping_scan:      ""
+
+# --- GitHub API token for the weekly release report -------------------------
+# OPTIONAL, and empty is the normal state. The report reads registry labels and
+# GitHub release feeds; unauthenticated that is 60 requests an hour per IP and a
+# full run costs about 45. The first live run on 2026-08-05 exhausted the budget
+# on its 48th image and reported `error` for it — visibly and correctly, but a
+# report one flaky retry from incomplete is worth a token. This raises the limit
+# to 5000/hour.
+#
+# IT NEEDS NO SCOPES. Every repository it reads is public, so a classic token
+# with nothing ticked, or a fine-grained token limited to "Public repositories
+# (read-only)", is the right shape. Granting more buys nothing and widens what
+# a leak would cost.
+vault_github_token: ""

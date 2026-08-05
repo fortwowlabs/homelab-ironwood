@@ -101,26 +101,33 @@
              if (not release_ok)
              else ((release_counts.error | default(0)) ~ ' image(s) could not be '
                    ~ 'checked at all — the release counts below are a floor, not a total') }}
-        # One line, and every conditional clause stays on ONE line. YAML's
-        # folded scalar keeps a literal newline wherever a continuation indents
-        # further than the first, which put blank lines into the middle of every
-        # ntfy message the scan sent until it was fixed there.
-        # The DEGRADED prefix leads, and it is not decoration. Read back off
-        # ntfy during the first live test, a broken run's routine message said
-        # "0 new upstream release(s) ... 0 up to date across 0 pinned images" —
-        # which on the muted topic, at a glance, is indistinguishable from a
-        # quiet week. The escalation on the alert topic carried the truth, but
-        # the two messages disagreed and only one of them gets read casually.
-        release_summary_line: >-
-          {{ ('DEGRADED — this run measured nothing: ' ~ release.summary.detail ~ '. ') if (not release_ok) else '' }}
-          {{ release_new | length }} new upstream release(s) since the last report;
-          {{ release_behind | length }} still behind,
-          {{ release_counts.current | default(0) }} up to date across
-          {{ release.summary.images_examined | default(0) }} pinned images
-          ({{ release_unmeasured | length }} unmeasured).
-          {{ (release_new | map(attribute='name') | join(', ')) if (release_new | length > 0) else '' }}
-          {{ ('; SEEDED — this run had no baseline, so nothing is reported as new') if (release.seeded | default(false)) else '' }}
-          {{ ('; ' ~ (release_counts.error | default(0)) ~ ' COULD NOT BE CHECKED') if ((release_counts.error | default(0) | int) > 0) else '' }}
+    # Built as a list and joined, rather than as one folded scalar. A folded
+    # scalar joins its lines with a space unconditionally, so every clause that
+    # renders empty leaves a double space behind — scan.yml carries exactly
+    # that artifact, and its neighbouring comment records an earlier round of
+    # the same fight where the folding put whole blank lines mid-message.
+    # `select` drops the empty clauses before the join, so the spacing is right
+    # for any combination of them and no clause has to know about the others.
+    - name: Compose the one-line summary
+      ansible.builtin.set_fact:
+        release_summary_line: "{{ summary_parts | select | join(' ') }}"
+      vars:
+        summary_parts:
+          # DEGRADED leads, and it is not decoration. Read back off ntfy during
+          # the first live test, a broken run's routine message said "0 new
+          # upstream release(s) ... 0 up to date across 0 pinned images" —
+          # which on the muted topic, at a glance, is indistinguishable from a
+          # quiet week. The escalation carried the truth, but the two messages
+          # disagreed and only one of them gets read casually.
+          - "{{ ('DEGRADED — this run measured nothing: ' ~ release.summary.detail ~ '.') if not release_ok else '' }}"
+          - "{{ release_new | length }} new upstream release(s) since the last report;"
+          - "{{ release_behind | length }} still behind,"
+          - "{{ release_counts.current | default(0) }} up to date across"
+          - "{{ release.summary.images_examined | default(0) }} pinned images"
+          - "({{ release_unmeasured | length }} unmeasured)."
+          - "{{ release_new | map(attribute='name') | join(', ') }}"
+          - "{{ 'SEEDED — no baseline existed, so nothing is reported as new.' if release.seeded | default(false) else '' }}"
+          - "{{ ((release_counts.error | default(0)) ~ ' COULD NOT BE CHECKED — the counts above are a floor.') if (release_counts.error | default(0) | int) > 0 else '' }}"
 
     - name: Write the release report
       ansible.builtin.template:

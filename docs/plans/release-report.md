@@ -204,12 +204,17 @@ What is actually done about it:
    `/rate_limit` would itself be a request. Below 15 remaining, the report says
    outright that another run within the hour will not complete, since the
    symptom otherwise is a page of `error` verdicts with no obvious cause.
-4. `GITHUB_TOKEN`, if present in the environment file, raises the limit to
-   5000/hour and makes the whole question go away. Optional, absent by default,
-   and read from the **rendered env file on the host** (`/etc/homelab-release.env`)
-   — never as a `vault_` variable, because the nightly runner executes from a
+4. `GITHUB_TOKEN` raises the limit to 5000/hour and makes the whole question go
+   away. Set `vault_github_token` and redeploy; it renders to
+   `/etc/homelab-release.env` (0600 root) at **deploy** time, when the vault
+   exists, and is read from that file at **run** time — never as a `vault_`
+   variable inside the playbook, because the runner executes from a
    `git archive` where the vault does not exist. That is the mistake `b77f27f`
    fixed and it is not going to be made again here.
+
+   The token needs **no scopes**: every repository read is public and it is
+   there only to count faster. A classic token with nothing ticked, or a
+   fine-grained one limited to public read, is the correct shape.
 
 The timer carries `RandomizedDelaySec=600` for the same reason: 45 requests
 against a 60/hour budget is worth keeping away from anything else that might
@@ -324,10 +329,20 @@ the same bearer token as the manifest on ghcr.io, and returns 401 rather than a
 redirect without it, which is how the first implementation failed silently
 across every image at once.
 
-**2. The whole report ran end to end.** 63 seconds, 48 images, 44 feeds
-answered, zero errors. It found 18 images genuinely behind, including Immich
-v3.0.3 → v3.1.0, paperless-ngx 2.20.15 → v3.0.5 and Home Assistant
-2026.7.3 → 2026.8.0.
+**2. The whole report ran end to end**, first from a workstation and then on
+svc-infra through `make release-report`: 48 images, 18 genuinely behind, 9 up to
+date, 21 unmeasured. Among the findings were Immich v3.0.3 → v3.1.0,
+paperless-ngx 2.20.15 → v3.0.5 and Home Assistant 2026.7.3 → 2026.8.0. Both the
+text and HTML reports rendered, and the baseline was seeded.
+
+That run also **ran out of GitHub quota on its 48th image**, starting from 50
+available against a cost of ~45. It reported that one image as
+`error  feed: HTTP 403 from api.github.com (quota 0/60)` and escalated, rather
+than reporting it as current. The design worked exactly as intended — and the
+margin it demonstrated is why `GITHUB_TOKEN` stopped being a documented
+possibility and became a rendered file: `/etc/homelab-release.env`, 0600 root,
+from `vault_github_token`, empty by default, needing no scopes because every
+repository read is public.
 
 **3. The degraded path was exercised for real, not simulated.** The quota was
 already exhausted by the measurements above, so the first live run on svc-infra
@@ -350,7 +365,16 @@ which failed the escalation task outright. Both defects were in the reporting
 path, which is the part no offline gate can see and the part that only matters
 when something is already wrong.
 
-**4. `make validate` passes**, 25 gates including the new
+**4. The baseline survives a partial run**, which is the rule scan.yml learned
+from a real false alarm and the one most likely to bite here. A later run with
+the quota already at zero measured only 8 of 48 images and reported 33 as
+`error` — and the state file still held **42** remembered releases afterwards,
+because `state_from` carries the previous entry forward wherever this run
+measured nothing. Had it written only what it measured, every one of those 34
+unchanged releases would have resurfaced as NEW the following week, and a
+report that cries wolf once has spent the only credibility it had.
+
+**5. `make validate` passes**, 25 gates including the new
 `validate_release_overrides.py`, and `make infra` reports `changed=0` on a
 second run.
 
