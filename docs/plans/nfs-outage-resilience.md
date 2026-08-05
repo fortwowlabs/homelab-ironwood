@@ -270,6 +270,52 @@ only svc-infra. That reads exactly like a successful exclusion and is in fact
 "could not look". Scrape node_exporter from the host itself or from svc-infra,
 never from a third machine.
 
+### Confirmed against a real outage, 2026-08-05
+
+Everything above verifies the guard by construction and by synthetic trigger.
+That is not the same as verifying it in the condition it exists for, so a
+second outage was run with the guard live: TrueNAS stopped 08:00:29, started
+08:05:50.
+
+The specific thing that was unproven is whether `qm status` — the guard's first
+probe, which talks to pvedaemon — stays responsive while every NFS client is
+wedged. It does, measured every 30s across the outage:
+
+```
+08:01:15  qm status -> status: stopped  in 527ms
+08:02:16  qm status -> status: stopped  in 529ms
+08:03:17  qm status -> status: stopped  in 540ms
+08:04:49  qm status -> status: stopped  in 596ms
+```
+
+The guard fired on its own timer at 08:05:16 and the alert was read back off
+ntfy **while the outage was still in progress** — delivery from the hypervisor
+to ntfy on svc-media works even with svc-media's PID 1 wedged, because the ntfy
+container was already running and never touches NFS:
+
+```
+[08:05:16] priority=5  STORAGE DOWN: NFS on thurgadin
+           storage VM 100 is not running (status: stopped). ...
+[08:11:16] priority=3  Storage recovered on thurgadin
+           NFS on 192.168.1.20:2049 is answering again.
+```
+
+Detection latency **4m47s**, inside the 5-minute bound. Note the verdict text
+differs from the synthetic run: this was `VM not running`, the other was `VM up
+but nothing listening` — two different branches of the probe, both now
+exercised for real.
+
+Exactly two messages were sent for a 5m21s outage, one per transition. The
+guard ran twice during it (08:05:16 and 08:11:16) and the dedupe suppressed a
+second `down`, which is the behaviour that keeps a long outage from becoming a
+push every five minutes.
+
+The post-outage health check diffed against the original baseline with **the
+two alert messages as the only difference** — every container, unit, mount and
+endpoint identical. Compare that to the 2026-08-04 run, where the diff was also
+clean but the alert section was empty, and the estate had no way to tell anyone
+anything had happened.
+
 ## Reproducing this test
 
 ```bash

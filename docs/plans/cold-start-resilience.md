@@ -282,6 +282,28 @@ the guest, so `qm shutdown` fell back to ACPI, which Windows ignored. It never
 shut down and had to be `qm stop`-ed. Not managed by this repo.
 **Recorded, not fixed.**
 
+> **Resolved out of band, 2026-08-05.** The agent is now installed and running
+> in w10-edgar — verified live, not inferred from the `agent: 1` line that was
+> already there while the agent was absent:
+>
+> ```
+> qm agent 108 ping        -> OK
+> qm agent 108 get-osinfo  -> Microsoft Windows 10 Education, build 19045
+> qm agent 108 get-host-name -> EDGAR
+> ```
+>
+> That is what distinguishes this from the original finding: `agent: 1` is
+> hypervisor-side configuration and says nothing about the guest. A `ping` that
+> answers can only come from an agent that is actually running.
+>
+> **w10-batsmores (106) is unchanged** — still `agent: 1`, still no verified
+> agent. It was powered off at the time of the check, and an agent cannot be
+> probed in a stopped guest, so this is "not measured", not "still broken".
+>
+> Whether `qm shutdown` is now graceful for 108 has **not** been retested; that
+> needs an actual shutdown of a guest in use. The agent's presence fixes IP
+> reporting and backup fsfreeze regardless.
+
 ## §5 — the gates
 
 Only one new gate was needed; the unit-liveness one already existed (see F3).
