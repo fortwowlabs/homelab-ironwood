@@ -74,10 +74,19 @@ Across all 48 distinct pins in the four catalogs:
 29/48 comparable with almost no configuration, against `image-check`'s 13/48
 with a hand-recorded tag each. That gap is the argument for building this.
 
-The first draft of this document said 33. That was the count before the
-version-shape rule below rejected four labels that are not versions, and it was
-wrong in the direction that matters — it counted four images as measured that
-would have reported a permanent false "behind". The lower number is the true one.
+**Two corrections to this number, both downward, both mine.**
+
+The first draft said 33. That was before the version-shape rule below rejected
+four labels that are not versions, and it was wrong in the direction that
+matters — it counted four images as measured that would have reported a
+permanent false "behind".
+
+And 29 is what `--coverage` reports; a **full run compares 27**. Coverage mode
+counts mariadb and searxng, which have a usable version label and a real
+upstream repository but publish no GitHub *releases* — something it cannot know
+without spending the request it exists to avoid. Both figures are honest about
+different things; 27 is the one to quote for "how much does this actually
+measure". See `docs/plans/container-inventory-audit.md` F6.
 
 ### The four ways a label lies, all of them observed
 
