@@ -109,7 +109,21 @@ infra_apps:
   # Home Assistant. Host networking, because auto-discovery of LAN devices is
   # the whole point of the thing and container-NAT'd networking cannot do it —
   # same reason as Syncthing above. Integrations added by IP worked without
-  # this; zeroconf/SSDP ones did not.
+  # this; zeroconf ones did not.
+  #
+  # Confirmed, not assumed: after this landed HA discovered ten Google Cast
+  # devices and Thread with source=zeroconf in .storage/core.config_entries.
+  # SSDP is still UNTESTED — no UPnP device has appeared on this LAN — so 1900
+  # is opened on the same reasoning as 5353, not on evidence.
+  #
+  # To re-test discovery later, COUNT source=zeroconf/dhcp entries in
+  # .storage/core.config_entries. Do not hand-roll an mDNS probe: one written
+  # here queried _services._dns-sd._udp.local (the optional meta-query Google
+  # hardware ignores) from an ephemeral port, so it missed every responder that
+  # answers to the 224.0.0.251:5353 group HA itself holds. It reported one
+  # responder on a LAN of twenty and nearly bought a needless bridge-mcsnoop
+  # change on the hypervisor. HA's own record is the positive control; a
+  # hand-rolled probe returns "none found" when it means "could not look".
   #
   # extra_ports is NOT optional here, and this is the part that is easy to get
   # wrong: host networking alone does not make discovery work. firewalld's
@@ -123,14 +137,20 @@ infra_apps:
   # 8123 is claimed by nothing else here; validate_infra_catalog's claim_port
   # keeps it that way.
   #
-  # Two of HA's discovery backends still do NOT work, and they log an error
-  # each at every start — expected, not a regression to chase:
-  #   habluetooth  "Missing NET_ADMIN/NET_RAW capabilities"
+  # Two errors are logged at every start. Both are expected, neither is a
+  # regression to chase, and the second one does NOT mean what it says:
+  #   habluetooth     "Missing NET_ADMIN/NET_RAW capabilities"
   #   aiodhcpwatcher  "Cannot watch for dhcp packets: Operation not permitted"
-  # Both want raw-socket capabilities that a ROOTLESS container sharing the
-  # host netns cannot hold, so the only fix is running this one rootful — not
-  # worth it for DHCP-based discovery (zeroconf and SSDP, which are the two
-  # that matter, both bind fine) and there is no Bluetooth adapter on a VM.
+  # Both want raw-socket capabilities a ROOTLESS container sharing the host
+  # netns cannot hold, and the only fix would be running this one rootful.
+  #
+  # But DHCP discovery still WORKS. Only the passive packet sniffer is dead;
+  # HA's dhcp integration falls back to ARP scanning (aiodiscover), which needs
+  # no capability, and that fallback is what found the TP-Link KP115. So do not
+  # read the aiodhcpwatcher line as "DHCP discovery is unavailable" — it is one
+  # of two mechanisms, and the surviving one is sufficient.
+  #
+  # Bluetooth genuinely is unavailable, and there is no adapter on a VM anyway.
   #
   # The image runs as container-root by default, which under rootless podman
   # maps to the host homelab user, so /config stays writable and
