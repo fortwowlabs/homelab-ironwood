@@ -443,10 +443,25 @@ Monday 2026-08-10 08:31. Everything below the timer has been run by hand and by
 starting the unit — the same gap the NFS guard closed by waiting a week, and it
 will close the same way.
 
-**No `NEW SINCE THE LAST REPORT` section has ever rendered with content.** The
-first successful run seeds the baseline and deliberately reports nothing as new.
-The delta logic is exercised by the `still_behind` split, but the headline
-section stays theoretical until upstream ships something next week.
+~~**No `NEW SINCE THE LAST REPORT` section has ever rendered with content.**~~
+**Proven 2026-08-06.** A run against an established baseline reported exactly
+two, correctly split from the eighteen carried forward:
+
+```
+NEW SINCE THE LAST REPORT (2)
+semaphore  v2.18.28 -> v2.19.7      released 2026-08-06
+sabnzbd    5.0.4-ls262 -> 5.0.4-ls265   released 2026-08-06
+```
+
+Both had genuinely shipped that day, and the other eighteen behind-images
+stayed in `STILL BEHIND` rather than being re-announced — which is the whole
+point of the delta and the thing that keeps this from becoming wallpaper.
+
+The sabnzbd entry is also a fair illustration of the report's limits: the
+application version did not change at all, only LinuxServer's build number
+(`-ls262` to `-ls265`). That is a real new image worth knowing about and it is
+not a new SABnzbd. The report says what moved and links the notes; deciding
+whether a base-image rebuild is worth a deploy is the reader's call.
 
 ## Reproducing the coverage measurement
 
