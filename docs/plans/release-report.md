@@ -81,12 +81,18 @@ four labels that are not versions, and it was wrong in the direction that
 matters — it counted four images as measured that would have reported a
 permanent false "behind".
 
-And 29 is what `--coverage` reports; a **full run compares 27**. Coverage mode
+And 29 is what `--coverage` reports; a **full run compared 27**. Coverage mode
 counts mariadb and searxng, which have a usable version label and a real
 upstream repository but publish no GitHub *releases* — something it cannot know
 without spending the request it exists to avoid. Both figures are honest about
-different things; 27 is the one to quote for "how much does this actually
-measure". See `docs/plans/container-inventory-audit.md` F6.
+different things; the full-run one is what to quote for "how much does this
+actually measure". See `docs/plans/container-inventory-audit.md` F6.
+
+**Since then it is 30**, because three images that carry no version label are
+now measured by asking the running service instead — see "Versions from the
+running process" below. `--coverage` still says 29: it makes no probes, so its
+number and the report's have drifted apart in the other direction now. Neither
+is wrong; they answer different questions, and the report prints which.
 
 ### The four ways a label lies, all of them observed
 
@@ -111,6 +117,48 @@ per image, and a version must look like a version — a digit and a dot — befo
 it is compared to anything. Where that rule is wrong it is wrong in the safe
 direction: a project versioning as a bare `v5` reads as `unknown-version`,
 which means unmeasured and says so, rather than as a permanent false `behind`.
+
+### Versions from the running process
+
+Added 2026-08-05, after the container inventory audit. Some images carry no
+version label at all, but the *application inside* reports its version over
+HTTP. Asking it is strictly better than reading a label: the label says what the
+build system claimed, the endpoint says what is actually answering right now.
+
+So `release_version_probes` in `main.yml` maps an image to a URL and a regex,
+`release.yml` probes them, and a probed version **wins over a label** wherever
+both exist.
+
+| service | endpoint | field |
+|---|---|---|
+| Grafana | `/api/health` | `version` |
+| Prometheus | `/api/v1/status/buildinfo` | `version` |
+| node-exporter | `/metrics`, over **loopback** | `node_exporter_build_info{version=…}` |
+
+One regex mechanism covers JSON and Prometheus text alike, which avoids a
+parser branch that would need testing of its own. node-exporter is probed on
+127.0.0.1 rather than the LAN address because firewalld admits `:9100` only
+from svc-infra — scraping it from anywhere else returns nothing, which reads
+exactly like a service with no version. That trap already cost a day during the
+NFS outage work.
+
+Effect: compared images 27 → 30, unmeasured 21 → 18, and it immediately found
+Grafana on 13.1.1 against 13.1.2 and Prometheus on 3.13.1 against 3.13.2 —
+neither visible to any check here before.
+
+A captured value is discarded unless it still looks like a version, so a service
+that changes its response shape reverts to `unknown-version` rather than
+reporting whatever the regex happened to catch.
+
+**Uptime Kuma is deliberately absent, and was named as a candidate before being
+measured.** `/api/entry-page`, `/metrics` and `/` all return no version to an
+unauthenticated caller — it is a socket.io application whose metrics endpoint
+needs a key. The three URLs are recorded in the variable's comment so they are
+not re-probed next year.
+
+`make release-check` from a workstation makes no probes, so those three read as
+`unknown-version` there. That is honest rather than ideal: the probes need to
+run on the host that can reach the services.
 
 ### A guessed feed is worse than no feed
 

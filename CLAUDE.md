@@ -119,15 +119,18 @@ moved. The full procedure is the `BUMP PROCEDURE` block at the top of
 
 `image-check` answers "has my pin drifted from the tag it follows", which it can
 only do for the 13 images carrying a `# tag:`. `make release-check` answers
-"what has upstream released", which it answers for **27 of 48** — including the
+"what has upstream released", which it answers for **30 of 48** — including the
 untracked ones, whose release notes are the ones actually worth reading before a
 decision. It reads the version out of each pinned digest's OCI labels, so it
-needs no recorded tag.
+needs no recorded tag, and for three services that ship no label it asks the
+running process instead (`release_version_probes`).
 
-(`--coverage` says 29. It counts mariadb and searxng, which have a usable
-version and a real upstream repository but publish no GitHub *releases* — which
-coverage mode cannot know without spending the request it exists to avoid. 27 is
-the number that actually compares.)
+(Two other numbers appear and mean different things. `--coverage` says 29: it
+counts mariadb and searxng, which have a version and a real upstream repository
+but publish no GitHub *releases*, which coverage mode cannot know without
+spending the request it exists to avoid — and it makes no probes. The report
+says "33 resolved a version", of which 30 had a feed to compare against. **30
+is the number that actually compares.**)
 
 It runs weekly on svc-infra (Mon 08:30) and publishes to ntfy and
 `https://scan.<domain>/releases.txt`. Three things to know:

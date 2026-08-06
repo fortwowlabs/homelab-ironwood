@@ -5,6 +5,15 @@
 #   scripts/release-check.sh --coverage   # label coverage; makes NO GitHub calls
 #   make release-check
 #
+# Other flags, used by release.yml rather than by hand:
+#   --previous FILE    last run's state, for the NEW-since-last-report split
+#   --state-out FILE   write the next baseline (the only write this makes)
+#   --probed FILE      {image: version} from services that report their own
+#                      version over HTTP; beats the image's label. Only the
+#                      playbook supplies this, because the URLs are host
+#                      knowledge — so a workstation run reports the three
+#                      label-less services as unknown-version.
+#
 # Read-only. It reads registry manifest metadata and release feeds, and writes
 # nothing unless given --state-out. Nothing here pulls, bumps, deploys or
 # restarts, and tests/validate_scan_readonly.py fails the build if that changes.

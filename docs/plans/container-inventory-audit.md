@@ -152,6 +152,11 @@ cannot know without spending the API request it exists to avoid.
 The figure is not wrong so much as measuring something slightly different, and I
 stated it as though it were the same thing. Corrected in both files.
 
+**Superseded by P2, which raised it to 30.** Three images that carry no version
+label are now measured by asking the running service. `--coverage` still reports
+29 — it makes no probes — so the two numbers have now drifted apart in the other
+direction. Neither is wrong; the report prints which it is quoting.
+
 ---
 
 ## Plan
