@@ -100,6 +100,11 @@ validate-yaml:
 validate-shell:
 	$(SHELLCHECK) $(SHELL_FILES)
 	$(PYTHON) tests/validate_shell_templates.py
+# Sits here because it exercises a shell template, but it is doing something the
+# other shell gates do not: running the script against fixtures and asserting it
+# FAILS in the four ways it has to. On live hosts the answer is always OK, so
+# without this nobody could tell the check had stopped working.
+	$(PYTHON) tests/validate_container_drift.py
 
 validate-links:
 	$(PYTHON) tests/validate_links.py

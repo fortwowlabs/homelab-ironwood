@@ -415,7 +415,7 @@ def display_name(ref: str) -> str:
     return leaf
 
 
-def examine(pins, overrides, *, timeout, github_token, coverage_only):
+def examine(pins, overrides, *, timeout, github_token, coverage_only, probed=None):
     images = []
     feed_cache: dict[str, object] = {}
 
@@ -431,6 +431,7 @@ def examine(pins, overrides, *, timeout, github_token, coverage_only):
             "latest_name": "",
             "published": "",
             "url": "",
+            "version_source": "",
             "verdict": ERROR,
             "detail": "",
         }
@@ -442,6 +443,17 @@ def examine(pins, overrides, *, timeout, github_token, coverage_only):
             continue
 
         record["version"] = labels.get("org.opencontainers.image.version", "") or ""
+        record["version_source"] = "label" if record["version"] else ""
+
+        # A version the RUNNING SERVICE reported about itself beats a label.
+        # The label describes what was built; this describes what is answering.
+        # Grafana, Prometheus and node-exporter carry no version label at all,
+        # so for those it is the difference between measured and unmeasured.
+        probed_version = (probed or {}).get(ref)
+        if probed_version and comparable(probed_version):
+            record["version"] = probed_version
+            record["version_source"] = "probe"
+
         feed, source = feed_for(ref, labels, overrides)
         record["feed"], record["feed_source"] = feed, source
 
@@ -508,6 +520,7 @@ def summarise(images, *, coverage_only=False):
         counts[record["verdict"]] = counts.get(record["verdict"], 0) + 1
     resolved = sum(1 for r in images if comparable(r["version"]))
     answered = sum(1 for r in images if r["latest"])
+    from_probe = sum(1 for r in images if r.get("version_source") == "probe")
 
     # The positive control, and the reason this cannot report a quiet all-clear.
     # Both of these are impossible if the run actually happened: 48 images do
@@ -525,6 +538,7 @@ def summarise(images, *, coverage_only=False):
     return {
         "counts": counts,
         "versions_resolved": resolved,
+        "versions_probed": from_probe,
         "feeds_answered": answered,
         "images_examined": len(images),
         "ok": not problems,
@@ -609,8 +623,11 @@ def print_report(result) -> None:
           f"no feed: {counts.get(NO_FEED, 0)}    "
           f"no version: {counts.get(UNKNOWN_VERSION, 0)}    "
           f"errors: {counts.get(ERROR, 0)}")
+    probed_note = (f" ({summary['versions_probed']} by asking the running service, "
+                   "the rest from image labels)") if summary.get("versions_probed") else ""
     print(f"{summary['versions_resolved']}/{summary['images_examined']} images "
-          f"resolved a version; {summary['feeds_answered']} upstream feeds answered.")
+          f"resolved a version{probed_note}; "
+          f"{summary['feeds_answered']} upstream feeds answered.")
 
     remaining = summary.get("quota_remaining")
     if remaining is not None:
@@ -671,6 +688,9 @@ def main() -> int:
                         help="last run's state, for the NEW-since-last-report split")
     parser.add_argument("--state-out", metavar="FILE",
                         help="write the next baseline here (the only write this makes)")
+    parser.add_argument("--probed", metavar="FILE",
+                        help="JSON {image: version} from services that report "
+                             "their own version; overrides the image label")
     parser.add_argument("--timeout", type=int, default=30)
     parser.add_argument("--root", default=str(ROOT))
     arguments = parser.parse_args()
@@ -714,8 +734,21 @@ def main() -> int:
             previous = stored.get("images") or {}
         seeded = seeded or not previous
 
+    probed = {}
+    if arguments.probed:
+        try:
+            probed = json.loads(Path(arguments.probed).read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            # Not fatal, and deliberately not silent. Without the probe file
+            # three images fall back to having no version label at all, which
+            # reports as unknown-version — honest, but a quiet downgrade if
+            # nobody is told the file was expected and missing.
+            print(f"note: --probed {arguments.probed} could not be read; "
+                  "falling back to image labels alone", file=sys.stderr)
+
     images = examine(pins, overrides, timeout=arguments.timeout,
-                     github_token=github_token, coverage_only=arguments.coverage)
+                     github_token=github_token, coverage_only=arguments.coverage,
+                     probed=probed)
     summary = summarise(images, coverage_only=arguments.coverage)
     summary["quota_remaining"] = QUOTA["remaining"]
     summary["quota_limit"] = QUOTA["limit"]

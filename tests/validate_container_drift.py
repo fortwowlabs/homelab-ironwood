@@ -1,0 +1,181 @@
+#!/usr/bin/env python3
+"""Exercise container-drift.sh against fixtures, including every way it must FAIL.
+
+roles/service_vm/templates/container-drift.sh.j2 asserts that each running
+container is the image its Quadlet unit declares. It runs on live hosts where
+the healthy answer is always "OK", so left alone it would be a check nobody
+could tell had stopped working — which is the exact failure this repo keeps
+writing down, and which the script's own positive control exists to prevent.
+
+So the failure paths are exercised here instead, offline, with a stub `podman`
+and fixture unit files. Six cases, and the four that must fail matter more than
+the two that must pass:
+
+  clean      every container matches its unit                        -> 0
+  drifted    a container running an image its unit does not name     -> 1
+  orphan     a container with no Quadlet unit at all                 -> 1
+  empty      podman answers, but reports nothing running             -> 2
+  no-podman  neither context could be queried                        -> 2
+  no-units   no Quadlet files where they are expected                -> 2
+
+The last three are the ones worth having. Each is a "could not look" that an
+ordinary implementation would report as "nothing found", and each would make a
+broken check indistinguishable from a healthy estate.
+
+This test renders the Jinja template with a trivial substitution rather than a
+full Ansible run: the template's only variable is svc_uid, and standing up
+ansible-core to interpolate one integer would make the test slow enough that
+somebody would eventually skip it.
+"""
+
+from __future__ import annotations
+
+import os
+import re
+import shutil
+import subprocess
+import sys
+import tempfile
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+TEMPLATE = ROOT / "roles/service_vm/templates/container-drift.sh.j2"
+
+# name|image lines a stub `podman ps` will emit, per case.
+SONARR = "lscr.io/linuxserver/sonarr@sha256:" + "a" * 64
+OTHER = "docker.io/example/other@sha256:" + "b" * 64
+STRANGER = "docker.io/somebody/unmanaged@sha256:" + "c" * 64
+
+CASES = {
+    "clean": (f"sonarr|{SONARR}\nsystemd-noname|{OTHER}\n", 0, "OK"),
+    "drifted": (f"sonarr|lscr.io/linuxserver/sonarr@sha256:{'d' * 64}\n", 1, "DRIFTED"),
+    "orphan": (f"sonarr|{SONARR}\nstranger|{STRANGER}\n", 1, "NO QUADLET"),
+    "empty": ("", 2, "CANNOT LOOK"),
+}
+
+
+def render(svc_uid: str = "10001") -> str:
+    """Render the template. Only svc_uid and ansible_managed are interpolated."""
+    text = TEMPLATE.read_text(encoding="utf-8")
+    text = text.replace("{{ ansible_managed | comment }}", "# (rendered for tests)")
+    text = text.replace("{{ svc_uid | quote }}", svc_uid)
+
+    # Scan for unhandled Jinja BEFORE unescaping the Go-template braces, not
+    # after. `podman ps --format` needs literal {{.Names}}, which the template
+    # escapes as {{ '{{' }} — so after unescaping those are indistinguishable
+    # from Jinja this function forgot, and the scan flagged them on its first
+    # run. A new variable in the template must still be caught: it would reach
+    # the shell as a literal `{{ foo }}`, a syntax error at best and a silently
+    # empty value at worst.
+    # Substituted out before scanning rather than filtered out of the results:
+    # the non-greedy `\{\{.*?\}\}` matches the inner `{{ '}}` of `{{ '}}' }}`,
+    # so a membership test against the whole escape never fires.
+    scanned = (text.replace("{{ '{{' }}", "\0OPEN\0")
+                   .replace("{{ '}}' }}", "\0CLOSE\0"))
+    leftover = re.findall(r"\{\{.*?\}\}|\{%.*?%\}", scanned)
+    if leftover:
+        raise SystemExit(
+            "container-drift.sh.j2 grew Jinja this test does not render: "
+            + ", ".join(sorted(set(leftover)))
+            + "\nAdd it to render() rather than loosening this check.")
+
+    return text.replace("{{ '{{' }}", "{{").replace("{{ '}}' }}", "}}")
+
+
+def build(tmp: Path, *, units: bool = True, podman: bool = True) -> Path:
+    (tmp / "bin").mkdir(parents=True, exist_ok=True)
+    quadlet = tmp / "quadlet"
+    quadlet.mkdir(parents=True, exist_ok=True)
+
+    if units:
+        (quadlet / "sonarr.container").write_text(
+            f"[Container]\nImage={SONARR}\nContainerName=sonarr\n", encoding="utf-8")
+        # No ContainerName: Quadlet names the container systemd-<unit>, and the
+        # script must derive that or every such unit reads as an orphan.
+        (quadlet / "noname.container").write_text(
+            f"[Container]\nImage={OTHER}\n", encoding="utf-8")
+
+    if podman:
+        stub = tmp / "bin/podman"
+        stub.write_text(
+            '#!/usr/bin/env bash\n'
+            '[[ -n "${DRIFT_FIXTURE:-}" ]] || exit 3\n'
+            'cat "$DRIFT_FIXTURE"\n', encoding="utf-8")
+        stub.chmod(0o755)
+
+    script = tmp / "container-drift.sh"
+    text = render()
+    text = re.sub(r"(?m)^ROOT_QUADLET_DIR=.*$",
+                  f"ROOT_QUADLET_DIR={quadlet if units else tmp / 'absent'}", text)
+    text = re.sub(r"(?m)^ROOTLESS_QUADLET_DIR=.*$",
+                  f"ROOTLESS_QUADLET_DIR={tmp / 'absent-rootless'}", text)
+    # No rootless account in the test environment; the script must tolerate a
+    # context that simply is not there, which is also true of svc-download.
+    text = re.sub(r"(?m)^ROOTLESS_USER=.*$",
+                  "ROOTLESS_USER=__no_such_user__", text)
+    script.write_text(text, encoding="utf-8")
+    script.chmod(0o755)
+    return script
+
+
+def run(script: Path, tmp: Path, fixture: str | None, *, podman: bool) -> tuple[int, str]:
+    env = dict(os.environ)
+    env["PATH"] = f"{tmp / 'bin'}:/usr/bin:/bin" if podman else "/usr/bin:/bin"
+    if fixture is not None:
+        path = tmp / "fixture"
+        path.write_text(fixture, encoding="utf-8")
+        env["DRIFT_FIXTURE"] = str(path)
+    result = subprocess.run(["bash", str(script)], capture_output=True,
+                            text=True, env=env, check=False)
+    return result.returncode, result.stdout + result.stderr
+
+
+def main() -> int:
+    if not shutil.which("bash"):
+        print("bash is required", file=sys.stderr)
+        return 127
+
+    failures: list[str] = []
+    checked = 0
+
+    for name, (fixture, want_rc, want_text) in CASES.items():
+        with tempfile.TemporaryDirectory() as raw:
+            tmp = Path(raw)
+            script = build(tmp)
+            rc, out = run(script, tmp, fixture, podman=True)
+        checked += 1
+        if rc != want_rc or want_text not in out:
+            failures.append(
+                f"{name}: expected rc={want_rc} containing {want_text!r}, "
+                f"got rc={rc}\n{out.rstrip()}")
+
+    # podman missing entirely
+    with tempfile.TemporaryDirectory() as raw:
+        tmp = Path(raw)
+        script = build(tmp, podman=False)
+        rc, out = run(script, tmp, None, podman=False)
+    checked += 1
+    if rc != 2 or "CANNOT LOOK" not in out:
+        failures.append(f"no-podman: expected rc=2 CANNOT LOOK, got rc={rc}\n{out.rstrip()}")
+
+    # Quadlet directory absent
+    with tempfile.TemporaryDirectory() as raw:
+        tmp = Path(raw)
+        script = build(tmp, units=False)
+        rc, out = run(script, tmp, CASES["clean"][0], podman=True)
+    checked += 1
+    if rc != 2 or "CANNOT LOOK" not in out:
+        failures.append(f"no-units: expected rc=2 CANNOT LOOK, got rc={rc}\n{out.rstrip()}")
+
+    if failures:
+        print("container drift check regressions:\n", file=sys.stderr)
+        for failure in failures:
+            print(f"  - {failure}\n", file=sys.stderr)
+        return 1
+
+    print(f"Container drift check: OK ({checked} cases, 4 of them failure paths)")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

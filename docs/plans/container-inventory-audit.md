@@ -101,10 +101,18 @@ cannot say which one you are on, so it reports `unknown-version` — unmeasured,
 not up to date.
 
 **Several of these can be fixed**, because the applications report their own
-version over HTTP even though the image does not label it. Grafana, Prometheus,
-node-exporter and Uptime Kuma all expose a version endpoint. That is a better
+version over HTTP even though the image does not label it. That is a better
 source than a label anyway: it is what the running process says about itself,
-not what the build system claimed.
+not what the build system claimed. Done in P2 for **Grafana, Prometheus and
+node-exporter**.
+
+> **Correction.** This section first named Uptime Kuma as a fourth. It was
+> asserted from familiarity, not measured, and it is wrong: `/api/entry-page`,
+> `/metrics` and `/` all return no version to an unauthenticated caller,
+> because it is a socket.io application whose metrics endpoint needs a key.
+> Probing it was attempted during P2 and abandoned. Left in the record rather
+> than quietly deleted, because "I assumed an endpoint existed" is exactly the
+> kind of claim this document is meant to stop repeating.
 
 ## F4 — 5 images label something that is not a version
 
@@ -150,7 +158,91 @@ stated it as though it were the same thing. Corrected in both files.
 
 Ordered by value. Each item stands alone.
 
-### P1 — Assert running digests against the catalog, in `make verify` (F2)
+**Status: P1 and P2 implemented 2026-08-05. P3 needs a token from you. P4 is
+deliberately nothing.**
+
+### P1 — Assert running digests against the catalog, in `make verify` (F2) — DONE
+
+Implemented as `roles/service_vm/templates/container-drift.sh.j2`, included by
+all three VM verify paths. It compares each running container against **its own
+Quadlet unit** rather than against the catalog directly, which is a better
+chain and needs no catalog plumbing on the host:
+
+```
+commit  ==  unit file on disk    (proved by changed=0 on a clean tree)
+unit file  ==  running container (proved by this check)
+```
+
+It checks **both podman contexts on every host**, root and rootless, rather
+than selecting one from a per-host flag — a manually started container does not
+consult that convention, and a check that looks only where it expects trouble
+is not looking for trouble.
+
+Live result: 12 + 12 + 30 = **54 containers, all matching**, which reproduces
+the manual audit above exactly.
+
+**The failure paths are tested, and that is the part that matters.** On live
+hosts the answer is always OK, so left alone this would be a check nobody could
+tell had stopped working. `tests/validate_container_drift.py` runs the script
+against fixtures with a stub `podman` and asserts all six outcomes — the four
+failures more than the two passes:
+
+| case | expected |
+|---|---|
+| every container matches its unit | pass |
+| container running an image its unit does not name | **DRIFTED**, rc 1 |
+| container with no Quadlet unit at all | **NO QUADLET**, rc 1 |
+| podman answers but reports nothing running | **CANNOT LOOK**, rc 2 |
+| neither podman context queryable | **CANNOT LOOK**, rc 2 |
+| no Quadlet files where expected | **CANNOT LOOK**, rc 2 |
+
+The three `CANNOT LOOK` cases are the point. Each is a "could not look" that an
+ordinary implementation reports as "nothing found". Verified by deliberately
+disabling the positive control, at which point the empty-list case printed
+`container drift: OK (0 running container(s)...)` and the test caught it.
+
+**One thing was attempted and not done.** Starting a throwaway container on
+svc-download to prove the orphan path against a live host was blocked by the
+safety classifier, and was not worked around. The fixture test covers the same
+logic; what remains unproven is only that a real unmanaged container looks the
+way the fixture says it does.
+
+### P2 — Read versions from the applications that expose them (F3) — DONE
+
+`release_version_probes` in `main.yml`, probed by `release.yml` and passed to
+the check as `--probed`. A probed version wins over a label, because asking the
+running process is a better source than reading what its build system claimed.
+
+Three services, each confirmed against the live endpoint with the value read
+back, one regex mechanism covering both JSON and Prometheus text:
+
+| service | endpoint | reads |
+|---|---|---|
+| Grafana | `/api/health` | `13.1.1` |
+| Prometheus | `/api/v1/status/buildinfo` | `3.13.1` |
+| node-exporter | `/metrics` (loopback) | `1.12.1` |
+
+Effect: **30 images now compare, up from 27**, and unmeasured fell 21 → 18. It
+immediately found two things nothing could previously see — Grafana 13.1.1
+against upstream 13.1.2, and Prometheus 3.13.1 against 3.13.2.
+
+A captured value is discarded unless it still looks like a version, so a service
+that changes its response shape reverts to `unknown-version` rather than
+reporting whatever the regex happened to catch.
+
+**Uptime Kuma was tried and deliberately excluded.** `/api/entry-page`,
+`/metrics` and `/` all return no version to an unauthenticated caller — it is a
+socket.io application and its metrics endpoint needs a key. Recorded in the
+variable's comment so the same three URLs are not re-probed next year. Guessing
+a field would be worse than the honest gap.
+
+The rest of F3 is deliberately not attempted: Nextcloud, ntfy, romm, it-tools,
+bambuddy and jdownloader would each need bespoke handling for one service
+apiece, and `unknown-version` is already an honest answer.
+
+### Original plan text follows
+
+#### P1 as originally specified
 
 The whole finding. Add a check per VM that reads every running container's image
 digest and asserts it is pinned by a catalog, failing with the container name
@@ -170,7 +262,7 @@ Rules it must follow, from the repo's own scar tissue:
 
 Estimated: one task file in `roles/service_vm/`, included by all three VM roles.
 
-### P2 — Read versions from the applications that expose them (F3)
+#### P2 as originally specified
 
 For Grafana, Prometheus, node-exporter and Uptime Kuma, ask the running service
 its version over HTTP instead of reading a label that does not exist. Moves four
@@ -184,7 +276,11 @@ Deliberately **not** attempted for the rest of F3. Nextcloud, ntfy, romm,
 it-tools, bambuddy and jdownloader would each need bespoke handling for one
 service apiece, and `unknown-version` is already an honest answer.
 
-### P3 — Get a GitHub token in place (already possible, not yet done)
+### P3 — Get a GitHub token in place — NEEDS YOU
+
+Still open, and the only item that does. See below.
+
+#### P3 as originally specified
 
 Unrelated to the audit but it is the live constraint on the report: 45 requests
 of a 60/hour budget, and the first real run exhausted it on the last image.

@@ -32,6 +32,51 @@
     # Runs on one host by construction: this reads registries and a release
     # feed, and which VM holds the checkout is an implementation detail. Nothing
     # about it is per-host, unlike the security scan.
+    # Asking the running service beats reading a build-time label, and for
+    # Grafana, Prometheus and node-exporter it is the only source there is —
+    # none of the three carries a version label at all. Done here rather than in
+    # the script because the URLs are host knowledge (which VM, which port,
+    # loopback vs LAN) and the script deliberately knows only about files and
+    # registries.
+    - name: Ask each service that reports its own version
+      ansible.builtin.uri:
+        url: "{{ item.value.url }}"
+        return_content: true
+        timeout: 10
+        status_code: [200]
+      register: release_probe_results
+      loop: "{{ release_version_probes | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      changed_when: false
+      # A service that is down must not fail the report — it is one image out of
+      # 48, and the fallback is the honest `unknown-version` this replaces.
+      failed_when: false
+
+    - name: Build the probed-version map
+      ansible.builtin.set_fact:
+        release_probed: "{{ release_probed | default({}) | combine(entry) }}"
+      loop: "{{ release_probe_results.results }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+      vars:
+        captured: >-
+          {{ (item.content | default('') | regex_search(item.item.value.pattern, '\1')
+              | default([], true) | first | default('')) }}
+        entry: >-
+          {{ {item.item.key: captured} if (captured is match('^(?=.*\d)(?=.*\.).+$'))
+             else {} }}
+      when: item.content is defined
+
+    - name: Record the probed versions for the check to read
+      ansible.builtin.copy:
+        content: "{{ release_probed | default({}) | to_nice_json }}\n"
+        dest: "{{ release_report_dir }}/versions-probed.json"
+        owner: "{{ svc_uid }}"
+        group: "{{ svc_gid }}"
+        mode: "0644"
+      changed_when: false
+
     - name: Check every pinned image against its upstream release feed
       ansible.builtin.command:
         # The INSTALLED script, not the one in the checkout. /opt/homelab-iac is
@@ -44,6 +89,7 @@
           {{ release_check_bin }}
           --json
           --root {{ release_checkout }}
+          --probed {{ release_report_dir }}/versions-probed.json
           --previous {{ release_state_file }}
           --state-out {{ release_state_file }}.next
       register: release_raw

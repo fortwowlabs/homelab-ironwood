@@ -140,7 +140,10 @@
 
 <p class="sub">
   {{ release.summary.versions_resolved | default(0) }}/{{ release.summary.images_examined | default(0) }}
-  images resolved a version from their OCI labels &middot;
+  images resolved a version
+  {%- if release.summary.versions_probed | default(0) > 0 %}
+  ({{ release.summary.versions_probed }} by asking the running service)
+  {%- endif %} &middot;
   {{ release.summary.feeds_answered | default(0) }} upstream feeds answered
   {%- if release.summary.quota_remaining is defined and release.summary.quota_remaining is not none %}
   &middot; GitHub quota {{ release.summary.quota_remaining }}/{{ release.summary.quota_limit }}

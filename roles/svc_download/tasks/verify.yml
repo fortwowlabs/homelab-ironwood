@@ -292,6 +292,11 @@
   changed_when: false
   when: download_recyclarr_quadlet_stat.stat.exists
 
+- name: Verify no container has drifted from its Quadlet unit
+  ansible.builtin.include_role:
+    name: service_vm
+    tasks_from: container-drift
+
 - name: Verify node_exporter metrics
   ansible.builtin.include_role:
     name: service_vm

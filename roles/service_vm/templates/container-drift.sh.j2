@@ -1,0 +1,140 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# container-drift.sh — assert every RUNNING container is the image its own
+# Quadlet unit specifies, and that no container is running without one.
+#
+# WHY THIS EXISTS. `make verify` asserts services are ACTIVE. A deploy reporting
+# `changed=0` asserts the unit FILES match the committed tree. Between those two
+# facts there was a gap nothing covered: whether the container actually running
+# is the image its unit names. Quadlet re-pulls only when the unit file changes,
+# so a hand-run `podman pull`, a manual `podman run`, a rolled-back deploy or a
+# restart that raced a half-finished pull all leave a container serving an image
+# no commit describes — with every existing gate green. See
+# docs/plans/container-inventory-audit.md, finding F2.
+#
+# Chained with the deploy's own guarantee this closes the loop:
+#   commit  ==  unit file on disk   (proved by changed=0 on a clean tree)
+#   unit file  ==  running container (proved here)
+#
+# It also catches the thing that prompted the audit: a container running with NO
+# Quadlet file at all is somebody's `podman run`, and is reported by name.
+#
+# BOTH PODMAN CONTEXTS ARE ALWAYS CHECKED — root and rootless — rather than
+# selecting one from a per-host flag. svc-download runs its stack as root and
+# the other two run rootless as `homelab`, but a manually started container does
+# not consult that convention, and a check that looks only where it expects
+# trouble is not looking for trouble. Whichever context is absent on a host
+# simply contributes nothing.
+#
+# Read-only: `podman ps` and file reads. Nothing is started, stopped or pulled.
+set -uo pipefail
+
+# `homelab` and /opt/homelab are spelled out here rather than parameterised,
+# matching the rest of the repo — roles/svc_infra/tasks/verify.yml writes
+# `systemctl --user -M homelab@` the same way. Only the uid is a variable,
+# because one already exists and the runtime directory needs it numerically.
+ROOTLESS_USER=homelab
+ROOTLESS_UID={{ svc_uid | quote }}
+ROOT_QUADLET_DIR=/etc/containers/systemd
+ROOTLESS_QUADLET_DIR=/opt/homelab/.config/containers/systemd
+
+work=$(mktemp -d)
+trap 'rm -rf "$work"' EXIT
+
+# --- collect running containers ---------------------------------------------
+# Failures here must NOT look like "no containers running". Each context records
+# whether the query actually succeeded, and the positive control below refuses a
+# clean verdict when nothing was collected at all.
+root_ok=0
+rootless_ok=0
+
+if command -v podman >/dev/null 2>&1; then
+    if podman ps --format '{{ '{{' }}.Names{{ '}}' }}|{{ '{{' }}.Image{{ '}}' }}' >"$work/root.ps" 2>"$work/root.err"; then
+        root_ok=1
+    fi
+fi
+
+if id "$ROOTLESS_USER" >/dev/null 2>&1; then
+    # chdir / deliberately: runuser inherits the caller's cwd, and the runner's
+    # home is not readable by the service account, which makes podman fail with
+    # "cannot chdir" — a permission error that reads exactly like an empty
+    # container list to anything parsing stdout.
+    if (cd / && runuser -u "$ROOTLESS_USER" -- \
+            env "XDG_RUNTIME_DIR=/run/user/${ROOTLESS_UID}" \
+            podman ps --format '{{ '{{' }}.Names{{ '}}' }}|{{ '{{' }}.Image{{ '}}' }}') \
+            >"$work/rootless.ps" 2>"$work/rootless.err"; then
+        rootless_ok=1
+    fi
+fi
+
+# --- collect what the Quadlet units say --------------------------------------
+# ContainerName= is what podman reports in `ps`; when a unit omits it, Quadlet
+# names the container systemd-<unit>. Both forms are recorded so a unit whose
+# name differs from its container (every dl-* unit on svc-download) still
+# matches.
+: >"$work/declared"
+quadlet_files=0
+for dir in "$ROOT_QUADLET_DIR" "$ROOTLESS_QUADLET_DIR"; do
+    [[ -d $dir ]] || continue
+    for unit in "$dir"/*.container; do
+        [[ -e $unit ]] || continue
+        quadlet_files=$((quadlet_files + 1))
+        image=$(sed -n 's/^Image=//p' "$unit" | head -1)
+        name=$(sed -n 's/^ContainerName=//p' "$unit" | head -1)
+        base=${unit##*/}
+        base=${base%.container}
+        [[ -n $name ]] || name="systemd-${base}"
+        printf '%s|%s|%s\n' "$name" "$image" "${unit}" >>"$work/declared"
+    done
+done
+
+# --- compare ------------------------------------------------------------------
+drift=0
+orphan=0
+checked=0
+: >"$work/findings"
+
+while IFS='|' read -r name image; do
+    [[ -n $name ]] || continue
+    checked=$((checked + 1))
+    declared=$(awk -F'|' -v n="$name" '$1 == n {print $2; exit}' "$work/declared")
+    if [[ -z $declared ]]; then
+        orphan=$((orphan + 1))
+        printf 'NO QUADLET  %-26s running %s\n' "$name" "$image" >>"$work/findings"
+    elif [[ $declared != "$image" ]]; then
+        drift=$((drift + 1))
+        printf 'DRIFTED     %-26s\n  running  %s\n  declared %s\n' \
+            "$name" "$image" "$declared" >>"$work/findings"
+    fi
+done < <(cat "$work/root.ps" "$work/rootless.ps" 2>/dev/null)
+
+# --- the positive control -----------------------------------------------------
+# "Found no problems" and "could not look" must not print the same thing. Three
+# conditions have to hold before a clean result means anything, and every one of
+# them is impossible on a healthy host: this estate runs 54 containers from 54
+# Quadlet units across three VMs, and the failure that produced this whole rule
+# was an image scan reporting zero vulnerabilities because it could not chdir.
+if (( root_ok == 0 && rootless_ok == 0 )); then
+    echo "CANNOT LOOK: neither podman context could be queried." >&2
+    [[ -s $work/root.err ]] && sed 's/^/  root: /' "$work/root.err" >&2
+    [[ -s $work/rootless.err ]] && sed 's/^/  rootless: /' "$work/rootless.err" >&2
+    exit 2
+fi
+if (( quadlet_files == 0 )); then
+    echo "CANNOT LOOK: no Quadlet unit files found in ${ROOT_QUADLET_DIR} or ${ROOTLESS_QUADLET_DIR}." >&2
+    echo "  Every container here is Quadlet-managed, so this is a broken path, not an empty host." >&2
+    exit 2
+fi
+if (( checked == 0 )); then
+    echo "CANNOT LOOK: ${quadlet_files} Quadlet unit(s) exist but no container is running." >&2
+    echo "  That is an outage or a broken query, never a pass." >&2
+    exit 2
+fi
+
+if (( drift > 0 || orphan > 0 )); then
+    echo "container drift: ${drift} running a different image than declared, ${orphan} with no Quadlet unit"
+    cat "$work/findings"
+    exit 1
+fi
+
+echo "container drift: OK (${checked} running container(s) all match their Quadlet unit, from ${quadlet_files} unit file(s))"

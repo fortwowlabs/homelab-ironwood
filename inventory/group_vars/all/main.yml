@@ -292,6 +292,43 @@ release_checkout: /opt/homelab-iac
 # deploy, the catalogs it reads arrive with the nightly runner's archive sync.
 release_check_bin: /usr/local/sbin/homelab-release-check.py
 
+# Services that report their own version over HTTP, for images that carry no
+# version label. ASKING THE RUNNING PROCESS IS A BETTER SOURCE THAN A LABEL —
+# it is what the software says about itself, not what its build system claimed —
+# so these win over the label wherever both exist.
+#
+# `pattern` is a regex with exactly one capture group, applied to the raw
+# response body. One mechanism covers both JSON and Prometheus text, which
+# avoids a parser branch that would need its own testing.
+#
+# Every entry below was confirmed against the live service on 2026-08-05, with
+# the value read back. A WRONG PATTERN SILENTLY YIELDS A WRONG VERSION, which
+# is worse than the honest `unknown-version` it replaces — the same rule as
+# release_feed_overrides. The probe result is discarded unless it looks like a
+# version (a digit and a dot), so a changed response shape reverts to unmeasured
+# rather than reporting whatever the regex happened to catch.
+#
+# UPTIME KUMA IS DELIBERATELY ABSENT. It was tried: /api/entry-page, /metrics
+# and / all return no version to an unauthenticated caller, because it is a
+# socket.io application and its metrics endpoint needs a key. Recorded here so
+# the same three URLs are not re-probed next year.
+release_version_probes:
+  docker.io/grafana/grafana:
+    url: "http://{{ hostvars['svc-infra'].ansible_host }}:3005/api/health"
+    pattern: '"version":\s*"([^"]+)"'
+  docker.io/prom/prometheus:
+    url: "http://{{ hostvars['svc-infra'].ansible_host }}:9091/api/v1/status/buildinfo"
+    # `"version":"` cannot match `"goVersion":"` in the same payload — the
+    # capital V is what keeps this unambiguous, and it is the reason this is a
+    # pattern rather than a JSON path with no branching.
+    pattern: '"version":"([^"]+)"'
+  docker.io/prom/node-exporter:
+    # Loopback, not the LAN address: firewalld admits :9100 only from svc-infra,
+    # so scraping this from anywhere else returns nothing and would read exactly
+    # like a service with no version — the trap recorded in the NFS outage notes.
+    url: "http://127.0.0.1:9100/metrics"
+    pattern: 'node_exporter_build_info\{[^}]*version="([^"]+)"'
+
 # Upstream release feeds that the image's own OCI labels get wrong or omit.
 #
 # The report derives the feed from `org.opencontainers.image.source` and needs

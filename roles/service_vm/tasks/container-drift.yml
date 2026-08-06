@@ -1,0 +1,27 @@
+---
+# Assert every running container is the image its Quadlet unit declares.
+#
+# Included by all three VM roles' verify paths. The reasoning, and the gap it
+# closes between "the unit files match the commit" and "the service is active",
+# is in the script's own header and in docs/plans/container-inventory-audit.md.
+- name: Install the container drift check
+  ansible.builtin.template:
+    src: container-drift.sh.j2
+    dest: /usr/local/sbin/homelab-container-drift.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Assert no container has drifted from its Quadlet unit
+  ansible.builtin.command: /usr/local/sbin/homelab-container-drift.sh
+  register: service_vm_container_drift
+  changed_when: false
+  # rc 1 is drift found, rc 2 is the script refusing to guess. BOTH fail, and
+  # they are deliberately not collapsed: a `failed_when` that only tested for
+  # drift would let "could not look" pass as "nothing found", which is the
+  # failure mode this repo has written down four separate times.
+  failed_when: service_vm_container_drift.rc != 0
+
+- name: Report the container drift result
+  ansible.builtin.debug:
+    msg: "{{ service_vm_container_drift.stdout_lines }}"
