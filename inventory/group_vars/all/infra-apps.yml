@@ -106,15 +106,42 @@ infra_apps:
       PORT: "8001"
     backup_paths: [bambuddy]
 
-  # Home Assistant. Published on 8123 only (no host networking under rootless
-  # podman) — auto-discovery of LAN devices via mDNS/SSDP is therefore
-  # limited; integrations added by IP work fine. Revisit host networking if
-  # the user needs zeroconf discovery later. The image runs as container-root
-  # by default, which under rootless podman maps to the host homelab user, so
-  # /config stays writable and backup-readable without a PUID/PGID override.
+  # Home Assistant. Host networking, because auto-discovery of LAN devices is
+  # the whole point of the thing and container-NAT'd networking cannot do it —
+  # same reason as Syncthing above. Integrations added by IP worked without
+  # this; zeroconf/SSDP ones did not.
+  #
+  # extra_ports is NOT optional here, and this is the part that is easy to get
+  # wrong: host networking alone does not make discovery work. firewalld's
+  # conntrack lets the unicast reply to an outbound query back in, but mDNS
+  # responses and SSDP NOTIFY announcements arrive as *multicast* (to
+  # 224.0.0.251:5353 and 239.255.255.250:1900) and are dropped without a rule
+  # of their own. files.yml turns extra_ports into lan_cidr-scoped rich rules.
+  #
+  # Host networking also means every catalog app on svc-infra shares ONE port
+  # namespace (see Bambuddy above, which had to move off 8000 for Paperless).
+  # 8123 is claimed by nothing else here; validate_infra_catalog's claim_port
+  # keeps it that way.
+  #
+  # Two of HA's discovery backends still do NOT work, and they log an error
+  # each at every start — expected, not a regression to chase:
+  #   habluetooth  "Missing NET_ADMIN/NET_RAW capabilities"
+  #   aiodhcpwatcher  "Cannot watch for dhcp packets: Operation not permitted"
+  # Both want raw-socket capabilities that a ROOTLESS container sharing the
+  # host netns cannot hold, so the only fix is running this one rootful — not
+  # worth it for DHCP-based discovery (zeroconf and SSDP, which are the two
+  # that matter, both bind fine) and there is no Bluetooth adapter on a VM.
+  #
+  # The image runs as container-root by default, which under rootless podman
+  # maps to the host homelab user, so /config stays writable and
+  # backup-readable without a PUID/PGID override.
   home-assistant:
     image: "ghcr.io/home-assistant/home-assistant@sha256:6937c6c51d2f5d6aa66d97e4a68f845bcccd5f9b62cd91992bd6d79b20fe2b3c"
     ui_port: 8123
+    network_mode: host
+    extra_ports:
+      - { port: 5353, protocol: udp }
+      - { port: 1900, protocol: udp }
     volumes:
       - /opt/homelab/appdata/home-assistant:/config:Z
     backup_paths: [home-assistant]

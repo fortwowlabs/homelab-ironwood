@@ -641,9 +641,10 @@ caddy_services:
 #
 # Deliberately NOT protected — a native or mobile client cannot follow a
 # browser redirect to a login form, so proxy auth breaks them outright:
-# jellyfin, immich, nextcloud, abs, ntfy, vaultwarden. Also left open: home
-# (the landing page), it-tools, glances (its /mcp/sse endpoint has no cookie
-# jar), bambuddy, the cockpit-* vhosts (own PAM auth), and shelfmark.
+# jellyfin, immich, nextcloud, abs, ntfy, vaultwarden, home-assistant (the HA
+# companion app is exactly this case). Also left open: home (the landing
+# page), it-tools, glances (its /mcp/sse endpoint has no cookie jar),
+# bambuddy, the cockpit-* vhosts (own PAM auth), and shelfmark.
 #
 # calibre-web is excluded for a different reason and it is not a good one: it
 # is loopback-only on svc-media, so unlike every name below it has no direct
