@@ -132,7 +132,7 @@ spending the request it exists to avoid — and it makes no probes. The report
 says "33 resolved a version", of which 30 had a feed to compare against. **30
 is the number that actually compares.**)
 
-It runs weekly on svc-infra (Mon 08:30) and publishes to ntfy and
+It runs weekly on svc-infra (Fri 08:30) and publishes to ntfy and
 `https://scan.<domain>/releases.txt`. Three things to know:
 
 - **It deliberately prints no bump command.** For an untracked image that would

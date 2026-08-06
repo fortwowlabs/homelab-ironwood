@@ -281,23 +281,31 @@ share the address.
 
 ## Where it runs
 
-**svc-infra, weekly, Monday 08:30**, on the same runner as the nightly scan —
+**svc-infra, weekly, Friday 08:30**, on the same runner as the nightly scan —
 same checkout, same venv, same account (`svcops`).
 
 Verified reachable from svc-infra before choosing it: `api.github.com` returns
 200 and `ghcr.io/v2/` returns its 401 auth challenge, both in ~0.14s. Registry
 egress was already proven by Trivy, which scans every image from this host.
 
-**Monday 08:30** sits in the gap between the alert canary (Mon 08:00) and
-certwatch (09:15), and lands when the estate actually gets looked at — the same
-reasoning the alert canary records for choosing Monday morning.
+**08:30** sits in the gap between the alert canary (Mon 08:00) and certwatch
+(09:15), clear of the whole nightly sequence, which ends at 07:00 + jitter.
 
-The counter-argument, from that same file, is that "two weekly checks on one day
-means one bad night can take out both". It is accepted here rather than dodged:
-the two share only the host and ntfy, they are 30 minutes apart, and unlike the
-canary this report is informational — a missed week costs a week of reading, not
-a week of undetected silence. Arriving on the morning it gets read is worth more
-than the independence.
+**Friday, changed from Monday on 2026-08-06** at the owner's request. A report
+is worth what the chance of acting on it is worth, and upgrading this estate is
+weekend work: a Friday morning report lands with the time to do something about
+it still ahead, where a Monday one lands at the start of the week most likely to
+swallow it.
+
+It also resolves an argument the Monday slot had to *accept* rather than answer.
+`homelab-alert-canary.timer` records that "two weekly checks on one day means
+one bad night can take out both", and the old slot sat thirty minutes after it.
+The original reasoning here — that the two share only the host and ntfy, that
+they are 30 minutes apart, and that a missed report costs a week of reading
+rather than a week of undetected silence — was defensible, and it is repeated
+here because it was the honest trade at the time. But defensible is not the same
+as fixed. Friday removes the coupling outright, which is a better outcome
+arrived at for an unrelated reason.
 
 Runnable by hand as `make release-check`, identically to `make scan`.
 
@@ -438,10 +446,14 @@ second run.
 ### What is not yet proven
 
 **The timer has not fired on its own schedule.** It is enabled and next due
-Monday 2026-08-10 08:31. Everything below the timer has been run by hand and by
-`make release-report`, so what remains unverified is specifically systemd
-starting the unit — the same gap the NFS guard closed by waiting a week, and it
-will close the same way.
+**Friday 2026-08-07 08:30** (+ up to 600s jitter). Everything below the timer
+has been run by hand and by `make release-report`, so what remains unverified is
+specifically systemd starting the unit — the same gap the NFS guard closed by
+waiting, and it will close the same way.
+
+Moving the day from Monday to Friday on 2026-08-06 brought that first
+unattended run forward from the 10th to the 7th, which is a day away rather
+than four. Incidental, but it means this closes sooner.
 
 ~~**No `NEW SINCE THE LAST REPORT` section has ever rendered with content.**~~
 **Proven 2026-08-06.** A run against an established baseline reported exactly

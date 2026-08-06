@@ -4,7 +4,7 @@
 Description=Run the homelab-iac weekly upstream release report for %i
 
 [Timer]
-# WEEKLY, Monday 08:30. Both halves are deliberate.
+# WEEKLY, Friday 08:30. Both halves are deliberate.
 #
 # Weekly because that is the cadence at which release news is actionable. Daily
 # would report the same eighteen behind-images every morning until somebody
@@ -18,17 +18,20 @@ Description=Run the homelab-iac weekly upstream release report for %i
 # jitter), 08:00 Monday (the ntfy alert canary) and 09:15 (certwatch). A run
 # measured at 63s starting at 08:30 is clear of all of them.
 #
-# Monday, because a report is worth exactly as much as the chance somebody reads
-# it, and Monday morning is when this estate gets looked at. The alert canary
-# records the same reasoning for the same slot.
+# FRIDAY, changed from Monday on 2026-08-06 at the owner's request. A report is
+# worth what the chance of acting on it is worth, and upgrading this estate is
+# weekend work — a Friday morning report lands with the time to do something
+# about it still ahead, where a Monday one lands at the start of the week most
+# likely to swallow it.
 #
-# THE COUNTER-ARGUMENT, which that file also states: "two weekly checks on one
-# day means one bad night can take out both". It is accepted here rather than
-# dodged. The two share only this host and ntfy, they are half an hour apart,
-# and unlike the canary this is informational — a missed week costs a week of
-# unread release notes, not a week of undetected silence. Landing on the morning
-# it gets read is worth more than the independence.
-OnCalendar=Mon *-*-* 08:30:00
+# It also resolves an argument the Monday version had to accept rather than
+# answer. homelab-alert-canary.timer records that "two weekly checks on one day
+# means one bad night can take out both", and the old slot sat thirty minutes
+# after it. That was defensible — the two share only this host and ntfy — but
+# defensible is not the same as fixed. Friday removes the coupling entirely
+# instead of arguing it is tolerable, which is the better outcome for a reason
+# unrelated to why the day changed.
+OnCalendar=Fri *-*-* 08:30:00
 # Persistent, so a host powered off on Monday morning reports when it comes back
 # rather than skipping the week. The report is a delta against the last run, so
 # a late run loses nothing — it covers the whole gap.

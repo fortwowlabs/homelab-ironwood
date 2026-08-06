@@ -51,6 +51,8 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 ROOT = Path(__file__).resolve().parents[1]
 
 CATALOGS = (
@@ -104,35 +106,57 @@ def overrides() -> dict[str, str]:
 
 
 def probes() -> dict[str, dict[str, str]]:
-    """The image -> {url, pattern} map, parsed by indentation.
+    """The image -> {url, pattern} map, parsed as YAML.
 
-    Nested, unlike the feed overrides, so it cannot reuse the flat parser. Still
-    a regex rather than PyYAML for the same reason: these are Ansible group_vars
-    full of Jinja that PyYAML cannot evaluate.
+    PARSE EACH MAP THE WAY ITS CONSUMER DOES. That is the rule these two
+    functions follow, and it is why they differ:
+
+      release_feed_overrides  is read by scripts/release_check.py's own regex
+                              parser, so overrides() mirrors that regex exactly.
+                              A gate that parsed it more cleverly than the
+                              script would pass on input the script misreads.
+      release_version_probes  is read by ANSIBLE, as YAML. So this uses YAML.
+
+    The first version of this hand-rolled an indentation parser and stripped
+    quotes off both ends of each value, which broke in two ways a code review
+    caught before either could bite:
+
+      - It compiled and group-counted a DIFFERENT STRING from the one Ansible
+        uses. `'"version":\\s*"([^"]+)"'` had its outer YAML quoting stripped
+        AND then its real leading and trailing `"` — so the gate was validating
+        `version":\\s*"([^"]+)`. A valid pattern ending in an escaped quote
+        would fail as `bad escape`, and a pattern with a trailing inline comment
+        would keep the comment inside the regex, still compile, still count one
+        group, and pass while the live probe matched nothing.
+      - A flow-style entry (`image: {url: ..., pattern: ...}`) was absorbed as a
+        field of the previous image. No entry was created, so its name, url and
+        pattern went unchecked and the gate still printed OK.
+
+    Both were the same underlying mistake: reimplementing YAML badly instead of
+    using it. A parse failure here is a GATE FAILURE, not an empty result —
+    including the case where somebody writes an unquoted Jinja value, which YAML
+    reads as a flow mapping. The message says to quote it.
     """
     text = (ROOT / "inventory/group_vars/all/main.yml").read_text(encoding="utf-8")
     block = PROBE_BLOCK_RE.search(text)
     if not block:
         return {}
-    found: dict[str, dict[str, str]] = {}
-    current: str | None = None
-    for line in block.group(1).splitlines():
-        if not line.strip() or line.strip().startswith("#"):
-            continue
-        indent = len(line) - len(line.lstrip())
-        stripped = line.strip()
-        if indent <= 2 and stripped.endswith(":"):
-            current = stripped[:-1].strip().strip('"\'')
-            found[current] = {}
-        elif current is not None and ":" in stripped:
-            key, _, value = stripped.partition(":")
-            found[current][key.strip()] = value.strip().strip('"\'')
-    return found
+    document = "release_version_probes:\n" + block.group(1)
+    loaded = yaml.safe_load(document)
+    return (loaded or {}).get("release_version_probes") or {}
 
 
 def check_probes(pins: set[str], mapped: dict[str, dict[str, str]]) -> list[str]:
     problems: list[str] = []
     for image, spec in sorted(mapped.items()):
+        if not isinstance(spec, dict):
+            # A scalar or list here means the entry was written in a shape the
+            # playbook cannot loop over. Caught explicitly so it reports as a
+            # malformed probe rather than raising an AttributeError below.
+            problems.append(
+                f"release_version_probes[{image!r}] is a "
+                f"{type(spec).__name__}, not a mapping with url and pattern.")
+            continue
         if image not in pins:
             problems.append(
                 f"release_version_probes names {image!r}, which no catalog pins. "
@@ -167,7 +191,21 @@ def check_probes(pins: set[str], mapped: dict[str, dict[str, str]]) -> list[str]
 def main() -> int:
     pins = pinned_images()
     mapped = overrides()
-    probe_map = probes()
+    try:
+        probe_map = probes()
+    except yaml.YAMLError as error:
+        # Never degrade to an empty map. That is the difference between "there
+        # are no probes" and "the probe block does not parse", and reading the
+        # second as the first is how a gate passes while measuring nothing.
+        print("release_version_probes does not parse as YAML:\n", file=sys.stderr)
+        print(f"  {error}\n", file=sys.stderr)
+        print("  An unquoted Jinja value is the usual cause — YAML reads a bare\n"
+              "  {{ ... }} as a flow mapping. Quote it.", file=sys.stderr)
+        return 1
+    if not isinstance(probe_map, dict):
+        print(f"release_version_probes parsed as {type(probe_map).__name__}, "
+              "not a mapping.", file=sys.stderr)
+        return 1
     problems: list[str] = check_probes(pins, probe_map)
 
     if not pins:
