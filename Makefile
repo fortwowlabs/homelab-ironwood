@@ -109,6 +109,11 @@ validate-shell:
 # succeeds on its first call every time, so the retry and — more importantly —
 # its refusal to retry forever are never exercised in production.
 	$(PYTHON) tests/validate_dnf_makecache_retry.py
+# Python rather than shell, but it belongs with the drift check above for the
+# same reason: it is a script whose refusal paths are the point, and on a
+# healthy host it succeeds every time. Its "leave the old file alone rather
+# than publish zeros" branch is the one that keeps a broken emitter legible.
+	$(PYTHON) tests/validate_metric_write.py
 
 validate-links:
 	$(PYTHON) tests/validate_links.py

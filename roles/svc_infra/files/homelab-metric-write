@@ -1,0 +1,151 @@
+#!/usr/bin/env python3
+"""Publish a Prometheus textfile-collector metric file, atomically and safely.
+
+The callers — scan.yml, release.yml and container-drift.yml — already hold the
+numbers they want charted. This owns everything mechanical about getting them
+onto disk where node_exporter's textfile collector will scrape them, so that
+three plays do not each solve it slightly differently.
+
+Four guarantees, each because the alternative is a chart that lies:
+
+  atomic       write to .tmp then rename(), so a half-written file is never
+               scraped.
+  validated    every input line must parse as a Prometheus sample. node_exporter
+               rejects a WHOLE file for one bad line, so a partial write would
+               take the good metrics down with the bad one.
+  timestamped  run and last-success are separate series, so "it ran and could
+               not look" is distinguishable from "it measured a zero".
+  non-empty    zero input lines leaves the previous file alone. A broken caller
+               must not replace real numbers with zeros: an old number shows up
+               as staleness, a zero shows up as good news.
+
+No HELP or TYPE lines are emitted, deliberately. The three drift files share the
+metric names homelab_drift_run_timestamp_seconds and
+homelab_drift_last_success_timestamp_seconds, and node_exporter merges every
+.prom in the directory — duplicate TYPE declarations across those files make it
+reject them and raise node_textfile_scrape_error. Untyped samples are read as
+untyped gauges, which is what all of these are.
+
+Installed by roles/svc_infra as a plain file rather than a .j2 template: it
+interpolates nothing, and keeping it out of Jinja means tests/validate_metric_write.py
+executes the real artifact rather than a re-rendered approximation of it.
+"""
+
+from __future__ import annotations
+
+import argparse
+import os
+import re
+import sys
+import time
+
+# A Prometheus sample: name, optional labels, value. Deliberately strict —
+# anything this does not match is something node_exporter would reject, and
+# failing here with the caller's file name in the message beats discovering it
+# as a silently absent series.
+LABEL = r'[a-zA-Z_][a-zA-Z0-9_]*="[^"\\\n]*"'
+SAMPLE = re.compile(
+    r"^[a-zA-Z_:][a-zA-Z0-9_:]*"
+    rf"(?:\{{{LABEL}(?:\s*,\s*{LABEL})*\}})?"
+    r"\s+[+-]?(?:\d+(?:\.\d+)?(?:[eE][+-]?\d+)?|Inf|NaN)$"
+)
+METRIC_NAME = re.compile(r"^[a-zA-Z_:][a-zA-Z0-9_:]*$")
+FILE_NAME = re.compile(r"^[A-Za-z0-9_.-]+$")
+
+EXIT_OK = 0
+EXIT_ERROR = 1
+EXIT_MALFORMED = 2
+EXIT_EMPTY = 3
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Publish metric samples to a node_exporter textfile directory.",
+    )
+    parser.add_argument("--dir", required=True,
+                        help="textfile collector directory")
+    parser.add_argument("--file", required=True,
+                        help="basename, without .prom (e.g. drift-svc-media)")
+    parser.add_argument("--prefix", required=True,
+                        help="metric prefix for the appended timestamp series")
+    parser.add_argument("--labels", default="",
+                        help='labels for the timestamp series, e.g. vm="svc-media"')
+    parser.add_argument("--success", action="store_true",
+                        help="also bump the last-success timestamp")
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(sys.argv[1:] if argv is None else argv)
+
+    # --prefix and --file are separate arguments because a file basename may
+    # contain hyphens (drift-svc-media) and a metric name may not.
+    if not METRIC_NAME.match(args.prefix):
+        print(f"--prefix {args.prefix!r} is not a valid metric name", file=sys.stderr)
+        return EXIT_ERROR
+    if not FILE_NAME.match(args.file):
+        print(f"--file {args.file!r} may only contain [A-Za-z0-9_.-]", file=sys.stderr)
+        return EXIT_ERROR
+
+    samples: list[str] = []
+    malformed: list[str] = []
+    for raw in sys.stdin.read().splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        (samples if SAMPLE.match(line) else malformed).append(line)
+
+    if malformed:
+        print(f"{args.file}: {len(malformed)} malformed metric line(s); "
+              "nothing written, previous file left in place:", file=sys.stderr)
+        for line in malformed[:5]:
+            print(f"  {line}", file=sys.stderr)
+        return EXIT_MALFORMED
+
+    if not samples:
+        print(f"{args.file}: no metric lines on stdin; leaving the previous file "
+              "in place. A stale file is detectable, a file of zeros is not.",
+              file=sys.stderr)
+        return EXIT_EMPTY
+
+    suffix = f"{{{args.labels}}}" if args.labels else ""
+    now = int(time.time())
+    stamps = [f"{args.prefix}_run_timestamp_seconds{suffix} {now}"]
+    if args.success:
+        stamps.append(f"{args.prefix}_last_success_timestamp_seconds{suffix} {now}")
+
+    # Validate what we generated, not just what we were handed. A malformed
+    # --labels would otherwise produce a file node_exporter rejects wholesale,
+    # taking the caller's good samples down with it.
+    for stamp in stamps:
+        if not SAMPLE.match(stamp):
+            print(f"--labels {args.labels!r} builds an invalid series "
+                  f"({stamp!r}); nothing written", file=sys.stderr)
+            return EXIT_ERROR
+    samples.extend(stamps)
+
+    target = os.path.join(args.dir, f"{args.file}.prom")
+    tmp = f"{target}.tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as handle:
+            handle.write("\n".join(samples) + "\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+        # 0644 and root-owned: container UID 0 maps to the unprivileged homelab
+        # account in the rootless exporter unit, and world-readable is all it
+        # needs. Nothing in the container ever writes here.
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, target)
+    except OSError as exc:
+        print(f"{args.file}: could not publish {target}: {exc}", file=sys.stderr)
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        return EXIT_ERROR
+
+    return EXIT_OK
+
+
+if __name__ == "__main__":
+    sys.exit(main())
