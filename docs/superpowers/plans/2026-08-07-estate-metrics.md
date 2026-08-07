@@ -607,7 +607,13 @@ In `roles/svc_infra/tasks/scan.yml`, between `Summarise the image scan` and
       homelab_scan_vulnerabilities{severity="high"} {{ infra_image_scan.high }}
       {% for image in infra_image_scan.images | selectattr('ok') %}
       {% set repo = image.ref | regex_replace('@sha256:.*$', '') %}
-      {% set digest = image.ref | regex_replace('^.*@sha256:(.{7}).*$', '\1') %}
+      {# '\\1', not '\1': Jinja parses the replacement string as a literal
+         before regex_replace ever sees it, and '\1' there is the one-char
+         octal escape \x01 (SOH), not a backreference. That shipped once
+         already — every digest came out as the same control character, so
+         the two valkey pins still collided under an identical, wrong label,
+         invisibly, with node_textfile_scrape_error still 0. #}
+      {% set digest = image.ref | regex_replace('^.*@sha256:(.{7}).*$', '\\1') %}
       homelab_scan_image_vulnerabilities{image="{{ repo }}",digest="{{ digest }}",severity="critical"} {{ image.critical }}
       homelab_scan_image_vulnerabilities{image="{{ repo }}",digest="{{ digest }}",severity="high"} {{ image.high }}
       {% endfor %}
