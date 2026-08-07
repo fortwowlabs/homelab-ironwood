@@ -567,9 +567,25 @@ In `roles/svc_infra/tasks/scan.yml`, between `Summarise the image scan` and
 # run timestamp and not the success timestamp, which is exactly the "it ran and
 # could not look" state the two series exist to separate.
 #
-# Per-image labels strip the digest: a digest in a label means every
+# Per-image series carry a digest-stripped `image` plus a short `digest`.
+#
+# `image` is stripped because a full digest in the primary label means every
 # `make image-bump` retires two series and creates two new ones, so the history
 # would restart on precisely the day you want to see a bump's effect.
+#
+# `digest` exists because stripping alone is not enough, which the first live run
+# proved: two DIFFERENT valkey digests collapsed to one label set, so scan.prom
+# held two lines reading `{image="docker.io/valkey/valkey",severity="critical"}`
+# and the exporter published one of them and silently dropped the other — with
+# node_textfile_scrape_error still 0. A number that is one of two, chosen
+# arbitrarily, reporting no error, is the exact failure this whole design exists
+# to remove. apps.yml deliberately shares one pin across three valkey services
+# and two postgres services (see the BUMP PROCEDURE block), so repos with more
+# than one distinct pin are a standing feature of this estate, not an anomaly.
+#
+# Seven characters, not the whole digest, and no chart groups on it: the
+# dashboard sums by `image`, so trends stay continuous across a bump and only
+# this extra dimension churns. Shared pins on the SAME digest still appear once.
 - name: Publish the image scan as metrics
   ansible.builtin.command:
     # argv as a computed list rather than a literal one, because --success is
@@ -590,8 +606,10 @@ In `roles/svc_infra/tasks/scan.yml`, between `Summarise the image scan` and
       homelab_scan_vulnerabilities{severity="critical"} {{ infra_image_scan.critical }}
       homelab_scan_vulnerabilities{severity="high"} {{ infra_image_scan.high }}
       {% for image in infra_image_scan.images | selectattr('ok') %}
-      homelab_scan_image_vulnerabilities{image="{{ image.ref | regex_replace('@sha256:.*$', '') }}",severity="critical"} {{ image.critical }}
-      homelab_scan_image_vulnerabilities{image="{{ image.ref | regex_replace('@sha256:.*$', '') }}",severity="high"} {{ image.high }}
+      {% set repo = image.ref | regex_replace('@sha256:.*$', '') %}
+      {% set digest = image.ref | regex_replace('^.*@sha256:(.{7}).*$', '\1') %}
+      homelab_scan_image_vulnerabilities{image="{{ repo }}",digest="{{ digest }}",severity="critical"} {{ image.critical }}
+      homelab_scan_image_vulnerabilities{image="{{ repo }}",digest="{{ digest }}",severity="high"} {{ image.high }}
       {% endfor %}
   register: infra_scan_metrics
   changed_when: false
@@ -1060,7 +1078,15 @@ design exists to prevent.
 | 15 | stat | Textfile collector errors | `node_textfile_scrape_error{instance="svc-infra"}` | 4,6,18,29 | thresholds green 0 / red 1 |
 | 16 | timeseries | Age of each published file | `time() - node_textfile_mtime_seconds` | 6,24,0,33 | unit `s`, legend `{{file}}` |
 | — | row | Worst offenders | — | 1,24,0,39 | |
-| 17 | table | Critical CVEs by image | `topk(15, homelab_scan_image_vulnerabilities{severity="critical"})` | 10,24,0,40 | `instant: true`, `format: "table"` |
+| 17 | table | Critical CVEs by image | `topk(15, homelab_scan_image_vulnerabilities{severity="critical"})` | 10,24,0,40 | `instant: true`, `format: "table"`; show the `digest` column |
+
+Panel 17 shows one row per `image` **and** `digest`, so a repo pinned twice at
+different digests appears twice — which is the point. Keep the `digest` column
+visible or the two rows look like a duplicate bug rather than two real pins.
+Anything wanting a per-repo total must say `sum by (image) (…)` explicitly;
+nothing on this dashboard groups on `digest`, so trends stay continuous across a
+bump. See Task 3 for why that label exists — the first live run published one of
+two colliding valkey series and silently dropped the other.
 
 Panels 15 and 16 are the bridge's own health check, and they are the closest
 thing here to a positive control: `node_textfile_scrape_error` is node_exporter's
