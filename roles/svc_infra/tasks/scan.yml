@@ -102,9 +102,18 @@
 # run timestamp and not the success timestamp, which is exactly the "it ran and
 # could not look" state the two series exist to separate.
 #
-# Per-image labels strip the digest: a digest in a label means every
-# `make image-bump` retires two series and creates two new ones, so the history
-# would restart on precisely the day you want to see a bump's effect.
+# Per-image labels carry BOTH a digest-stripped `image` and a short `digest`.
+# `image` alone was the first cut, and it silently dropped data on the first
+# live run: apps.yml deliberately pins valkey (and postgres) at two DIFFERENT
+# digests for two different purposes, so digest-stripping collapsed those into
+# one label set with two different values. node_exporter picked one and
+# discarded the other with node_textfile_scrape_error staying 0 — a wrong
+# number with no error anywhere, which is exactly the failure this feature
+# exists to prevent. `image` still drops the digest so the series a dashboard
+# sums by does not churn on every `make image-bump`; `digest` (7 chars, not
+# the whole thing) exists only to keep two distinct pins from colliding, and
+# it is a dimension no chart groups on, so its own churn on a bump is harmless.
+# A shared pin used at the same digest by several services still appears once.
 - name: Publish the image scan as metrics
   ansible.builtin.command:
     # argv as a computed list rather than a literal one, because --success is
@@ -125,8 +134,16 @@
       homelab_scan_vulnerabilities{severity="critical"} {{ infra_image_scan.critical }}
       homelab_scan_vulnerabilities{severity="high"} {{ infra_image_scan.high }}
       {% for image in infra_image_scan.images | selectattr('ok') %}
-      homelab_scan_image_vulnerabilities{image="{{ image.ref | regex_replace('@sha256:.*$', '') }}",severity="critical"} {{ image.critical }}
-      homelab_scan_image_vulnerabilities{image="{{ image.ref | regex_replace('@sha256:.*$', '') }}",severity="high"} {{ image.high }}
+      {% set repo = image.ref | regex_replace('@sha256:.*$', '') %}
+      {# '\\1', not '\1': Jinja parses the replacement string as a literal
+         before regex_replace ever sees it, and '\1' there is the one-char
+         octal escape \x01 (SOH), not a backreference. That shipped once
+         already — every digest came out as the same control character, so
+         the two valkey pins still collided under an identical, wrong label,
+         invisibly, with node_textfile_scrape_error still 0. #}
+      {% set digest = image.ref | regex_replace('^.*@sha256:(.{7}).*$', '\\1') %}
+      homelab_scan_image_vulnerabilities{image="{{ repo }}",digest="{{ digest }}",severity="critical"} {{ image.critical }}
+      homelab_scan_image_vulnerabilities{image="{{ repo }}",digest="{{ digest }}",severity="high"} {{ image.high }}
       {% endfor %}
   register: infra_scan_metrics
   changed_when: false
