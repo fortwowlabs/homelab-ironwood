@@ -25,7 +25,15 @@ SecurityLabelDisable=true
 Volume=/proc:/host/proc:ro
 Volume=/sys:/host/sys:ro
 Volume=/:/rootfs:ro
-Exec=--path.procfs=/host/proc --path.sysfs=/host/sys --path.rootfs=/rootfs --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run)($|/) --collector.filesystem.fs-types-exclude={{ node_exporter_fs_types_exclude }}
+# Plain :ro, not :Z. This unit already sets SecurityLabelDisable=true above so
+# the node and filesystem collectors can read host /proc metadata, so label
+# separation is off for this container and the textfile mount follows the same
+# convention /proc, /sys and /rootfs use. On a host whose exporter did NOT
+# disable labelling this would need :Z, and an Ansible-written .prom would
+# arrive with a default context the container could not read — a silently empty
+# chart rather than an error.
+Volume={{ infra_textfile_dir }}:/var/lib/node_exporter/textfile:ro
+Exec=--path.procfs=/host/proc --path.sysfs=/host/sys --path.rootfs=/rootfs --collector.filesystem.mount-points-exclude=^/(dev|proc|sys|run)($|/) --collector.filesystem.fs-types-exclude={{ node_exporter_fs_types_exclude }} --collector.textfile.directory=/var/lib/node_exporter/textfile
 
 [Service]
 Restart=on-failure

@@ -176,6 +176,24 @@ node_exporter_image: "docker.io/prom/node-exporter@sha256:1b4e4438faca4dd7e001dd
 node_exporter_fs_types_exclude: >-
   ^(autofs|binfmt_misc|bpf|cgroup2?|configfs|debugfs|devpts|devtmpfs|fusectl|hugetlbfs|iso9660|mqueue|nfs|nfs4|nsfs|overlay|proc|procfs|pstore|rpc_pipefs|securityfs|selinuxfs|squashfs|sysfs|tracefs)$
 
+# --- estate metrics bridge (Grafana sub-project A) --------------------------
+# node_exporter's textfile collector, enabled on svc-infra only. It is how the
+# nightly scan, the weekly release check and the container drift check get their
+# numbers into Prometheus: each already computes them and previously reduced
+# them to one ntfy line, which gave this estate thorough threshold alerting and
+# no trending at all.
+#
+# These live here rather than in roles/svc_infra/defaults/main.yml for the same
+# reason scan_report_dir does: scan.yml and release.yml do not apply that role,
+# and role defaults are only in scope for a play that does.
+#
+# Root-owned, files 0644. Container UID 0 maps to the unprivileged homelab
+# account in the rootless exporter unit and world-readable is sufficient —
+# nothing inside the container ever writes here, so there is no subuid
+# ownership problem and no `podman unshare chown`.
+infra_textfile_dir: /opt/homelab/appdata/node-exporter-textfile
+infra_metric_write_bin: /usr/local/sbin/homelab-metric-write
+
 # --- Recyclarr (v6, download jail) -----------------------------------------
 # TRaSH-Guides sync for Sonarr/Radarr. Bespoke, not a download_apps entry:
 # the official image doesn't support PUID/PGID (needs Podman User= instead)

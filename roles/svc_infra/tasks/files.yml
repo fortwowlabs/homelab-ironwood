@@ -675,6 +675,27 @@
 
 # --- Monitoring stack: node_exporter (bespoke, like beszel-agent) + the
 # supplementary config renders for the Prometheus/Grafana catalog entries.
+# The textfile collector's directory and the helper that writes into it. The
+# WRITES do not happen here — they happen in scan.yml, release.yml and
+# container-drift.yml. A metric file changes on every run by definition, so a
+# template task in this role would make every `make infra` report changed and
+# the "clean tree deploys to changed=0" proof would stop meaning anything.
+- name: Create the node_exporter textfile directory
+  ansible.builtin.file:
+    path: "{{ infra_textfile_dir }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Install the metric publisher
+  ansible.builtin.copy:
+    src: homelab-metric-write
+    dest: "{{ infra_metric_write_bin }}"
+    owner: root
+    group: root
+    mode: "0755"
+
 - name: Render the node_exporter Quadlet
   ansible.builtin.template:
     src: node-exporter.container.j2
