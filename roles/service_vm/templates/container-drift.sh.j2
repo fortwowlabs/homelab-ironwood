@@ -131,6 +131,16 @@ if (( checked == 0 )); then
     exit 2
 fi
 
+# Machine-readable summary, parsed by the metric emitter in container-drift.yml.
+# Placed AFTER the cannot-look guards above and BEFORE the drift branch below,
+# so it prints for a clean run and for a run that found drift — the two
+# outcomes whose numbers mean anything — and never for a run that could not
+# look. A cannot-look exits before here on purpose: the emitter then sends the
+# publisher nothing, the publisher keeps the previous file, and the staleness
+# is what shows up. Publishing zeros there would read as an all-clear.
+printf 'drift_metrics checked=%d units=%d drifted=%d orphan=%d\n' \
+    "$checked" "$quadlet_files" "$drift" "$orphan"
+
 if (( drift > 0 || orphan > 0 )); then
     echo "container drift: ${drift} running a different image than declared, ${orphan} with no Quadlet unit"
     cat "$work/findings"

@@ -46,11 +46,19 @@ SONARR = "lscr.io/linuxserver/sonarr@sha256:" + "a" * 64
 OTHER = "docker.io/example/other@sha256:" + "b" * 64
 STRANGER = "docker.io/somebody/unmanaged@sha256:" + "c" * 64
 
+# case -> (podman ps output, expected rc, expected substring, expected metrics line)
+# The metrics line is consumed by the emitter in container-drift.yml. It must
+# appear for a clean run AND for a run that found drift, and must NOT appear for
+# any cannot-look: publishing counts nobody could measure is the failure the
+# whole metrics design exists to avoid.
 CASES = {
-    "clean": (f"sonarr|{SONARR}\nsystemd-noname|{OTHER}\n", 0, "OK"),
-    "drifted": (f"sonarr|lscr.io/linuxserver/sonarr@sha256:{'d' * 64}\n", 1, "DRIFTED"),
-    "orphan": (f"sonarr|{SONARR}\nstranger|{STRANGER}\n", 1, "NO QUADLET"),
-    "empty": ("", 2, "CANNOT LOOK"),
+    "clean": (f"sonarr|{SONARR}\nsystemd-noname|{OTHER}\n", 0, "OK",
+              "drift_metrics checked=2 units=2 drifted=0 orphan=0"),
+    "drifted": (f"sonarr|lscr.io/linuxserver/sonarr@sha256:{'d' * 64}\n", 1, "DRIFTED",
+                "drift_metrics checked=1 units=2 drifted=1 orphan=0"),
+    "orphan": (f"sonarr|{SONARR}\nstranger|{STRANGER}\n", 1, "NO QUADLET",
+               "drift_metrics checked=2 units=2 drifted=0 orphan=1"),
+    "empty": ("", 2, "CANNOT LOOK", None),
 }
 
 
@@ -138,7 +146,7 @@ def main() -> int:
     failures: list[str] = []
     checked = 0
 
-    for name, (fixture, want_rc, want_text) in CASES.items():
+    for name, (fixture, want_rc, want_text, expected_metrics) in CASES.items():
         with tempfile.TemporaryDirectory() as raw:
             tmp = Path(raw)
             script = build(tmp)
@@ -148,6 +156,20 @@ def main() -> int:
             failures.append(
                 f"{name}: expected rc={want_rc} containing {want_text!r}, "
                 f"got rc={rc}\n{out.rstrip()}")
+        # A cannot-look (expected_metrics is None) must never publish counts;
+        # a clean or drifted run must publish exactly the counts it found. Both
+        # halves of this check matter equally: this is the guarantee the whole
+        # task exists to prove, not a side effect of the rc/text assertion above.
+        if expected_metrics is None:
+            if "drift_metrics" in out:
+                failures.append(
+                    f"{name}: printed a drift_metrics line on a cannot-look. "
+                    "Counts nobody could measure must not be published."
+                )
+        elif expected_metrics not in out:
+            failures.append(
+                f"{name}: expected {expected_metrics!r} in stdout, got:\n{out}"
+            )
 
     # podman missing entirely
     with tempfile.TemporaryDirectory() as raw:
@@ -157,6 +179,13 @@ def main() -> int:
     checked += 1
     if rc != 2 or "CANNOT LOOK" not in out:
         failures.append(f"no-podman: expected rc=2 CANNOT LOOK, got rc={rc}\n{out.rstrip()}")
+    # Same rule as the CASES loop: a cannot-look must publish nothing, so the
+    # publisher keeps the previous file and the staleness is what shows up.
+    if "drift_metrics" in out:
+        failures.append(
+            "no-podman: printed a drift_metrics line on a cannot-look. "
+            "Counts nobody could measure must not be published."
+        )
 
     # Quadlet directory absent
     with tempfile.TemporaryDirectory() as raw:
@@ -166,6 +195,13 @@ def main() -> int:
     checked += 1
     if rc != 2 or "CANNOT LOOK" not in out:
         failures.append(f"no-units: expected rc=2 CANNOT LOOK, got rc={rc}\n{out.rstrip()}")
+    # Same rule as the CASES loop: a cannot-look must publish nothing, so the
+    # publisher keeps the previous file and the staleness is what shows up.
+    if "drift_metrics" in out:
+        failures.append(
+            "no-units: printed a drift_metrics line on a cannot-look. "
+            "Counts nobody could measure must not be published."
+        )
 
     if failures:
         print("container drift check regressions:\n", file=sys.stderr)
