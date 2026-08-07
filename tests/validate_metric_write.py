@@ -126,6 +126,20 @@ def test_bad_prefix_rejected() -> None:
         check("bad prefix writes no file", not Path(tmp, "scan.prom").exists())
 
 
+def test_missing_required_flag() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = run(tmp, ["--file", "scan"], SAMPLE_IN)
+        check("missing required flag exits 1", proc.returncode == 1, f"rc={proc.returncode}")
+        check("missing flag writes no file", not Path(tmp, "scan.prom").exists())
+
+
+def test_unrecognized_flag() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        proc = run(tmp, ["--file", "scan", "--prefix", "homelab_scan", "--nope"], SAMPLE_IN)
+        check("unrecognized flag exits 1", proc.returncode == 1, f"rc={proc.returncode}")
+        check("unrecognized flag writes no file", not Path(tmp, "scan.prom").exists())
+
+
 def main() -> int:
     if not HELPER.exists():
         print(f"missing {HELPER}", file=sys.stderr)
@@ -138,6 +152,8 @@ def main() -> int:
         test_malformed_line_writes_nothing,
         test_bad_labels_rejected,
         test_bad_prefix_rejected,
+        test_missing_required_flag,
+        test_unrecognized_flag,
     ):
         fn()
     if failures:
@@ -145,7 +161,7 @@ def main() -> int:
         for f in failures:
             print(f"  {f}", file=sys.stderr)
         return 1
-    print("homelab-metric-write: 7 case(s) OK")
+    print("homelab-metric-write: 9 case(s) OK")
     return 0
 
 

@@ -58,8 +58,16 @@ EXIT_MALFORMED = 2
 EXIT_EMPTY = 3
 
 
+class ArgumentParser(argparse.ArgumentParser):
+    def error(self, message: str) -> None:
+        # Remap argparse errors to EXIT_ERROR (1) rather than 2, which is reserved
+        # for malformed input lines. A bad flag is a caller bug, not a data problem.
+        self.print_usage(sys.stderr)
+        self.exit(EXIT_ERROR, f"{self.prog}: error: {message}\n")
+
+
 def parse_args(argv: list[str]) -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
+    parser = ArgumentParser(
         description="Publish metric samples to a node_exporter textfile directory.",
     )
     parser.add_argument("--dir", required=True,
