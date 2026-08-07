@@ -175,6 +175,43 @@
           - "{{ 'SEEDED — no baseline existed, so nothing is reported as new.' if release.seeded | default(false) else '' }}"
           - "{{ ((release_counts.error | default(0)) ~ ' COULD NOT BE CHECKED — the counts above are a floor.') if (release_counts.error | default(0) | int) > 0 else '' }}"
 
+    # Same reasoning as scan.yml's emitter: read the facts that feed ntfy, so
+    # the chart and the message cannot disagree. --success follows release_ok,
+    # which is the report's own "this run measured something" verdict.
+    #
+    # `comparable` is derived, not a fact: images_examined counts every pinned
+    # image, release_unmeasured counts the ones with no usable answer, and the
+    # difference is what the report can actually compare. Charting it against
+    # the total is what makes coverage legible as it accrues — and keeps
+    # "unmeasured" a visible quantity instead of folding it into "fine".
+    - name: Publish the release check as metrics
+      ansible.builtin.command:
+        argv: >-
+          {{ [infra_metric_write_bin,
+              '--dir', infra_textfile_dir,
+              '--file', 'release',
+              '--prefix', 'homelab_release']
+             + (['--success'] if release_ok else []) }}
+        stdin: |
+          homelab_release_images_total {{ release.summary.images_examined | default(0) }}
+          homelab_release_images_unmeasured {{ release_unmeasured | length }}
+          homelab_release_images_comparable {{ (release.summary.images_examined | default(0) | int) - (release_unmeasured | length) }}
+          homelab_release_images_behind {{ release_behind | length }}
+          homelab_release_images_current {{ release_counts.current | default(0) }}
+          homelab_release_new {{ release_new | length }}
+          homelab_release_errors {{ release_counts.error | default(0) }}
+      register: release_metrics
+      changed_when: false
+      failed_when: false
+
+    - name: Warn if the release metrics could not be published
+      ansible.builtin.debug:
+        msg: >-
+          metric publish FAILED (rc={{ release_metrics.rc | default('none') }}):
+          {{ release_metrics.stderr | default('') }} —
+          the estate dashboard will show this emitter as stale
+      when: (release_metrics.rc | default(0)) != 0
+
     - name: Write the release report
       ansible.builtin.template:
         # Explicit path, not a bare filename: this play does not apply the
