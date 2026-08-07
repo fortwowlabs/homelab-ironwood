@@ -26,6 +26,7 @@ TEMPLATES = (
     "roles/service_vm/templates/maintenance-egress.sh.j2",
     "roles/service_vm/templates/notify-failure.sh.j2",
     "roles/service_vm/templates/hc-ping.sh.j2",
+    "roles/service_vm/templates/dnf-makecache-retry.sh.j2",
     "roles/svc_infra/templates/backups-fresh.sh.j2",
     "roles/svc_infra/templates/verify-run.sh.j2",
     "roles/svc_infra/templates/scan-run.sh.j2",

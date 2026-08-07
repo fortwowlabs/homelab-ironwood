@@ -105,6 +105,10 @@ validate-shell:
 # FAILS in the four ways it has to. On live hosts the answer is always OK, so
 # without this nobody could tell the check had stopped working.
 	$(PYTHON) tests/validate_container_drift.py
+# Same reason as the drift check above: on a healthy host the retry wrapper
+# succeeds on its first call every time, so the retry and — more importantly —
+# its refusal to retry forever are never exercised in production.
+	$(PYTHON) tests/validate_dnf_makecache_retry.py
 
 validate-links:
 	$(PYTHON) tests/validate_links.py

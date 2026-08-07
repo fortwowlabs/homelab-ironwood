@@ -46,6 +46,67 @@
       changed_when: "'closed' in service_egress_close.stdout"
       when: service_guarded_egress | bool
 
+# Rocky's dnf-makecache.timer runs hourly and fails whenever a mirror rotates a
+# repodata file out from under an in-flight fetch — a 404 that clears itself on
+# the next run, but not before leaving the unit `failed` for homelab-failedunits
+# to report. ~3 alerts a month across svc-media and svc-infra, on the topic that
+# is allowed to wake somebody. See docs/plans/ and the script's own header.
+#
+# Installed on ALL service VMs rather than conditionally. On svc-download it is
+# inert — roles/svc_download/tasks/packages.yml masks the timer and that role's
+# verify.yml asserts it stays masked — but a conditional here would be a second
+# place to keep that fact correct, and this way the protection is already right
+# if the mask is ever lifted.
+- name: Install the dnf makecache retry wrapper
+  ansible.builtin.template:
+    src: dnf-makecache-retry.sh.j2
+    dest: /usr/local/sbin/dnf-makecache-retry.sh
+    owner: root
+    group: root
+    # 0750 root: only systemd starts this, and it runs as root.
+    mode: "0750"
+
+- name: Create the dnf makecache drop-in directory
+  ansible.builtin.file:
+    path: /etc/systemd/system/dnf-makecache.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Retry a transient dnf makecache failure before failing the unit
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/dnf-makecache.service.d/10-retry.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by Ansible (roles/service_vm/tasks/packages.yml).
+      #
+      # The bare ExecStart= is required, not stylistic: it CLEARS the unit's
+      # inherited ExecStart, and without it systemd runs both the original
+      # command and the wrapper.
+      #
+      # TimeoutStartSec is not incidental either. The shipped unit is
+      # Type=oneshot with no timeout set, and systemd disables the start
+      # timeout entirely for oneshot by default — so a mirror that accepts the
+      # connection and then stalls would leave this in `activating` forever.
+      # `activating` is not `failed`, so neither homelab-failedunits nor any
+      # OnFailure= would ever notice; the unit would simply stop refreshing
+      # metadata with every indicator green. That is the same trap
+      # roles/svc_infra/files/homelab-alert-canary.service documents. 900s
+      # covers two dnf runs plus the retry delay with room to spare.
+      [Service]
+      ExecStart=
+      ExecStart=/usr/local/sbin/dnf-makecache-retry.sh
+      TimeoutStartSec=900
+  register: service_vm_makecache_dropin
+
+- name: Reload systemd for the dnf makecache drop-in
+  ansible.builtin.systemd:
+    daemon_reload: true
+  when: service_vm_makecache_dropin is changed
+
 - name: Render host notification credentials
   ansible.builtin.template:
     src: notify.env.j2

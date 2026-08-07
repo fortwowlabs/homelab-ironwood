@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# Run `dnf makecache --timer`, and retry ONCE if it fails.
+#
+# WHY. Rocky's mirrors sync out from under a running dnf: makecache fetches
+# repomd.xml, which names a primary.xml.gz by checksum, and by the time the
+# follow-up GET lands the mirror has rotated that file away and answers 404.
+# Seen on svc-infra 2026-08-07 11:53 after three clean runs that same morning
+# (07:47, 09:00, 10:27). Entirely upstream, and it clears itself on the next
+# hourly run — but it leaves the unit in `failed` in the meantime, which
+# homelab-failedunits correctly reports on the topic that is allowed to wake
+# somebody. Roughly three such alerts a month across svc-media and svc-infra.
+#
+# WHAT THIS DOES NOT DO IS HIDE THE FAILURE. A second failure exits non-zero,
+# the unit fails, and the watcher alerts exactly as it does today — so a
+# repository that is genuinely broken still surfaces. Only the transient case
+# is absorbed, and even that is logged loudly (see below).
+#
+# Type=oneshot is why this is a script at all: systemd refuses Restart= on a
+# oneshot unit, so the retry cannot be a unit setting and has to live inside
+# ExecStart. The drop-in that installs it is in
+# roles/service_vm/tasks/packages.yml.
+set -uo pipefail
+
+DELAY={{ dnf_makecache_retry_delay | default(120) }}
+DNF=/usr/bin/dnf
+
+if "$DNF" makecache --timer; then
+    exit 0
+fi
+
+# Deliberately loud, and on stderr so it lands in the journal at a visible
+# priority. A retry that happens once a month is noise absorbed; a retry that
+# happens every hour is a real repository problem wearing a transient error's
+# clothes, and a wrapper that swallowed it silently would be exactly the
+# "check that cannot fail" trap this repo keeps writing down. This line is how
+# anyone can tell the difference:
+#
+#   journalctl -u dnf-makecache.service --since -30d | grep -c 'retrying once'
+#
+echo "dnf makecache failed; retrying once in ${DELAY}s (a transient mirror 404 is the usual cause)" >&2
+sleep "$DELAY"
+
+# exec, so the second attempt's exit status IS the unit's exit status. No
+# trailing command can accidentally mask it — the thing that would quietly turn
+# this from a retry into a suppression.
+exec "$DNF" makecache --timer

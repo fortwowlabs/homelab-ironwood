@@ -2,6 +2,12 @@
 service_guarded_egress: false
 service_requires_subids: false
 
+# How long dnf-makecache-retry.sh waits before its single retry. Long enough
+# that a mirror mid-rotation has finished, or that the mirrorlist hands out a
+# different one; short enough to stay far inside the drop-in's 900s
+# TimeoutStartSec alongside two dnf runs.
+dnf_makecache_retry_delay: 120
+
 # How long systemd waits for the rootless user manager to stop its containers
 # before SIGKILLing the session. The default is 90s, which SIGKILLed nine
 # postgres processes during the 2026-08-04 cold start; svc-infra needed ~6m to
