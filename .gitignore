@@ -12,7 +12,20 @@ docs/transcripts/
 *-root-ca.crt
 
 # Python venv (created by `make deps`)
-.venv/
+#
+# No trailing slash, deliberately. A worktree starts without a .venv, and
+# building a second one per worktree duplicates the collections tree for no
+# benefit — so the practical move is to symlink it at the primary checkout's.
+# `.venv/` matches a directory and NOT a symlink, so that symlink showed up as
+# an untracked file, and step 5 of the change workflow requires
+# `git status --porcelain` to print nothing. That made a worktree and a clean
+# tree mutually exclusive, in exactly the parallel-work case the workflow says
+# to use a worktree for.
+#
+# Symlinking is not optional either: tests/validate_secret_output.py resolves
+# ROOT/.venv/bin/ansible-playbook directly and honours no override, so without
+# a .venv at the worktree root that gate cannot run at all.
+.venv
 __pycache__/
 *.py[cod]
 
