@@ -8,6 +8,15 @@ service_requires_subids: false
 # TimeoutStartSec alongside two dnf runs.
 dnf_makecache_retry_delay: 120
 
+# The three enabled Rocky repos, served from the CDN origin rather than the
+# mirrorlist. `dir` is the path segment in the baseurl and `repo` is the token
+# in the mirrorlist query — they differ in case for BaseOS/AppStream, which is
+# exactly the kind of detail worth naming as data rather than deriving.
+rocky_cdn_repos:
+  - {section: baseos,    file: rocky.repo,        dir: BaseOS,    repo: BaseOS}
+  - {section: appstream, file: rocky.repo,        dir: AppStream, repo: AppStream}
+  - {section: extras,    file: rocky-extras.repo, dir: extras,    repo: extras}
+
 # How long systemd waits for the rootless user manager to stop its containers
 # before SIGKILLing the session. The default is 90s, which SIGKILLed nine
 # postgres processes during the 2026-08-04 cold start; svc-infra needed ~6m to

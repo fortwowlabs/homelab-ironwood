@@ -46,11 +46,72 @@
       changed_when: "'closed' in service_egress_close.stdout"
       when: service_guarded_egress | bool
 
+# --- Rocky repositories: CDN origin, not the mirrorlist -------------------
+#
+# THE ACTUAL CAUSE of the dnf-makecache 404s, addressed at the source rather
+# than only retried around.
+#
+# Stock Rocky points baseos/appstream/extras at mirrors.rockylinux.org, which
+# returns a plain list of mirror URLs and NOTHING ELSE. dnf fetches repomd.xml
+# from whichever mirror it picks, then fetches the data files that repomd names
+# by checksum — and if that mirror is mid-rsync, the named primary.xml.gz is
+# already gone. 404, with no way to tell a rotating mirror from a broken one.
+#
+# EPEL on these same hosts never does this, and the reason is instructive: it
+# uses `metalink=`, which carries the EXPECTED CHECKSUM of repomd.xml, so
+# librepo can recognise a mirror serving something stale and move on. Rocky
+# publishes no metalink, so that failover is simply unavailable.
+#
+# dl.rockylinux.org is the origin every mirror syncs FROM, so it cannot be out
+# of sync with itself, and it is not a single machine: it resolved to
+# 151.101.146.132 (Fastly) from svc-infra, answering in ~0.12s. It is also
+# listed in the mirrorlist Rocky hands out, and the exact baseurl below ships
+# COMMENTED OUT in rocky.repo as the supported alternative — this uncomments
+# Rocky's own line and upgrades http to https. Not a workaround.
+#
+# THE TRADE, stated plainly: a single baseurl gives up mirror failover. That is
+# accepted because the failure it removes (a mirror out of sync with the repomd
+# it just served) is one this estate has actually hit, while the failure it
+# adds (Fastly down globally) is rarer and would be visible everywhere at once.
+# The retry wrapper below remains as the net for both.
+#
+# Durability checked, not assumed: both files are flagged `cn` — config +
+# noreplace — in rocky-repos, so a package update keeps these edits and drops a
+# .rpmnew beside them rather than reverting.
+- name: Serve the Rocky repos from the CDN origin instead of a mirrorlist
+  ansible.builtin.replace:
+    path: "/etc/yum.repos.d/{{ item.file }}"
+    # Anchored to end-of-line on `$rltype`, which is what distinguishes the
+    # enabled repo from its -debug and -source siblings in the same file.
+    regexp: >-
+      ^mirrorlist=(https://mirrors\.rockylinux\.org/mirrorlist\?arch=\$basearch&repo={{ item.repo }}-\$releasever\$rltype)$
+    replace: '#mirrorlist=\1'
+  loop: "{{ rocky_cdn_repos }}"
+  loop_control:
+    label: "{{ item.section }}"
+
+- name: Uncomment the Rocky CDN baseurl the repo file already ships
+  ansible.builtin.replace:
+    path: "/etc/yum.repos.d/{{ item.file }}"
+    # The trailing `/os/` is what separates this from the debug and source
+    # variants, whose paths end /debug/tree/ and /source/tree/.
+    regexp: >-
+      ^#baseurl=http://dl\.rockylinux\.org/\$contentdir/\$releasever/{{ item.dir }}/\$basearch/os/$
+    replace: 'baseurl=https://dl.rockylinux.org/$contentdir/$releasever/{{ item.dir }}/$basearch/os/'
+  loop: "{{ rocky_cdn_repos }}"
+  loop_control:
+    label: "{{ item.section }}"
+
 # Rocky's dnf-makecache.timer runs hourly and fails whenever a mirror rotates a
 # repodata file out from under an in-flight fetch — a 404 that clears itself on
 # the next run, but not before leaving the unit `failed` for homelab-failedunits
 # to report. ~3 alerts a month across svc-media and svc-infra, on the topic that
 # is allowed to wake somebody. See docs/plans/ and the script's own header.
+#
+# KEPT even though the CDN change above removes the known cause. The wrapper
+# costs nothing on a healthy run and still covers a Fastly blip, a DNS hiccup
+# or any future repo added on a mirrorlist. Removing a net because the last
+# known hole was patched is how the next hole goes unnoticed.
 #
 # Installed on ALL service VMs rather than conditionally. On svc-download it is
 # inert — roles/svc_download/tasks/packages.yml masks the timer and that role's
