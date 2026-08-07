@@ -45,6 +45,12 @@ collections/ansible_collections/
 # that file is local-only and does not survive a clone, so it belongs here.
 .claude/worktrees/
 
+# Subagent-driven-development scratch: per-plan ledger, task briefs, reports and
+# review packages. Same clean-tree reasoning as the worktree directory above —
+# these are working artifacts of an in-flight change, and the git history is the
+# durable record once the branch merges.
+.superpowers/
+
 # Editor / OS
 *.swp
 .DS_Store
