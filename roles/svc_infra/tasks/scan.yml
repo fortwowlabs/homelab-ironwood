@@ -92,6 +92,56 @@
     scanned: "{{ images | selectattr('ok') | list | length | int }}"
     failed: "{{ images | rejectattr('ok') | list | length | int }}"
 
+# Publish the summary as Prometheus series. Deliberately reads the same
+# infra_image_scan fact that feeds the ntfy message rather than re-parsing
+# state.json, so a chart and an alert cannot disagree about the same night.
+#
+# --success is gated on infra_image_scan.ok, which that fact already defines as
+# "ran AND scanned > 0" — the positive control is inherited rather than
+# reinvented here. A run where every image failed to scan therefore bumps the
+# run timestamp and not the success timestamp, which is exactly the "it ran and
+# could not look" state the two series exist to separate.
+#
+# Per-image labels strip the digest: a digest in a label means every
+# `make image-bump` retires two series and creates two new ones, so the history
+# would restart on precisely the day you want to see a bump's effect.
+- name: Publish the image scan as metrics
+  ansible.builtin.command:
+    # argv as a computed list rather than a literal one, because --success is
+    # conditional: appending it inside the expression keeps the flag out of the
+    # argument vector entirely on a run that measured nothing, instead of
+    # passing it an empty string that argparse would treat as a positional.
+    argv: >-
+      {{ [infra_metric_write_bin,
+          '--dir', infra_textfile_dir,
+          '--file', 'scan',
+          '--prefix', 'homelab_scan']
+         + (['--success'] if infra_image_scan.ok else []) }}
+    stdin: |
+      homelab_scan_images_total {{ infra_image_scan.images | length }}
+      homelab_scan_images_scanned {{ infra_image_scan.scanned }}
+      homelab_scan_images_failed {{ infra_image_scan.failed }}
+      homelab_scan_images_eosl {{ infra_image_scan.eosl | length }}
+      homelab_scan_vulnerabilities{severity="critical"} {{ infra_image_scan.critical }}
+      homelab_scan_vulnerabilities{severity="high"} {{ infra_image_scan.high }}
+      {% for image in infra_image_scan.images | selectattr('ok') %}
+      homelab_scan_image_vulnerabilities{image="{{ image.ref | regex_replace('@sha256:.*$', '') }}",severity="critical"} {{ image.critical }}
+      homelab_scan_image_vulnerabilities{image="{{ image.ref | regex_replace('@sha256:.*$', '') }}",severity="high"} {{ image.high }}
+      {% endfor %}
+  register: infra_scan_metrics
+  changed_when: false
+  # Telemetry must not be able to break the check it describes. A failed publish
+  # surfaces as the dashboard's freshness row going red, not as a failed scan.
+  failed_when: false
+
+- name: Warn if the scan metrics could not be published
+  ansible.builtin.debug:
+    msg: >-
+      metric publish FAILED (rc={{ infra_scan_metrics.rc | default('none') }}):
+      {{ infra_scan_metrics.stderr | default('') }} —
+      the estate dashboard will show this emitter as stale
+  when: (infra_scan_metrics.rc | default(0)) != 0
+
 - name: Mark the infra scan complete
   ansible.builtin.set_fact:
     svc_infra_scanned: true

@@ -59,6 +59,11 @@ SCAN_PATHS = (
     "scripts/release-check.sh",
     "scripts/image-release.sh",
     "roles/svc_infra/templates/release-run.sh.j2",
+    # Invoked from roles/svc_infra/tasks/scan.yml, so it executes under a scan
+    # path and belongs inside this gate rather than beside it. It only ever
+    # writes a metrics file, but that is a claim this gate should be the one to
+    # confirm.
+    "roles/svc_infra/files/homelab-metric-write",
 )
 
 # Jinja comment blocks, which shell templates use for the managed-file header.
