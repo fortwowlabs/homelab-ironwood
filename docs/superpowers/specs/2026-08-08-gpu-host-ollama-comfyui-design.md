@@ -151,10 +151,13 @@ spaces, and because the auto-start shortcut in 2.3 hard-codes it.
 
 It bundles an embedded Python, which matters because no Python is on this
 machine's `PATH` and a gaming workstation is a poor place to start managing
-system Python versions. The zip (~1.5 GB) is downloaded by hand from ComfyUI's
-GitHub releases; scripting that download is more brittle than doing it once.
+system Python versions. The archive (~1.5 GB) is downloaded by hand from
+ComfyUI's GitHub releases; scripting that download is more brittle than doing
+it once. Note it ships as a **`.7z`, not a `.zip`** — Windows 11 extracts that
+natively, but it is a surprise worth knowing before the download finishes.
 
-Checkpoints go in `C:\ComfyUI\ComfyUI\models\checkpoints\`.
+Extraction yields `C:\ComfyUI\ComfyUI_windows_portable\`, so checkpoints go in
+`C:\ComfyUI\ComfyUI_windows_portable\ComfyUI\models\checkpoints\`.
 
 ### 2.2 A checkpoint is mandatory
 
@@ -168,11 +171,15 @@ contention reason below.
 ### 2.3 Launch and auto-start
 
 Launched with `--listen 0.0.0.0 --port 8188`, via a shortcut in the Startup
-folder (`shell:startup`) pointing at the portable build's
-`run_nvidia_gpu.bat`, so it survives reboots unattended. Open WebUI's image
+folder (`shell:startup`), so it survives reboots unattended. Open WebUI's image
 generation assumes the backend is simply there whenever `gpu_host_online` is
 true; a service that needs a manual launch after every reboot would not hold
 up that assumption.
+
+The shortcut points at a **separate launcher script**, not at the portable
+build's stock `run_nvidia_gpu.bat` — that one binds loopback only, and editing
+it in place would be silently reverted by the next ComfyUI update, taking the
+LAN bind with it.
 
 Second inbound firewall rule, TCP 8188, scoped to `192.168.1.0/24`. ComfyUI
 has no authentication either — same constraint as Ollama.
