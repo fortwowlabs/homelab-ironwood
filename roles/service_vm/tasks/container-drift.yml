@@ -12,16 +12,82 @@
     group: root
     mode: "0750"
 
-- name: Assert no container has drifted from its Quadlet unit
+# rc 1 is drift found, rc 2 is the script refusing to guess. Both must fail the
+# play — but NOT here. The assert is a separate task below so the metrics get
+# published first: a failed_when on this task would abort the play the moment
+# drift appeared, and the drift chart would go blank in the one situation it
+# exists for. The rc check itself is unchanged, only later.
+- name: Check whether any container has drifted from its Quadlet unit
   ansible.builtin.command: /usr/local/sbin/homelab-container-drift.sh
   register: service_vm_container_drift
   changed_when: false
-  # rc 1 is drift found, rc 2 is the script refusing to guess. BOTH fail, and
-  # they are deliberately not collapsed: a `failed_when` that only tested for
-  # drift would let "could not look" pass as "nothing found", which is the
-  # failure mode this repo has written down four separate times.
-  failed_when: service_vm_container_drift.rc != 0
+  failed_when: false
+
+# Only rc 0 and rc 1 print the line — a cannot-look exits before it. So an
+# absent line means "could not measure", and the right response is to publish
+# nothing at all: the publisher keeps the previous file and the freshness panel
+# goes red. Publishing zeros here would render as a clean estate.
+- name: Extract the drift counts
+  ansible.builtin.set_fact:
+    service_vm_drift_counts: >-
+      {{ service_vm_container_drift.stdout
+         | regex_search('drift_metrics checked=(\d+) units=(\d+) drifted=(\d+) orphan=(\d+)',
+                        '\1', '\2', '\3', '\4') }}
+
+# delegate_to svc-infra because that is the only host with a textfile directory;
+# the vm label is what keeps the three hosts' series apart. It is deliberately
+# NOT `instance`: these files are published by svc-infra's exporter, so
+# Prometheus stamps instance="svc-infra" on all of them, and reusing that label
+# would overwrite it and make each series lie about where it came from.
+#
+# --success is unconditional here, because this task only runs when the counts
+# were parsed at all, and that only happens on a run that measured something.
+- name: Publish the container drift counts as metrics
+  ansible.builtin.command:
+    argv:
+      - "{{ infra_metric_write_bin }}"
+      - --dir
+      - "{{ infra_textfile_dir }}"
+      - --file
+      - "drift-{{ inventory_hostname }}"
+      - --prefix
+      - homelab_drift
+      - --labels
+      - 'vm="{{ inventory_hostname }}"'
+      - --success
+    stdin: |
+      homelab_drift_containers_running{vm="{{ inventory_hostname }}"} {{ service_vm_drift_counts[0] }}
+      homelab_drift_quadlet_units{vm="{{ inventory_hostname }}"} {{ service_vm_drift_counts[1] }}
+      homelab_drift_containers_drifted{vm="{{ inventory_hostname }}"} {{ service_vm_drift_counts[2] }}
+      homelab_drift_containers_orphaned{vm="{{ inventory_hostname }}"} {{ service_vm_drift_counts[3] }}
+  delegate_to: "{{ infra_host }}"
+  register: service_vm_drift_metrics
+  changed_when: false
+  failed_when: false
+  when: service_vm_drift_counts | default([]) | length == 4
+
+- name: Warn if the drift metrics could not be published
+  ansible.builtin.debug:
+    msg: >-
+      metric publish FAILED (rc={{ service_vm_drift_metrics.rc | default('none') }}):
+      {{ service_vm_drift_metrics.stderr | default('') }} —
+      the estate dashboard will show {{ inventory_hostname }} drift as stale
+  when:
+    - service_vm_drift_counts | default([]) | length == 4
+    - (service_vm_drift_metrics.rc | default(0)) != 0
 
 - name: Report the container drift result
   ansible.builtin.debug:
     msg: "{{ service_vm_container_drift.stdout_lines }}"
+
+# The gate, unchanged in strictness and now the last word. rc 1 is drift, rc 2
+# is "could not look", and they stay deliberately uncollapsed: a check that only
+# tested for drift would let a broken query pass as a clean estate, which is the
+# failure mode this repo has written down four separate times.
+- name: Assert no container has drifted from its Quadlet unit
+  ansible.builtin.assert:
+    that: service_vm_container_drift.rc == 0
+    fail_msg: >-
+      {{ service_vm_container_drift.stdout | default('') }}
+      {{ service_vm_container_drift.stderr | default('') }}
+    success_msg: "container drift: OK"
