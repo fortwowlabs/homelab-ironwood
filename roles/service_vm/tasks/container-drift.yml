@@ -34,6 +34,17 @@
          | regex_search('drift_metrics checked=(\d+) units=(\d+) drifted=(\d+) orphan=(\d+)',
                         '\1', '\2', '\3', '\4') }}
 
+# The trap: regex_search returns Python None (not []) when the line is
+# absent, and `| default([])` only substitutes for Undefined — it does not
+# catch None. So a cannot-look leaves service_vm_drift_counts set to None,
+# and `None | length` blows up the `when:` below with a raw Jinja filter
+# error instead of skipping, which loses the assert's diagnostic entirely.
+# Hoisted here, tested once with an explicit `is not none`, and shared by
+# both the emit and the warn task below so the two guards cannot drift apart.
+- name: Determine whether the drift counts were parsed
+  ansible.builtin.set_fact:
+    service_vm_drift_counts_valid: "{{ service_vm_drift_counts is not none and service_vm_drift_counts | length == 4 }}"
+
 # delegate_to svc-infra because that is the only host with a textfile directory;
 # the vm label is what keeps the three hosts' series apart. It is deliberately
 # NOT `instance`: these files are published by svc-infra's exporter, so
@@ -64,7 +75,7 @@
   register: service_vm_drift_metrics
   changed_when: false
   failed_when: false
-  when: service_vm_drift_counts | default([]) | length == 4
+  when: service_vm_drift_counts_valid
 
 - name: Warn if the drift metrics could not be published
   ansible.builtin.debug:
@@ -73,17 +84,20 @@
       {{ service_vm_drift_metrics.stderr | default('') }} —
       the estate dashboard will show {{ inventory_hostname }} drift as stale
   when:
-    - service_vm_drift_counts | default([]) | length == 4
+    - service_vm_drift_counts_valid
     - (service_vm_drift_metrics.rc | default(0)) != 0
 
 - name: Report the container drift result
   ansible.builtin.debug:
     msg: "{{ service_vm_container_drift.stdout_lines }}"
 
-# The gate, unchanged in strictness and now the last word. rc 1 is drift, rc 2
-# is "could not look", and they stay deliberately uncollapsed: a check that only
-# tested for drift would let a broken query pass as a clean estate, which is the
-# failure mode this repo has written down four separate times.
+# The gate, unchanged in strictness and now the last word — which depends on
+# every task above degrading to a clean skip on a cannot-look rather than
+# raising, since a raised error stops the play before reaching this task just
+# as surely as the old failed_when did. rc 1 is drift, rc 2 is "could not
+# look", and they stay deliberately uncollapsed: a check that only tested for
+# drift would let a broken query pass as a clean estate, which is the failure
+# mode this repo has written down four separate times.
 - name: Assert no container has drifted from its Quadlet unit
   ansible.builtin.assert:
     that: service_vm_container_drift.rc == 0
