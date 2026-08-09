@@ -233,6 +233,80 @@ come back `vulnerable` every night. That was considered and deliberately not
 done — it means standing up a genuinely insecure thing to prove a check works.
 If the canary is ever extended to more services, revisit it.
 
+### Trending is separate from alerting, and both are needed
+
+Every check here reduced its numbers to a threshold and threw the number away.
+That is why the rpool fill was an outage rather than a slope somebody noticed a
+week earlier: nothing was wrong until it was entirely wrong, because no series
+existed to look at.
+
+node_exporter's textfile collector on svc-infra is the bridge. Anything that
+already knows a number can publish it:
+
+```bash
+homelab-metric-write --dir /opt/homelab/appdata/node-exporter-textfile \
+    --file scan --prefix homelab_scan --success <<'EOF'
+homelab_scan_images_total 48
+EOF
+```
+
+The full contract is `--dir DIR --file BASENAME --prefix PREFIX [--labels
+'k="v"'] [--success]`. Its exit codes are worth knowing before scripting
+against it: `0` published, `1` bad arguments or an I/O failure, `2` malformed
+input lines (previous file left in place), `3` no input lines at all (same).
+argparse's own usage errors are remapped from its default exit code of `2` to
+`1` deliberately, because `2` is reserved for "the data was bad" — a caller
+can tell "my flag was wrong" from "the numbers I handed it don't parse"
+without reading stderr.
+
+Four rules, learned the hard way:
+
+- **The write goes in the play, never in `roles/svc_infra`.** A metrics file
+  changes every run, so a template task in the role would make every
+  `make infra` report `changed` and the `changed=0` proof would stop meaning
+  anything.
+- **Emit the number the alert used.** Every emitter reads the same fact that
+  feeds ntfy. A second independent parse of `state.json` can drift from the
+  first, and then two numbers disagree with no way to tell which is right.
+- **Never publish zeros you did not measure.** `homelab-metric-write` refuses
+  empty input and leaves the previous file in place, because a stale number is
+  detectable and a zero reads as good news. The drift script's cannot-look
+  paths exit *before* printing counts for the same reason — and the guard
+  around them in `container-drift.yml` is stricter than a plain length check:
+  `regex_search` returns Python `None`, not `[]`, when the counts line is
+  absent, and `| default([])` only substitutes for `Undefined` — it does not
+  catch `None`. So the play hoists an explicit
+  `service_vm_drift_counts is not none and service_vm_drift_counts | length
+  == 4` into its own fact, tested once and shared by both the emit task and
+  the assert after it, so the two guards cannot drift apart.
+- **Emit before you assert.** `container-drift.yml` publishes and then asserts,
+  in that order. The other way round, the chart goes blank exactly when
+  something is wrong.
+
+Per-image scan series carry three labels, not two:
+`homelab_scan_image_vulnerabilities{image, digest, severity}`. `image` is the
+ref with its digest stripped, so the series does not churn on every
+`make image-bump`; `digest` is the pinned digest's first 7 characters and
+exists because two *different* pins collapsed to the same `image` label set —
+apps.yml deliberately holds valkey at two digests for two purposes — and
+node_exporter silently kept one and dropped the other with
+`node_textfile_scrape_error` still `0`. Nothing groups on `digest`; a per-repo
+total needs an explicit `sum by (image)`.
+
+`node_textfile_scrape_error` is node_exporter's own verdict on whether it could
+parse the files, and the estate dashboard charts it. If a panel is empty, read
+that before anything else — one malformed line makes node_exporter reject a
+whole file, so a typo takes every series in it down at once. This is why the
+publisher validates each line before writing, and why nothing emits `# HELP` or
+`# TYPE`: the three drift files (one per service VM) share timestamp metric
+names, and duplicate TYPE declarations across merged textfiles make
+node_exporter reject them.
+
+The release emitter's coverage count, `homelab_release_images_comparable`, is
+`images_examined` minus `images_unmeasured` — it moves as pins gain `# tag:`
+coverage or the catalog grows, so read it off the chart rather than quoting a
+number here; it already moved once during this feature's own branch.
+
 ### Alerting counts as an application
 
 The same rule applies to the alert paths themselves, and it is easier to get

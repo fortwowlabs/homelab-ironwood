@@ -255,6 +255,26 @@ has been visited once (there's no API/CLI to generate them ahead of time):
 `vault_beszel_token`/`vault_beszel_key` are shared by all three agents; there
 is nothing host-specific to configure per VM.
 
+## Grafana dashboards
+
+Two provisioned dashboards, both owned by this repo (`allowUiUpdates: false`,
+so UI edits revert on restart — copy a dashboard to a new name to experiment):
+
+- **Homelab nodes** — host CPU, memory, disk and network from node_exporter.
+- **Homelab estate** — CVE counts, images behind upstream, container drift, and
+  a freshness row that reports how old each of those numbers is. Fed by the
+  textfile collector rather than a scrape; see "Trending is separate from
+  alerting, and both are needed" in `CLAUDE.md`. Its default range is 30 days
+  because the series update nightly and weekly — a 6h window shows nothing and
+  looks broken.
+
+Freshness is judged per emitter, not against one global threshold: scan and
+drift read as stale past 26h, release past 8 days, because a single threshold
+would show the weekly release series as permanently red. The "Critical CVEs"
+tile alarms at 1; "High CVEs" deliberately does not, because high-severity
+findings are routine across the pinned image catalog and a tile that is always
+red stops getting read.
+
 ## Seerr and RomM migration notes
 
 Seerr replaces Jellyseerr on the same application port. The role retires legacy
