@@ -103,11 +103,17 @@ def main() -> int:
         print(f"no dashboards found in {DASHBOARD_DIR}", file=sys.stderr)
         return 1
 
-    known = emitted_metric_names() | BUILTIN
-    if not known:
+    # Checked against the extraction's own result, not against `known`: BUILTIN
+    # is a non-empty static set, so `known` can never be empty even if the
+    # extraction found nothing — a guard on `known` would be unreachable and
+    # a broken extraction would pass silently as long as every dashboard
+    # happened to query only BUILTIN names.
+    emitted = emitted_metric_names()
+    if not emitted:
         print("collected zero emitted metric names — the extraction is broken, "
               "which would make this gate pass everything", file=sys.stderr)
         return 1
+    known = emitted | BUILTIN
 
     for path in dashboards:
         try:
