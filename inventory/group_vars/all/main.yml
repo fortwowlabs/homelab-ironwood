@@ -53,15 +53,18 @@ infra_host:    "{{ groups['infra_vms'] | first }}"
 # VSCode can talk straight to it. There is no Ansible connection to it and
 # there never will be — see docs/gpu-host.md for the manual setup.
 #
-# The address is reserved ahead of the hardware. Make the matching DHCP
-# reservation when the PC arrives; nothing here reaches out to it until
-# gpu_host_online is flipped.
+# The address is DHCP-reserved on the PC's NIC in pfSense.
 gpu_host_ip: "192.168.1.40"
 # While false, Open WebUI is deployed with its Ollama and image-generation
 # backends switched OFF, so the UI shows no dead-backend errors for a machine
 # that does not exist yet. Flipping this to true and running `make infra` is
 # the entire go-live step.
-gpu_host_online: false
+#
+# True since 2026-08-09: the PC is built and both backends answer from the LAN.
+# Set it back to false and run `make infra` whenever the PC will be off for a
+# while — that restores the clean "no models" state instead of a wall of
+# timeouts. See docs/gpu-host.md.
+gpu_host_online: true
 
 # --- TrueNAS NFS (created by hand in Phase 1 — NOT automated) ---
 # These live INSIDE the exported `tank` dataset (exports are tank + rust;
