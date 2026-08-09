@@ -88,6 +88,31 @@ where a stock model declines, selectable in the Open WebUI dropdown.
 `qwen2.5-coder:1.5b-base` and `nomic-embed-text` stay — autocomplete and
 embeddings are small, always-on, and unaffected by any of this.
 
+### Obtaining the chat and coding models
+
+Five of the six are plain `ollama pull` against the Ollama registry, needing no
+account and no token:
+
+```powershell
+ollama pull huihui_ai/gemma-4-abliterated:26b
+ollama pull huihui_ai/gemma-4-abliterated:31b
+ollama pull huihui_ai/Qwen3.6-abliterated:27b
+ollama pull qwen3-coder:30b
+ollama pull aratan/qwen3.6-claude-coder-35b-A3b-mlx-Q4KM-abliterated
+```
+
+**The DavidAU model is the exception: it is a Hugging Face GGUF repo, not an
+Ollama registry entry**, so it needs the `hf.co/` prefix and an explicit quant
+tag. `ollama pull DavidAU/...` alone fails with a not-found error that reads
+like the model was withdrawn:
+
+```powershell
+ollama pull hf.co/DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF:Q4_K_M
+```
+
+Confirm the quant tag exists in that repo's file list before pulling — DavidAU
+publishes many quants per model and the available tag names vary between them.
+
 ### Disk
 
 New pulls total ~102 GB. Net of the ~27 GB retired and the ~27 GB of image
@@ -145,7 +170,10 @@ workflow, so it can only switch between models of the same architecture.
   `CheckpointLoaderSimple`.
 - **Chroma1-HD** is Flux-architecture (8.9B, retrained from FLUX.1-schnell
   with safety alignment removed): three files across three directories,
-  `UNETLoader` + `CLIPLoader` + `VAELoader`.
+  `UNETLoader` + `CLIPLoader` + `VAELoader`. Its text encoder is a **T5-FLAN**
+  variant loaded with `CLIPLoader` type `chroma`, *not* the plain
+  `t5xxl_fp8_e4m3fn` used by stock Flux workflows, and it lives in
+  `models/text_encoders/` rather than the legacy `models/clip/`.
 
 **They cannot share a workflow.** Having both in one chat dropdown is not
 achievable, so the design picks which is reachable from inside a conversation.
@@ -165,18 +193,60 @@ for quality work. No Open WebUI involvement, full node-graph control.
 committed. Switching is a `make infra`, not a per-request choice, which keeps
 the decision in git and makes trying Chroma in-chat later a one-line change.
 
-### Files on the GPU host
+### Obtaining the files
 
-```
-models/checkpoints/ponyDiffusionV6XL.safetensors           ~6.5 GB
-models/diffusion_models/chroma1-hd-fp8-scaled.safetensors    ~9 GB
-models/clip/t5xxl_fp8_e4m3fn.safetensors                     ~5 GB
-models/vae/ae.safetensors                                  ~335 MB
-```
+Every URL below was HEAD-checked on 2026-08-09: all four are public and
+ungated, and the sizes and SHA256 checksums are read from Hugging Face's own
+response headers rather than estimated.
+
+| Destination | File | Size |
+|---|---|---|
+| `models/checkpoints/` | [`ponyDiffusionV6XL_v6StartWithThisOne.safetensors`](https://huggingface.co/LyliaEngine/Pony_Diffusion_V6_XL/resolve/main/ponyDiffusionV6XL_v6StartWithThisOne.safetensors) | 6.46 GB |
+| `models/diffusion_models/` | [`Chroma1-HD-fp8_scaled_defaultloader_hybrid_large_rev2.safetensors`](https://huggingface.co/silveroxides/Chroma1-HD-fp8-scaled/resolve/main/Chroma1-HD-fp8_scaled_defaultloader_hybrid_large_rev2.safetensors) | 8.56 GB |
+| `models/text_encoders/` | [`t5xxl_flan_fp8_scaled.safetensors`](https://huggingface.co/silveroxides/t5xxl_flan_enc/resolve/main/t5xxl_flan_fp8_scaled.safetensors) | 4.80 GB |
+| `models/vae/` | [`ae.safetensors`](https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors) | 0.31 GB |
+
+~20.1 GB total. Downloaded by hand on the GPU host with `Invoke-WebRequest`,
+in the same style as the existing SDXL download in `docs/gpu-host.md`.
+
+**Verify by checksum, not by eyeballing the size.** Hugging Face's CDN returns
+each file's SHA256 as its `etag`, so the expected value is knowable in advance:
+
+| File | SHA256 |
+|---|---|
+| `ponyDiffusionV6XL_v6StartWithThisOne` | `614f55e8bd8701b9168957361a00c7a76c5de1aa625ade08edfca3db2675b2cc` |
+| `Chroma1-HD-fp8_scaled_…_rev2` | `377eff193fc866064ed587bd4140b3fd59bad0555b32b02224d60353b3049ebc` |
+| `t5xxl_flan_fp8_scaled` | `e9b22d1142585f501864671e07af481f8800415296f6f54c10a88e71e05a7a60` |
+| `ae` | `f73eecf7c469ff442523dc712cc161d631df071bf4d9d793494fbf00cdd80a82` |
+
+`Get-FileHash -Algorithm SHA256` against each is a strictly stronger check than
+the current doc's "if it lands as a few KB, it is an HTML error page wearing a
+`.safetensors` name" — it catches a truncated or substituted file too, not just
+an obviously tiny one.
+
+**Do not use `black-forest-labs/FLUX.1-schnell` for the VAE. It is gated and
+returns 401**, which is precisely the download that lands as an HTML page named
+`ae.safetensors`. The Comfy-Org repackage above is the ungated equivalent.
 
 The existing `sd_xl_base_1.0.safetensors` stays on disk as a known-good
 control. It costs 6.5 GB and is the fastest way to tell "the new checkpoint is
 bad" from "the workflow is bad".
+
+### Provenance, stated honestly
+
+Chroma, the FLAN encoder and the VAE all trace to their upstreams: the official
+[`lodestones/Chroma1-HD`](https://huggingface.co/lodestones/Chroma1-HD) is
+ungated and Apache-2.0, and the fp8 and encoder repos are the ones the official
+ComfyUI workflow points at.
+
+**Pony V6 XL is different.** It is officially distributed on CivitAI only, and
+CivitAI requires an API token for downloads. `LyliaEngine/Pony_Diffusion_V6_XL`
+is an unaffiliated third-party mirror. Two mitigations make this acceptable
+rather than reckless: `.safetensors` is a data-only format that cannot execute
+code on load, unlike the `.ckpt` pickles it replaced; and the checksum above
+pins exactly which bytes were reviewed. If that is still not good enough, the
+alternative is a CivitAI API token and a download from source — a deliberate
+choice, not an oversight.
 
 ### The risk in this section, stated plainly
 
@@ -220,6 +290,40 @@ documents this trap; image config falls into the same one.
 | `inventory/group_vars/all/infra-apps.yml` | `open-webui` env: add `IMAGE_SIZE`, `IMAGE_STEPS`, `IMAGE_GENERATION_MODEL`, `COMFYUI_WORKFLOW`, `COMFYUI_WORKFLOW_NODES` |
 | `roles/svc_infra/files/comfyui/pony.json` | New — API-format workflow, SDXL |
 | `roles/svc_infra/files/comfyui/chroma.json` | New — API-format workflow, Flux |
+
+### Where the workflow JSONs come from
+
+`pony.json` derives from Open WebUI's own built-in default workflow
+(`COMFYUI_DEFAULT_WORKFLOW` in `config.py`), which is already SDXL-shaped — the
+change is the checkpoint name and the sampler settings.
+
+`chroma.json` derives from the **official** workflow that ships in the
+Chroma repo as `ComfyUI_Chroma1-HD_T2I-workflow.json`, rather than being
+hand-built. Its settings, which are not guessable and matter:
+
+| Setting | Value |
+|---|---|
+| Sampler | `euler` with `BetaSamplingScheduler`, 26 steps |
+| CFG | **3.8** via `CFGGuider` |
+| Model sampling | `ModelSamplingAuraFlow`, shift 1 |
+| Latent | `EmptySD3LatentImage`, 1152×1152 |
+
+**CFG 3.8 is the one to notice.** Chroma is derived from FLUX.1-schnell but is
+not distilled the same way, so it needs real classifier-free guidance; a
+schnell-style CFG of 1.0 produces washed-out output that looks like a bad model
+rather than a bad setting.
+
+**The official workflow's filenames are stale.** It references
+`Chroma1-HD-fp8_scaled_rev2.safetensors` and
+`t5xxl_flan_latest_float8_e4m3fn_scaled_stochastic.safetensors`; neither exists
+in the upstream repos any more (both 404 as of 2026-08-09). The committed
+`chroma.json` must be edited to name the files actually downloaded above. Left
+unedited it fails at generation time with a missing-model error, after the
+workflow has already loaded fine.
+
+Both files must be saved in ComfyUI's **API format** (`Workflow → Export
+(API)`), not the editor format. Open WebUI cannot read the editor format, and
+the two look similar enough to confuse.
 | `tests/validate_openwebui_image_config.py` | New validator, wired into `make validate` |
 | `docs/chat-models.md` | New — roster, persona text, swap procedure |
 | `docs/gpu-host.md` | Updated pull list, Continue config, VRAM table |
@@ -269,6 +373,10 @@ The rest:
   returns the previous image in ~2 s, indistinguishable from success.
 - Confirm the returned image is actually 1024×1024. That is the `IMAGE_SIZE`
   fix proving itself.
+- `Get-FileHash -Algorithm SHA256` on all four downloaded image files, matched
+  against the table above, **before** wiring any of them into a workflow. A
+  truncated or substituted download otherwise surfaces as an inscrutable
+  ComfyUI error much later.
 - Continue autocomplete in a real file against `qwen3-coder:30b`.
 - `nvidia-smi` with a chat model resident and Chroma generating — the
   measurement that decides whether Chroma can ever become the in-chat engine.
