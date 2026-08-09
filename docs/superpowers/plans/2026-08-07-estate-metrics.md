@@ -1172,14 +1172,29 @@ EMITTER_PATHS = (
     "roles/service_vm/tasks/container-drift.yml",
 )
 
-# node_exporter's own series, which this repo does not emit but the freshness
-# row legitimately queries. Explicit rather than a prefix rule: the point of the
+# node_exporter's own series, which this repo does not emit but the dashboards
+# legitimately query. Explicit rather than a prefix rule: the point of the
 # cross-check is that an unknown homelab_* name is an error, and a blanket
 # "anything starting with node_ is fine" would be one loosening away from
 # letting a typo through.
+#
+# The first two are the bridge's own health signals, queried by the estate
+# dashboard's freshness row. The rest are what homelab-nodes.json has always
+# queried — that dashboard predates this gate, so the list has to cover it or the
+# gate rejects correct work on its first run, which is how gates get loosened.
+# Add a name here only after confirming a dashboard actually queries it.
 BUILTIN = {
     "node_textfile_scrape_error",
     "node_textfile_mtime_seconds",
+    "node_boot_time_seconds",
+    "node_load1",
+    "node_filesystem_avail_bytes",
+    "node_filesystem_size_bytes",
+    "node_cpu_seconds_total",
+    "node_memory_MemAvailable_bytes",
+    "node_memory_MemTotal_bytes",
+    "node_network_receive_bytes_total",
+    "node_network_transmit_bytes_total",
 }
 
 DATASOURCE_UID = "prometheus"
@@ -1192,8 +1207,11 @@ DATASOURCE_UID = "prometheus"
 PREFIX_ARG = re.compile(r"--prefix['\",\s\]\[-]*?(homelab_[a-z0-9_]+)", re.S)
 
 # Prometheus functions and keywords that appear in exprs and are not metrics.
+# `instance` is here because the extraction's lookahead matches a bare name
+# followed by `)`, which is exactly the shape a label takes inside `by (instance)`.
+# Without it the gate reports a label as an unknown metric.
 NOT_METRICS = {"sum", "topk", "time", "rate", "increase", "avg", "max", "min",
-               "count", "by", "without", "and", "or", "unless"}
+               "count", "by", "without", "and", "or", "unless", "instance"}
 
 
 def emitted_metric_names() -> set[str]:
@@ -1223,11 +1241,20 @@ def main() -> int:
         print(f"no dashboards found in {DASHBOARD_DIR}", file=sys.stderr)
         return 1
 
-    known = emitted_metric_names() | BUILTIN
-    if not known:
+    # Test the EXTRACTION's own result, before unioning BUILTIN into it. Checking
+    # `not known` after the union is dead code: BUILTIN is a non-empty static set,
+    # so the union is never empty and the guard can never fire. That shipped once,
+    # and it is a particularly bad place for it — the guard exists precisely so a
+    # broken extraction fails loudly instead of silently approving every panel, and
+    # it was itself incapable of failing. A dashboard querying only node_exporter
+    # metrics, plus a broken extraction, would have exited 0 printing
+    # "N file(s) OK, 11 known metric name(s)".
+    emitted = emitted_metric_names()
+    if not emitted:
         print("collected zero emitted metric names — the extraction is broken, "
               "which would make this gate pass everything", file=sys.stderr)
         return 1
+    known = emitted | BUILTIN
 
     for path in dashboards:
         try:
