@@ -121,6 +121,11 @@ validate-links:
 validate-catalog:
 	$(PYTHON) tests/validate_catalog.py
 	$(PYTHON) tests/validate_infra_catalog.py
+# Sits with the catalog gates because it validates a provisioned artifact the
+# same way: the dashboards are files this repo owns and Grafana loads verbatim.
+# The metric cross-check is the reason it exists — a name renamed in a play
+# leaves the panel blank and reports nothing anywhere.
+	$(PYTHON) tests/validate_grafana_dashboards.py
 	$(PYTHON) tests/validate_generated_catalog.py
 	$(PYTHON) tests/validate_sso.py
 	$(PYTHON) tests/validate_scan_image_coverage.py

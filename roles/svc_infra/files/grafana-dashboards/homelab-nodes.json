@@ -35,7 +35,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 4, "w": 8, "x": 0, "y": 1 },
       "fieldConfig": {
-        "defaults": { "unit": "s", "color": { "mode": "thresholds" },
+        "defaults": { "unit": "s", "noValue": "no data", "color": { "mode": "thresholds" },
           "thresholds": { "mode": "absolute", "steps": [ { "color": "text", "value": null } ] } },
         "overrides": []
       },
@@ -53,7 +53,7 @@
       "datasource": { "type": "prometheus", "uid": "prometheus" },
       "gridPos": { "h": 4, "w": 8, "x": 8, "y": 1 },
       "fieldConfig": {
-        "defaults": { "unit": "short", "decimals": 2, "color": { "mode": "thresholds" },
+        "defaults": { "unit": "short", "decimals": 2, "noValue": "no data", "color": { "mode": "thresholds" },
           "thresholds": { "mode": "absolute", "steps": [
             { "color": "green", "value": null }, { "color": "yellow", "value": 4 }, { "color": "red", "value": 8 } ] } },
         "overrides": []
@@ -73,7 +73,7 @@
       "gridPos": { "h": 4, "w": 8, "x": 16, "y": 1 },
       "fieldConfig": {
         "defaults": { "unit": "percent", "min": 0, "max": 100, "decimals": 1,
-          "color": { "mode": "thresholds" },
+          "noValue": "no data", "color": { "mode": "thresholds" },
           "thresholds": { "mode": "absolute", "steps": [
             { "color": "green", "value": null }, { "color": "yellow", "value": 75 }, { "color": "red", "value": 90 } ] } },
         "overrides": []
