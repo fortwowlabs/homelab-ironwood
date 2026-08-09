@@ -1,7 +1,11 @@
 # Estate health as Prometheus metrics (Grafana sub-project A)
 
 Date: 2026-08-07
-Status: designed, not implemented
+Status: **shipped** 2026-08-09. Implemented on branch `docs/grafana-estate-metrics`.
+
+Read the amendments at the bottom of this file before relying on any detail here:
+four things diverged from this design during implementation, and two of them
+changed the metric contract.
 
 ## The problem
 
@@ -120,7 +124,8 @@ sufficient. Nothing inside the container ever writes here, so there is no
 metric lines on stdin:
 
 ```bash
-homelab-metric-write --file scan --prefix homelab_scan --success <<'EOF'
+homelab-metric-write --dir /opt/homelab/appdata/node-exporter-textfile \
+    --file scan --prefix homelab_scan --success <<'EOF'
 homelab_scan_images_total 48
 homelab_scan_vulnerabilities{severity="critical"} 12
 EOF
@@ -128,6 +133,8 @@ EOF
 
 Arguments:
 
+- `--dir <path>` — the textfile collector directory to publish into. Required;
+  there is no default, so a caller that omits it exits 1.
 - `--file <basename>` — the `.prom` file to publish, e.g. `drift-svc-media`.
 - `--prefix <name>` — metric prefix for the timestamp series it appends.
   Separate from `--file` because file basenames may contain hyphens and metric
@@ -158,7 +165,9 @@ All series are prefixed `homelab_`. Every emitter publishes three kinds:
 - **The finding** — what you want to chart.
 - **A denominator that cannot legitimately be zero** if the emitter really
   looked: `homelab_scan_images_total` (48), `homelab_release_images_comparable`
-  (27), and `homelab_drift_containers_running`, which is per-VM and so is
+  (30 at the time of writing, and rising as pins gain a recorded tag — the
+  identity that matters is comparable + unmeasured == total), and
+  `homelab_drift_containers_running`, which is per-VM and so is
   non-zero per `vm` label rather than any single fleet number — the three sum
   to the 54 the drift check audits. Zero on any of them means *could not
   look*, and the dashboard renders it that way rather than as green.
@@ -184,7 +193,7 @@ is inherited rather than reinvented.
 Series: `homelab_scan_vulnerabilities{severity}`,
 `homelab_scan_images_total`, `homelab_scan_images_scanned`,
 `homelab_scan_images_failed`, `homelab_scan_images_eosl`, and per-image
-`homelab_scan_image_vulnerabilities{image,severity}`.
+`homelab_scan_image_vulnerabilities{image,digest,severity}` (see amendment 1).
 
 Per-image labels use the ref **with the digest stripped**
 (`ghcr.io/owner/name`). A digest in the label means every `image-bump` retires
@@ -194,7 +203,7 @@ want to see a bump's effect.
 ### Weekly release check — `release.yml`
 
 Same shape, after the existing summary facts:
-`homelab_release_images_behind`, `homelab_release_images_comparable` (27),
+`homelab_release_images_behind`, `homelab_release_images_comparable`,
 `homelab_release_images_total` (48). Charting comparable against total makes
 coverage visibly accrue as pins gain a `# tag:`, and keeps *unmeasured* legible
 as its own quantity instead of folded into "fine".
@@ -330,3 +339,76 @@ deploy:
   `prometheus-podman-exporter` and a coarser textfile script.
 - The three `node-exporter.container.j2` templates are divergent until C
   unifies them.
+
+## Amendments — what diverged during implementation
+
+Four things in the design above turned out to be wrong. Each was found by a check
+with a required positive result, and none was caught by `make validate`, by a
+successful deploy, or by `node_textfile_scrape_error` — which is the argument this
+design makes about the estate, holding against the design itself. They are
+recorded here rather than silently corrected upstream, because the reasoning is
+the useful part.
+
+**1. Per-image series needed a `digest` label as well as a stripped `image`.**
+
+The design said to strip the digest so series would not churn across
+`make image-bump`. That is necessary but not sufficient: `apps.yml` deliberately
+pins one repo at more than one digest (three valkey services share one pin, a
+fourth uses another), so stripping collapsed two *different* pins onto one label
+set. `scan.prom` then held two lines reading
+`homelab_scan_image_vulnerabilities{image="docker.io/valkey/valkey",severity="critical"}`,
+node_exporter published one and discarded the other, and
+`node_textfile_scrape_error` stayed `0` throughout. Shipped contract is
+`{image, digest, severity}`, digest being the first 7 characters. Nothing groups
+on `digest`, so trends stay continuous; a per-repo total needs an explicit
+`sum by (image)`.
+
+**2. "last_success does not advance" required the publisher to carry it forward.**
+
+The design's central mechanism — `run_timestamp` advances every run,
+`last_success_timestamp` only when something was measured, and the two diverging
+is the machine-readable form of "it ran and could not look" — did not work as
+written. The publisher rewrites the whole file rather than merging, so omitting
+the success stamp did not freeze the old one, it **deleted** it. The freshness
+tile then read "no data" instead of climbing past its threshold, so the red state
+the design relies on could never fire. The publisher now preserves any existing
+`<prefix>_last_success_timestamp_seconds` line verbatim when `--success` is
+absent.
+
+**3. Emitters must suppress findings they did not measure, not just withhold
+`--success`.**
+
+With an empty result set the scan emitter rendered six *valid* lines of zeros —
+and a zero vulnerability count is indistinguishable from a healthy estate. The
+design assumed the non-zero denominator would carry the signal, which is true in
+the data and false on a dashboard, because no tile charted it. Findings are now
+gated on the same `ok` condition that gates `--success`, so they go absent and
+`noValue` renders "no data". Denominators and the run timestamp still publish
+unconditionally — those are the could-not-look evidence.
+
+**4. The drift emitter's guard tests for `None`, not for an empty list.**
+
+`regex_search` returns Python `None` on a no-match, and `| default([])`
+substitutes only for *Undefined*. `None | length` therefore raised on exactly the
+cannot-look path the guard existed to handle, and the play never reached the
+assert — so the operator got an opaque Jinja error instead of the script's own
+account of why it could not look. The test is now
+`is not none and … | length == 4`, hoisted into one fact that both consumers read
+so a fix cannot be applied to one site and missed at the other.
+
+### Smaller corrections
+
+- The publisher's exit codes are `0` published, `1` bad arguments or I/O failure,
+  `2` malformed input lines, `3` no input lines. argparse's own usage errors are
+  remapped from its default `2` to `1`, because `2` is reserved for malformed
+  input and a caller's bad flag must not look like bad data.
+- `--dir` is required and has no default. The design's example omitted it.
+- A third gate shipped that this design did not anticipate:
+  `tests/validate_grafana_dashboards.py`, which cross-checks every metric name a
+  panel queries against the names the emitters actually write. A renamed metric
+  otherwise leaves a panel blank and reports nothing anywhere.
+- `tests/validate_verify_safety.py` gained `container-drift.yml` and an assertion
+  that the drift rc gate stays unconditional and stays positioned after the
+  metrics publish. Moving the `failed_when` onto a separate `assert` made the gate
+  deletable without any gate noticing, which is the failure mode this repo has
+  written down more than once.
