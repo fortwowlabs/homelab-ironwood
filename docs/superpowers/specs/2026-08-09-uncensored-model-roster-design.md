@@ -3,11 +3,32 @@
 **Date:** 2026-08-09
 **Status:** design approved, not yet implemented
 
-Open WebUI at `chat.fortwow.dev` currently offers one chat model (`qwen3:30b`),
-one coding model two generations old (`qwen2.5-coder:14b`), and stock SDXL for
-images. All three are safety-aligned upstream. This replaces that roster with
-abliterated models across chat, coding and image generation, and adds saved
-personas so that "therapy" is a system prompt rather than a fourth download.
+Open WebUI at `chat.fortwow.dev` currently offers one chat model (`qwen3:30b`)
+and one coding model two generations old (`qwen2.5-coder:14b`), both safety
+aligned upstream. This replaces that roster with abliterated models and adds
+saved personas so that "therapy" is a system prompt rather than a fourth
+download.
+
+**Image generation is deliberately out of scope.** It was designed alongside
+this and split out on 2026-08-09 to keep the change to models only; the full
+design, the verified download URLs and checksums, and the non-obvious ComfyUI
+findings are preserved in
+[docs/plans/uncensored-image-generation.md](../../plans/uncensored-image-generation.md).
+That page also records a **live defect** found while designing this — Open WebUI's
+`IMAGE_SIZE` defaults to `512x512` against a checkpoint trained at 1024, so
+in-chat images have been quietly poor since the feature was enabled. Fixing it
+is two lines and needs no new models, but it is not part of this change.
+
+## What this change actually touches
+
+Worth stating up front, because it is smaller than it looks: **every model here
+is installed by hand on the Windows GPU host, which is deliberately not
+Ansible-managed, and the personas are created in Open WebUI's web UI.** No
+deployed configuration changes. The repo's entire contribution is
+documentation — `docs/chat-models.md` and an updated `docs/gpu-host.md`.
+
+That is a real limitation, not an oversight. It is discussed under
+*Where the persona text lives* below.
 
 ## What abliteration is, and why "heretic" appears in every model name
 
@@ -88,7 +109,7 @@ where a stock model declines, selectable in the Open WebUI dropdown.
 `qwen2.5-coder:1.5b-base` and `nomic-embed-text` stay — autocomplete and
 embeddings are small, always-on, and unaffected by any of this.
 
-### Obtaining the chat and coding models
+### Obtaining the models
 
 Five of the six are plain `ollama pull` against the Ollama registry, needing no
 account and no token:
@@ -115,10 +136,10 @@ publishes many quants per model and the available tag names vary between them.
 
 ### Disk
 
-New pulls total ~102 GB. Net of the ~27 GB retired and the ~27 GB of image
-models, the GPU host ends up carrying roughly **130 GB of models**, up from
-about 35 GB today. Unremarkable for a modern SSD,
-but it is not a rounding error on a small boot drive — check before pulling.
+New pulls total ~102 GB. Net of the ~27 GB retired, the GPU host ends up
+carrying roughly **110 GB of models**, up from about 35 GB today.
+Unremarkable for a modern SSD, but it is not a rounding error on a small boot
+drive — check before pulling.
 
 ## Personas
 
@@ -158,200 +179,24 @@ proof the whole repo depends on. Rejected as disproportionate for what is
 ultimately four paragraphs of text. Revisit if the persona set grows or starts
 mattering operationally.
 
-## Image generation
-
-### The constraint
-
-Open WebUI holds exactly one ComfyUI workflow (`COMFYUI_WORKFLOW`). Its
-per-request model dropdown maps to a checkpoint-name input *within* that one
-workflow, so it can only switch between models of the same architecture.
-
-- **Pony Diffusion V6 XL** is SDXL-architecture: one checkpoint file,
-  `CheckpointLoaderSimple`.
-- **Chroma1-HD** is Flux-architecture (8.9B, retrained from FLUX.1-schnell
-  with safety alignment removed): three files across three directories,
-  `UNETLoader` + `CLIPLoader` + `VAELoader`. Its text encoder is a **T5-FLAN**
-  variant loaded with `CLIPLoader` type `chroma`, *not* the plain
-  `t5xxl_fp8_e4m3fn` used by stock Flux workflows, and it lives in
-  `models/text_encoders/` rather than the legacy `models/clip/`.
-
-**They cannot share a workflow.** Having both in one chat dropdown is not
-achievable, so the design picks which is reachable from inside a conversation.
-
-### The split
-
-**Pony V6 XL is the in-chat engine.** ~6.5 GB — the same VRAM profile as the
-SDXL base already proven to coexist with a resident chat model — and it works
-with Open WebUI's built-in default workflow. It also has by far the deepest
-LoRA ecosystem on CivitAI.
-
-**Chroma1-HD is driven directly from ComfyUI** at `http://192.168.1.40:8188`
-for quality work. No Open WebUI involvement, full node-graph control.
-
-**A repo variable selects which workflow Open WebUI uses** —
-`image_workflow: pony | chroma` in group_vars, with both workflow JSONs
-committed. Switching is a `make infra`, not a per-request choice, which keeps
-the decision in git and makes trying Chroma in-chat later a one-line change.
-
-### Obtaining the files
-
-Every URL below was HEAD-checked on 2026-08-09: all four are public and
-ungated, and the sizes and SHA256 checksums are read from Hugging Face's own
-response headers rather than estimated.
-
-| Destination | File | Size |
-|---|---|---|
-| `models/checkpoints/` | [`ponyDiffusionV6XL_v6StartWithThisOne.safetensors`](https://huggingface.co/LyliaEngine/Pony_Diffusion_V6_XL/resolve/main/ponyDiffusionV6XL_v6StartWithThisOne.safetensors) | 6.46 GB |
-| `models/diffusion_models/` | [`Chroma1-HD-fp8_scaled_defaultloader_hybrid_large_rev2.safetensors`](https://huggingface.co/silveroxides/Chroma1-HD-fp8-scaled/resolve/main/Chroma1-HD-fp8_scaled_defaultloader_hybrid_large_rev2.safetensors) | 8.56 GB |
-| `models/text_encoders/` | [`t5xxl_flan_fp8_scaled.safetensors`](https://huggingface.co/silveroxides/t5xxl_flan_enc/resolve/main/t5xxl_flan_fp8_scaled.safetensors) | 4.80 GB |
-| `models/vae/` | [`ae.safetensors`](https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors) | 0.31 GB |
-
-~20.1 GB total. Downloaded by hand on the GPU host with `Invoke-WebRequest`,
-in the same style as the existing SDXL download in `docs/gpu-host.md`.
-
-**Verify by checksum, not by eyeballing the size.** Hugging Face's CDN returns
-each file's SHA256 as its `etag`, so the expected value is knowable in advance:
-
-| File | SHA256 |
-|---|---|
-| `ponyDiffusionV6XL_v6StartWithThisOne` | `614f55e8bd8701b9168957361a00c7a76c5de1aa625ade08edfca3db2675b2cc` |
-| `Chroma1-HD-fp8_scaled_…_rev2` | `377eff193fc866064ed587bd4140b3fd59bad0555b32b02224d60353b3049ebc` |
-| `t5xxl_flan_fp8_scaled` | `e9b22d1142585f501864671e07af481f8800415296f6f54c10a88e71e05a7a60` |
-| `ae` | `f73eecf7c469ff442523dc712cc161d631df071bf4d9d793494fbf00cdd80a82` |
-
-`Get-FileHash -Algorithm SHA256` against each is a strictly stronger check than
-the current doc's "if it lands as a few KB, it is an HTML error page wearing a
-`.safetensors` name" — it catches a truncated or substituted file too, not just
-an obviously tiny one.
-
-**Do not use `black-forest-labs/FLUX.1-schnell` for the VAE. It is gated and
-returns 401**, which is precisely the download that lands as an HTML page named
-`ae.safetensors`. The Comfy-Org repackage above is the ungated equivalent.
-
-The existing `sd_xl_base_1.0.safetensors` stays on disk as a known-good
-control. It costs 6.5 GB and is the fastest way to tell "the new checkpoint is
-bad" from "the workflow is bad".
-
-### Provenance, stated honestly
-
-Chroma, the FLAN encoder and the VAE all trace to their upstreams: the official
-[`lodestones/Chroma1-HD`](https://huggingface.co/lodestones/Chroma1-HD) is
-ungated and Apache-2.0, and the fp8 and encoder repos are the ones the official
-ComfyUI workflow points at.
-
-**Pony V6 XL is different.** It is officially distributed on CivitAI only, and
-CivitAI requires an API token for downloads. `LyliaEngine/Pony_Diffusion_V6_XL`
-is an unaffiliated third-party mirror. Two mitigations make this acceptable
-rather than reckless: `.safetensors` is a data-only format that cannot execute
-code on load, unlike the `.ckpt` pickles it replaced; and the checksum above
-pins exactly which bytes were reviewed. If that is still not good enough, the
-alternative is a CivitAI API token and a download from source — a deliberate
-choice, not an oversight.
-
-### The risk in this section, stated plainly
-
-fp8 rather than fp16 is deliberate: Chroma's stack is **~14 GB in fp8, ~28 GB
-in fp16**. Alongside a 15 GB resident chat model, even the fp8 figure exceeds
-the card.
-
-`docs/gpu-host.md` measured ComfyUI paging its weights against system RAM
-rather than demanding the whole card, which is the only reason this is
-plausible at all. But **that was measured with a 6.5 GB SDXL checkpoint, and
-extrapolating it to a 14 GB Flux stack is exactly the kind of assumption that
-document warns against.** Chroma-alongside-chat is unverified and must be
-measured, not assumed. `ollama stop` frees ~20 GB instantly if it OOMs. Pony
-carries no such risk, which is a second reason it is the in-chat default.
-
-### Three defects in the current config this fixes
-
-1. **`IMAGE_SIZE` is unset and defaults to `512x512`.** SDXL is trained at
-   1024 and degrades badly below it. In-chat images have likely been quietly
-   poor since the feature was enabled, and this would never surface as an
-   error. Set `1024x1024`.
-2. **`IMAGE_STEPS` is unset and defaults to `50`** — roughly double what Pony
-   needs. 28 gives the same result in half the time.
-3. **`COMFYUI_WORKFLOW_NODES` is parsed with a bare `except JSONDecodeError`
-   that falls back to `[]`.** A typo in that JSON configures nothing, logs
-   nothing, and silently leaves image generation on defaults. This is the
-   repo's canonical failure mode — a clean result because the thing never ran
-   — and it is why the validator below exists.
-
-All three are set through the environment rather than the admin UI, because
-`ENABLE_PERSISTENT_CONFIG: "false"` makes the environment authoritative on
-every container start: anything clicked in the admin UI is silently discarded
-on the next restart. The `ENABLE_SIGNUP` comment in `infra-apps.yml` already
-documents this trap; image config falls into the same one.
+Note that with image generation deferred, this is now the *only* state this
+change creates outside git. That makes the exception more visible than it was
+when it sat beside a set of committed workflow files, and it is a fair reason
+to revisit the decision — but it does not make the Ansible task any less
+disproportionate today.
 
 ## Files that change
 
 | File | Change |
 |---|---|
-| `inventory/group_vars/all/main.yml` | New `image_workflow: pony` |
-| `inventory/group_vars/all/infra-apps.yml` | `open-webui` env: add `IMAGE_SIZE`, `IMAGE_STEPS`, `IMAGE_GENERATION_MODEL`, `COMFYUI_WORKFLOW`, `COMFYUI_WORKFLOW_NODES` |
-| `roles/svc_infra/files/comfyui/pony.json` | New — API-format workflow, SDXL |
-| `roles/svc_infra/files/comfyui/chroma.json` | New — API-format workflow, Flux |
-
-### Where the workflow JSONs come from
-
-`pony.json` derives from Open WebUI's own built-in default workflow
-(`COMFYUI_DEFAULT_WORKFLOW` in `config.py`), which is already SDXL-shaped — the
-change is the checkpoint name and the sampler settings.
-
-`chroma.json` derives from the **official** workflow that ships in the
-Chroma repo as `ComfyUI_Chroma1-HD_T2I-workflow.json`, rather than being
-hand-built. Its settings, which are not guessable and matter:
-
-| Setting | Value |
-|---|---|
-| Sampler | `euler` with `BetaSamplingScheduler`, 26 steps |
-| CFG | **3.8** via `CFGGuider` |
-| Model sampling | `ModelSamplingAuraFlow`, shift 1 |
-| Latent | `EmptySD3LatentImage`, 1152×1152 |
-
-**CFG 3.8 is the one to notice.** Chroma is derived from FLUX.1-schnell but is
-not distilled the same way, so it needs real classifier-free guidance; a
-schnell-style CFG of 1.0 produces washed-out output that looks like a bad model
-rather than a bad setting.
-
-**The official workflow's filenames are stale.** It references
-`Chroma1-HD-fp8_scaled_rev2.safetensors` and
-`t5xxl_flan_latest_float8_e4m3fn_scaled_stochastic.safetensors`; neither exists
-in the upstream repos any more (both 404 as of 2026-08-09). The committed
-`chroma.json` must be edited to name the files actually downloaded above. Left
-unedited it fails at generation time with a missing-model error, after the
-workflow has already loaded fine.
-
-Both files must be saved in ComfyUI's **API format** (`Workflow → Export
-(API)`), not the editor format. Open WebUI cannot read the editor format, and
-the two look similar enough to confuse.
-| `tests/validate_openwebui_image_config.py` | New validator, wired into `make validate` |
-| `docs/chat-models.md` | New — roster, persona text, swap procedure |
+| `docs/chat-models.md` | New — roster, persona text, model-switching cost |
 | `docs/gpu-host.md` | Updated pull list, Continue config, VRAM table |
+| `docs/plans/uncensored-image-generation.md` | New — the deferred image work |
 
-Workflow selection:
-
-```yaml
-COMFYUI_WORKFLOW: "{{ lookup('file', playbook_dir + '/roles/svc_infra/files/comfyui/' + image_workflow + '.json') }}"
-```
-
-One variable, both workflows in git, no hand-editing of JSON in YAML.
-
-## The validator
-
-`tests/validate_openwebui_image_config.py` asserts what Open WebUI will not:
-
-- Both the workflow JSON and the nodes JSON parse.
-- **Every node ID referenced in the nodes mapping exists in the workflow.**
-- `image_workflow` names a file that exists.
-
-Open WebUI's own failure mode is a silent fallback to `[]`, so this test is the
-only mechanism that can distinguish a typo from a working config before it
-reaches the host.
+No Ansible, no catalog, no validator. The change is entirely hand-work on the
+GPU host and the Open WebUI web UI, with the repo recording what was done.
 
 ## Verification
-
-Everything else here can be checked by a green container. The first item
-cannot, and it is the one that matters.
 
 **Positive control: prove the models are actually uncensored.** A pulled tag, a
 loaded model and a plausible chat reply are byte-identical between a working
@@ -359,6 +204,9 @@ abliteration and the wrong model pulled by mistake. So verification is a prompt
 that the outgoing `qwen3:30b` refuses, run against each new chat model, which
 must come back answered. If it refuses, either the abliteration did not take or
 the tag was wrong — and nothing else in the stack would reveal it.
+
+The prompt must be calibrated first: confirm `qwen3:30b` actually refuses it
+before retiring that model, or the control proves nothing.
 
 This mirrors the reasoning behind the credential canary in `CLAUDE.md`, with
 the advantage that the control here is a prompt rather than a deliberately
@@ -369,17 +217,10 @@ The rest:
 - `curl http://192.168.1.40:11434/api/tags` lists all six new models.
 - One real chat turn per chat model. The dropdown populates from `/api/tags`
   even when generation is broken, so a populated list proves nothing.
-- One in-chat image **with a fresh seed** — ComfyUI caches by workflow hash and
-  returns the previous image in ~2 s, indistinguishable from success.
-- Confirm the returned image is actually 1024×1024. That is the `IMAGE_SIZE`
-  fix proving itself.
-- `Get-FileHash -Algorithm SHA256` on all four downloaded image files, matched
-  against the table above, **before** wiring any of them into a workflow. A
-  truncated or substituted download otherwise surfaces as an inscrutable
-  ComfyUI error much later.
+- Each persona sends a message and behaves per its prompt. A persona that
+  failed to attach looks identical to one that worked, so compare against the
+  bare base model rather than reading the reply on its own.
 - Continue autocomplete in a real file against `qwen3-coder:30b`.
-- `nvidia-smi` with a chat model resident and Chroma generating — the
-  measurement that decides whether Chroma can ever become the in-chat engine.
 
 ## Rollout
 
@@ -388,9 +229,11 @@ Standard workflow from `CLAUDE.md`: branch → edit → `make validate` →
 svc-infra's first run after a commit, then `changed=0` on the second) →
 `make verify` → merge → push → delete branch.
 
-Model pulls and checkpoint downloads happen by hand on the GPU host, documented
-in `docs/gpu-host.md` but not automated — consistent with that machine
-deliberately not being under Ansible management.
+The deploy steps still apply even though the change is documentation-only: the
+nightly runner keeps a `git archive` of the tree at `/opt/homelab-iac` with the
+deployed revision in `.deployed-rev`, so a commit still makes the sync block
+fire. Running it keeps that copy current rather than leaving it a revision
+behind.
 
 ## Exposure note
 
@@ -408,9 +251,9 @@ leaks, the blast radius is larger than it was yesterday.
 
 ## Out of scope
 
+- **Image generation** — deferred in full to
+  [docs/plans/uncensored-image-generation.md](../../plans/uncensored-image-generation.md).
 - Automating the GPU host. It stays hand-managed by deliberate decision.
-- Per-request switching between SDXL and Flux workflows in Open WebUI. Not
-  achievable without upstream changes.
 - Personas as committed configuration. Deferred; see the tradeoff above.
 - Any model above the 24 GB single-card budget — GLM 5.2, DeepSeek V4,
   Kimi K3 and Llama 4 Scout are all out of reach on this hardware regardless
