@@ -92,7 +92,12 @@ def emitted_metric_names() -> set[str]:
 
 
 def metrics_in_expr(expr: str) -> set[str]:
-    found = set(re.findall(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?=\s*[\{\s\)]|$)", expr))
+    # `\[` belongs in the lookahead: a range-vector selector like
+    # `rate(homelab_typo_total[5m])` has the metric name followed directly by
+    # `[`, not `{`, whitespace or end-of-string. Without it the name simply
+    # fails to match at all and the typo passes silently — the Trend row's
+    # rate()/increase() panels are exactly where such a query would land.
+    found = set(re.findall(r"\b([a-zA-Z_][a-zA-Z0-9_]*)\b(?=\s*[\{\[\s\)]|$)", expr))
     return {name for name in found if name not in NOT_METRICS and not name.isdigit()}
 
 

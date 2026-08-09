@@ -14,7 +14,12 @@ Four guarantees, each because the alternative is a chart that lies:
                rejects a WHOLE file for one bad line, so a partial write would
                take the good metrics down with the bad one.
   timestamped  run and last-success are separate series, so "it ran and could
-               not look" is distinguishable from "it measured a zero".
+               not look" is distinguishable from "it measured a zero". Without
+               --success, any last-success line already on disk is carried
+               forward verbatim rather than dropped — the whole file is
+               rewritten every run, so simply omitting the line would DELETE
+               the last known success instead of freezing it, which is the
+               opposite of what "could not look" is supposed to mean.
   non-empty    zero input lines leaves the previous file alone. A broken caller
                must not replace real numbers with zeros: an old number shows up
                as staleness, a zero shows up as good news.
@@ -56,6 +61,31 @@ EXIT_OK = 0
 EXIT_ERROR = 1
 EXIT_MALFORMED = 2
 EXIT_EMPTY = 3
+
+
+def carried_last_success_line(target: str, prefix: str) -> str | None:
+    """Return the prefix's last-success line already on disk, verbatim.
+
+    Called only when this invocation lacks --success. The publisher rewrites
+    the whole file every run, so if this returns None the caller must not
+    reconstruct a substitute — a missing file, an unreadable one, or one with
+    no such line are all "nothing to carry", and a first-ever run legitimately
+    has no prior success. Any of those must fall through to publishing without
+    a last-success line, never fail the publish outright: an old, trustworthy
+    success stamp is worth preserving, but a broken read of it is not worth an
+    aborted run over.
+    """
+    name = f"{prefix}_last_success_timestamp_seconds"
+    pattern = re.compile(rf"^{re.escape(name)}(\{{[^\n]*\}})?\s+\S+$")
+    try:
+        with open(target, "r", encoding="utf-8") as handle:
+            for raw in handle:
+                line = raw.strip()
+                if pattern.match(line):
+                    return line
+    except (OSError, UnicodeDecodeError):
+        return None
+    return None
 
 
 class ArgumentParser(argparse.ArgumentParser):
@@ -116,11 +146,20 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return EXIT_EMPTY
 
+    target = os.path.join(args.dir, f"{args.file}.prom")
+
     suffix = f"{{{args.labels}}}" if args.labels else ""
     now = int(time.time())
     stamps = [f"{args.prefix}_run_timestamp_seconds{suffix} {now}"]
     if args.success:
         stamps.append(f"{args.prefix}_last_success_timestamp_seconds{suffix} {now}")
+    else:
+        # run advances; last_success does not. The only way to make that true
+        # when the whole file is rewritten every time is to re-read whatever
+        # was already there and copy it forward unchanged.
+        carried = carried_last_success_line(target, args.prefix)
+        if carried is not None:
+            stamps.append(carried)
 
     # Validate what we generated, not just what we were handed. A malformed
     # --labels would otherwise produce a file node_exporter rejects wholesale,
@@ -132,7 +171,6 @@ def main(argv: list[str] | None = None) -> int:
             return EXIT_ERROR
     samples.extend(stamps)
 
-    target = os.path.join(args.dir, f"{args.file}.prom")
     tmp = f"{target}.tmp"
     try:
         with open(tmp, "w", encoding="utf-8") as handle:

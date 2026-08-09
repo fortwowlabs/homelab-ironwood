@@ -192,14 +192,25 @@
               '--file', 'release',
               '--prefix', 'homelab_release']
              + (['--success'] if release_ok else []) }}
+        # images_total/unmeasured/comparable and the run timestamp publish
+        # unconditionally — they are the "did this run measure anything"
+        # evidence, and a zero there is meaningful on its own. The FINDINGS
+        # (behind/current/new/errors) are gated on release_ok: a run that
+        # produced no parseable output has images_examined=0 and every list
+        # empty, so without this gate it would still emit four valid lines of
+        # zero — "0 behind, 0 current, 0 new, 0 errors" — which is
+        # indistinguishable from a genuinely quiet week. Suppressing them lets
+        # the series go absent instead of reading as a clean run.
         stdin: |
           homelab_release_images_total {{ release.summary.images_examined | default(0) }}
           homelab_release_images_unmeasured {{ release_unmeasured | length }}
           homelab_release_images_comparable {{ (release.summary.images_examined | default(0) | int) - (release_unmeasured | length) }}
+          {% if release_ok %}
           homelab_release_images_behind {{ release_behind | length }}
           homelab_release_images_current {{ release_counts.current | default(0) }}
           homelab_release_new {{ release_new | length }}
           homelab_release_errors {{ release_counts.error | default(0) }}
+          {% endif %}
       register: release_metrics
       changed_when: false
       failed_when: false

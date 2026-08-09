@@ -126,11 +126,23 @@
           '--file', 'scan',
           '--prefix', 'homelab_scan']
          + (['--success'] if infra_image_scan.ok else []) }}
+    # The denominators (total/scanned/failed/eosl) and the run timestamp are
+    # published unconditionally — a zero there is the "could not look"
+    # evidence itself. The FINDINGS below (vulnerability counts, per-image
+    # series) are gated on infra_image_scan.ok: a run where every image failed
+    # to scan has scanned=0 and an empty selectattr('ok') list, so without
+    # this gate it would still emit six valid, well-formed lines of zero
+    # criticals/highs — exactly the "scan reported zero vulnerabilities
+    # because it could not chdir" incident this file's header describes,
+    # just at the metrics layer instead of the ntfy one. Suppressing them
+    # lets the series go absent so the dashboard's noValue reads "no data"
+    # instead of a fabricated clean bill of health.
     stdin: |
       homelab_scan_images_total {{ infra_image_scan.images | length }}
       homelab_scan_images_scanned {{ infra_image_scan.scanned }}
       homelab_scan_images_failed {{ infra_image_scan.failed }}
       homelab_scan_images_eosl {{ infra_image_scan.eosl | length }}
+      {% if infra_image_scan.ok %}
       homelab_scan_vulnerabilities{severity="critical"} {{ infra_image_scan.critical }}
       homelab_scan_vulnerabilities{severity="high"} {{ infra_image_scan.high }}
       {% for image in infra_image_scan.images | selectattr('ok') %}
@@ -145,6 +157,7 @@
       homelab_scan_image_vulnerabilities{image="{{ repo }}",digest="{{ digest }}",severity="critical"} {{ image.critical }}
       homelab_scan_image_vulnerabilities{image="{{ repo }}",digest="{{ digest }}",severity="high"} {{ image.high }}
       {% endfor %}
+      {% endif %}
   register: infra_scan_metrics
   changed_when: false
   # Telemetry must not be able to break the check it describes. A failed publish

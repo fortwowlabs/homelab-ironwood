@@ -29,6 +29,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +75,78 @@ def test_success_flag_adds_success_timestamp() -> None:
         body = Path(tmp, "scan.prom").read_text(encoding="utf-8")
         check("--success adds the success timestamp",
               "homelab_scan_last_success_timestamp_seconds " in body)
+
+
+def test_first_run_without_success_has_no_last_success_line() -> None:
+    # A first-ever run legitimately has no prior success to carry forward —
+    # there must be nothing to read yet, so the line is simply absent, not
+    # fabricated as a zero or a "now".
+    with tempfile.TemporaryDirectory() as tmp:
+        run(tmp, ["--file", "scan", "--prefix", "homelab_scan"], SAMPLE_IN)
+        body = Path(tmp, "scan.prom").read_text(encoding="utf-8")
+        check("no last_success line on a first run",
+              "homelab_scan_last_success_timestamp_seconds" not in body, body)
+
+
+def test_carries_last_success_forward_without_flag() -> None:
+    # The whole file is rewritten every run, so simply omitting --success
+    # would DELETE a prior success rather than freeze it. The publisher must
+    # instead read the old line back off disk and copy it forward verbatim
+    # while the run timestamp still advances.
+    with tempfile.TemporaryDirectory() as tmp:
+        run(tmp, ["--file", "scan", "--prefix", "homelab_scan", "--success"], SAMPLE_IN)
+        first = Path(tmp, "scan.prom").read_text(encoding="utf-8")
+        first_success = next(
+            l for l in first.splitlines()
+            if l.startswith("homelab_scan_last_success_timestamp_seconds"))
+        first_run = next(
+            l for l in first.splitlines()
+            if l.startswith("homelab_scan_run_timestamp_seconds"))
+
+        time.sleep(1.1)  # force the integer run timestamp to actually advance
+
+        proc = run(tmp, ["--file", "scan", "--prefix", "homelab_scan"], SAMPLE_IN)
+        second = Path(tmp, "scan.prom").read_text(encoding="utf-8")
+        second_lines = second.splitlines()
+        success_lines = [
+            l for l in second_lines
+            if l.startswith("homelab_scan_last_success_timestamp_seconds")]
+        second_run = next(
+            l for l in second_lines
+            if l.startswith("homelab_scan_run_timestamp_seconds"))
+
+        check("no --success still exits 0", proc.returncode == 0, proc.stderr)
+        check("exactly one last_success line survives", len(success_lines) == 1,
+              second)
+        check("last_success carried forward verbatim",
+              success_lines and success_lines[0] == first_success,
+              f"{first_success!r} -> {success_lines!r}")
+        check("run timestamp advanced", second_run != first_run,
+              f"{first_run!r} -> {second_run!r}")
+
+
+def test_success_overwrites_existing_last_success() -> None:
+    with tempfile.TemporaryDirectory() as tmp:
+        run(tmp, ["--file", "scan", "--prefix", "homelab_scan", "--success"], SAMPLE_IN)
+        first = Path(tmp, "scan.prom").read_text(encoding="utf-8")
+        first_success = next(
+            l for l in first.splitlines()
+            if l.startswith("homelab_scan_last_success_timestamp_seconds"))
+
+        time.sleep(1.1)
+
+        run(tmp, ["--file", "scan", "--prefix", "homelab_scan", "--success"], SAMPLE_IN)
+        second = Path(tmp, "scan.prom").read_text(encoding="utf-8")
+        second_lines = second.splitlines()
+        success_lines = [
+            l for l in second_lines
+            if l.startswith("homelab_scan_last_success_timestamp_seconds")]
+
+        check("exactly one last_success line after two --success runs",
+              len(success_lines) == 1, second)
+        check("--success overwrites rather than carries forward the old stamp",
+              success_lines and success_lines[0] != first_success,
+              f"{first_success!r} vs {success_lines!r}")
 
 
 def test_labels_land_on_timestamp_series() -> None:
@@ -144,9 +217,12 @@ def main() -> int:
     if not HELPER.exists():
         print(f"missing {HELPER}", file=sys.stderr)
         return 1
-    for fn in (
+    tests = (
         test_publishes_valid_input,
         test_success_flag_adds_success_timestamp,
+        test_first_run_without_success_has_no_last_success_line,
+        test_carries_last_success_forward_without_flag,
+        test_success_overwrites_existing_last_success,
         test_labels_land_on_timestamp_series,
         test_empty_stdin_preserves_previous_file,
         test_malformed_line_writes_nothing,
@@ -154,14 +230,15 @@ def main() -> int:
         test_bad_prefix_rejected,
         test_missing_required_flag,
         test_unrecognized_flag,
-    ):
+    )
+    for fn in tests:
         fn()
     if failures:
         print("homelab-metric-write FAILED:", file=sys.stderr)
         for f in failures:
             print(f"  {f}", file=sys.stderr)
         return 1
-    print("homelab-metric-write: 9 case(s) OK")
+    print(f"homelab-metric-write: {len(tests)} case(s) OK")
     return 0
 
 

@@ -72,6 +72,15 @@
       homelab_drift_containers_drifted{vm="{{ inventory_hostname }}"} {{ service_vm_drift_counts[2] }}
       homelab_drift_containers_orphaned{vm="{{ inventory_hostname }}"} {{ service_vm_drift_counts[3] }}
   delegate_to: "{{ infra_host }}"
+  # failed_when: false only masks a non-zero rc from the command itself — it
+  # does nothing about the delegate being UNREACHABLE (svc-infra rebooting,
+  # say), and an unreachable host is not something verify.yml's `rescue:`
+  # catches either. With any_errors_fatal: true that would abort the whole
+  # play — a scoped `make media` failing, without even the ntfy notice,
+  # because of telemetry for a different host. Telemetry must not be able to
+  # break the check it describes, so an unreachable delegate degrades the same
+  # way a non-zero rc already does: warned about below, never fatal.
+  ignore_unreachable: true
   register: service_vm_drift_metrics
   changed_when: false
   failed_when: false
