@@ -575,6 +575,22 @@ infra_secret_apps:
       ENABLE_IMAGE_GENERATION: "{{ 'true' if gpu_host_online | bool else 'false' }}"
       IMAGE_GENERATION_ENGINE: comfyui
       COMFYUI_BASE_URL: "http://{{ gpu_host_ip }}:8188"
+      # Both of these are upstream defaults that were wrong here, and neither
+      # announced itself: the container is green, the request succeeds, the
+      # image is just bad.
+      #
+      # IMAGE_SIZE defaults to 512x512 (config.py). The deployed checkpoint is
+      # SDXL, which is trained at 1024 and degrades badly below it — so every
+      # in-chat image since this feature was enabled has been quietly poor.
+      # IMAGE_STEPS defaults to 50, roughly double what SDXL needs, so each
+      # one also cost about twice the time it should.
+      #
+      # Set here rather than in the admin UI because ENABLE_PERSISTENT_CONFIG
+      # is false above: the environment is re-read as authoritative on every
+      # container start, so a value clicked into the UI is discarded on the
+      # next restart. Same trap as the ENABLE_SIGNUP comment.
+      IMAGE_SIZE: "1024x1024"
+      IMAGE_STEPS: "28"
       ENABLE_WEB_SEARCH: "true"
       WEB_SEARCH_ENGINE: searxng
       SEARXNG_QUERY_URL: "http://{{ hostvars[download_host].ansible_host }}:{{ download_apps.searxng.ui_port }}/search?q=<query>"
