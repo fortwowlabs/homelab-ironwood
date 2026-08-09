@@ -101,8 +101,42 @@ def metrics_in_expr(expr: str) -> set[str]:
     return {name for name in found if name not in NOT_METRICS and not name.isdigit()}
 
 
+# Shapes the extractor must handle, checked on every run. No dashboard currently
+# writes a bare `name[5m]` range selector, so without this the `\[` branch above
+# is unexercised by anything in the repo — reverting it would break the gate's
+# ability to catch a typo and every existing check would still pass. That is the
+# failure this whole gate exists to prevent, so it is not allowed to apply to the
+# gate itself.
+#
+# Each case is (expr, the metric names that must be extracted).
+EXTRACTION_CASES = (
+    ("rate(homelab_typo_total[5m])", {"homelab_typo_total"}),
+    ("increase(homelab_scan_images_failed[7d])", {"homelab_scan_images_failed"}),
+    ('homelab_scan_vulnerabilities{severity="critical"}', {"homelab_scan_vulnerabilities"}),
+    ("sum(homelab_drift_containers_drifted)", {"homelab_drift_containers_drifted"}),
+    ("time() - homelab_scan_last_success_timestamp_seconds",
+     {"homelab_scan_last_success_timestamp_seconds"}),
+    # `instance` is a label here, not a metric, and `by`/`sum` are keywords.
+    ("sum by (instance) (homelab_release_errors)", {"homelab_release_errors"}),
+)
+
+
+def extraction_self_check() -> list[str]:
+    """Prove the extractor still sees each query shape the dashboards can use."""
+    problems: list[str] = []
+    for expr, expected in EXTRACTION_CASES:
+        got = metrics_in_expr(expr)
+        if got != expected:
+            problems.append(
+                f"metrics_in_expr({expr!r}) returned {sorted(got)}, "
+                f"expected {sorted(expected)} — the extractor is blind to a shape "
+                "a panel can legitimately use, so a typo in one would pass silently"
+            )
+    return problems
+
+
 def main() -> int:
-    failures: list[str] = []
+    failures: list[str] = extraction_self_check()
     dashboards = sorted(DASHBOARD_DIR.glob("*.json"))
     if not dashboards:
         print(f"no dashboards found in {DASHBOARD_DIR}", file=sys.stderr)
