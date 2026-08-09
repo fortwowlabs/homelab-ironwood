@@ -936,6 +936,29 @@ to the end of `roles/service_vm/tasks/container-drift.yml` with:
 #
 # --success is unconditional here, because this task only runs when the counts
 # were parsed at all, and that only happens on a run that measured something.
+#
+# The validity test is hoisted into its own fact rather than repeated in each
+# consumer's `when:`, because it has to be written correctly and there is more
+# than one way to get it wrong:
+#
+#   `is not none`, NOT `| default([])`. regex_search returns Python None on a
+#   no-match, and `default([])` substitutes only for Undefined — never for None —
+#   so `None | length` raises "object of type 'NoneType' has no len()" on exactly
+#   the cannot-look path this guard exists to handle. That shipped once: the emit
+#   task errored fatally and the play never reached the assert, so the operator
+#   got an opaque Jinja crash instead of the script's own account of why it could
+#   not look. verify.yml's outer rescue still failed the run, so rc 2 was never
+#   masked — but the diagnostic, which is the whole point of this path, was lost.
+#
+# Two consumers guard on this, and a fix applied to one and missed at the other
+# would silently restore the crash. One fact, tested once, is why that cannot
+# happen. Jinja's `and` short-circuits, so `length` is never reached on a None.
+- name: Determine whether the drift counts were parsed
+  ansible.builtin.set_fact:
+    service_vm_drift_counts_valid: >-
+      {{ service_vm_drift_counts is not none
+         and service_vm_drift_counts | length == 4 }}
+
 - name: Publish the container drift counts as metrics
   ansible.builtin.command:
     argv:
@@ -958,16 +981,7 @@ to the end of `roles/service_vm/tasks/container-drift.yml` with:
   register: service_vm_drift_metrics
   changed_when: false
   failed_when: false
-  # `is not none`, not `| default([])`. regex_search returns Python None on a
-  # no-match, and `default([])` substitutes only for Undefined — never for None —
-  # so `None | length` raises "object of type 'NoneType' has no len()" right here,
-  # on exactly the cannot-look path this guard exists to handle. That shipped once:
-  # the emit task errored fatally and the play never reached the assert, so the
-  # operator got an opaque Jinja crash instead of the script's own explanation of
-  # why it could not look. verify.yml's outer rescue still failed the run, so rc 2
-  # was never masked — but the diagnostic, which is the whole point of this path,
-  # was lost.
-  when: service_vm_drift_counts is not none and service_vm_drift_counts | length == 4
+  when: service_vm_drift_counts_valid
 
 - name: Warn if the drift metrics could not be published
   ansible.builtin.debug:
@@ -976,8 +990,7 @@ to the end of `roles/service_vm/tasks/container-drift.yml` with:
       {{ service_vm_drift_metrics.stderr | default('') }} —
       the estate dashboard will show {{ inventory_hostname }} drift as stale
   when:
-    - service_vm_drift_counts is not none
-    - service_vm_drift_counts | length == 4
+    - service_vm_drift_counts_valid
     - (service_vm_drift_metrics.rc | default(0)) != 0
 
 - name: Report the container drift result
