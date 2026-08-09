@@ -163,14 +163,29 @@ has one: a gate against silent failure is not allowed to fail silently itself.
 
 ## Two open risks
 
-**Chroma alongside a resident chat model is unverified.** Its fp8 stack is
-~13.4 GB; in fp16 it is ~28 GB. Against a ~15 GB resident chat model even the
-fp8 figure exceeds the 24 GB card. `docs/gpu-host.md` measured ComfyUI paging
-against system RAM rather than demanding the whole card, which is the only
-reason this is plausible — but **that was measured with a 6.5 GB SDXL
-checkpoint, and extrapolating to a 14 GB Flux stack is exactly the kind of
-assumption that document warns against.** Measure before relying on it;
-`ollama stop` frees ~20 GB if it OOMs. Pony carries no such risk.
+**Chroma alongside a resident chat model looks impossible, not merely
+unverified.** Measured on TERRA 2026-08-09, once the new roster's default was
+actually installed:
+
+| State | GPU used of 24564 MiB | Free |
+|---|---|---|
+| `huihui_ai/gemma-4-abliterated:26b` resident (17 GB, 32768 ctx, 100% GPU) | 20853 MiB | **~3.6 GiB** |
+
+This supersedes the estimate the design was written against. The chat model was
+projected at ~15 GB leaving ~7 GB of headroom; it is 18.0 GB on disk, 17 GB
+resident, and leaves **3.6 GiB**. Chroma's fp8 stack is ~13.4 GB, so it cannot
+coexist — it would have to evict the chat model. In fp16 (~28 GB) it does not
+fit the card at all.
+
+Pony at ~6.5 GB is also above 3.6 GiB on paper. The reason SDXL works today
+anyway is the paging behaviour `docs/gpu-host.md` measured — ComfyUI pages
+weights against system RAM rather than demanding the whole card. **That was
+measured with a 6.5 GB SDXL checkpoint against a smaller chat model, so it
+should not be extrapolated to a 13.4 GB Flux stack.** `ollama stop` frees the
+card instantly if something does OOM.
+
+Practical consequence: if image generation returns, the realistic shape is
+Pony in-chat (paging, as today) and Chroma with the chat model stopped.
 
 **A shared node mapping across two architectures has two latent mismatches.**
 If one mapping serves both workflows, `model` writes `ckpt_name` — correct for
