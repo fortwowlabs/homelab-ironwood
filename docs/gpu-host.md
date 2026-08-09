@@ -29,6 +29,13 @@ Give the PC's NIC a DHCP reservation for `192.168.1.40` in pfSense. The address
 is already baked into the deployed config, so a different one means editing
 `gpu_host_ip` and re-running `make infra`.
 
+As built, `.40` is held by the **Wi-Fi** adapter, not the wired one. That is
+fine — model responses are text and generated images are about a megabyte. But
+if you ever move to Ethernet, **move the reservation to the Ethernet MAC rather
+than adding a second one**: with both, Windows prefers the wired route outbound
+while `.40` stays on Wi-Fi inbound, which is a confusing way to spend an
+afternoon.
+
 ### 2. Install Ollama
 
 Install from [ollama.com](https://ollama.com/download/windows), then set a
@@ -43,14 +50,23 @@ Set it under *System Properties → Environment Variables → System variables*,
 not in a shell — Ollama runs as a background service and will not see a
 variable set in one terminal. Restart Ollama afterwards.
 
-Pull at least a chat model and, if you want Continue's autocomplete and
-retrieval to work, a small completion model and an embedding model:
+Pull the general chat model Open WebUI uses, plus the three Continue needs —
+a coding model, a small completion model, and an embedding model:
 
 ```powershell
-ollama pull qwen2.5-coder:14b
-ollama pull qwen2.5-coder:1.5b-base
-ollama pull nomic-embed-text
+ollama pull qwen3:30b                  # Open WebUI chat
+ollama pull qwen2.5-coder:14b          # Continue chat/edit/apply
+ollama pull qwen2.5-coder:1.5b-base    # Continue autocomplete
+ollama pull nomic-embed-text           # Continue embeddings
 ```
+
+About 28 GB in total. `qwen3:30b` rather than `qwen3:32b` because the 32B buys
+little on a 24 GB card and costs an extra gigabyte on every reload.
+
+**A model's download size is not its VRAM footprint.** `qwen3:30b` is an 18 GB
+download but occupies **21 GB resident**, because Ollama allocates a 32768-token
+KV cache alongside it (`ollama ps` reports both). Budget from the resident
+figure, not the tag.
 
 Confirm from another machine, not from the PC itself — loopback would pass
 even with the default bind:
@@ -61,14 +77,44 @@ curl http://192.168.1.40:11434/api/tags
 
 ### 3. Install ComfyUI
 
-Install [ComfyUI](https://github.com/comfyanonymous/ComfyUI) and start it with
-an explicit listen address:
+Use the **portable build** — it bundles its own Python, and there is no Python
+on this machine's `PATH`. Take `ComfyUI_windows_portable_nvidia.7z` from
+[ComfyUI's releases](https://github.com/comfyanonymous/ComfyUI/releases) and
+extract to `C:\ComfyUI\`, giving `C:\ComfyUI\ComfyUI_windows_portable\`.
+
+It is a **`.7z`, not a `.zip`**. Windows 11 handles it; so does the bundled
+`tar.exe`, which is the scriptable option:
 
 ```powershell
-python main.py --listen 0.0.0.0 --port 8188
+tar.exe -xf ComfyUI_windows_portable_nvidia.7z -C C:\ComfyUI
 ```
 
-Confirm `http://192.168.1.40:8188` loads from another machine.
+**A fresh ComfyUI ships no image models, and without one the UI loads
+perfectly while every generation fails.** Download a checkpoint before
+believing the install works:
+
+```powershell
+Invoke-WebRequest -Uri "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors" `
+  -OutFile "C:\ComfyUI\ComfyUI_windows_portable\ComfyUI\models\checkpoints\sd_xl_base_1.0.safetensors"
+```
+
+~6.5 GB. If it lands as a few KB, that is an HTML error page wearing a
+`.safetensors` name — delete it and retry.
+
+The stock `run_nvidia_gpu.bat` binds loopback only, and editing it would be
+reverted by the next ComfyUI update, silently taking the LAN bind with it.
+Write `C:\ComfyUI\start-comfyui-lan.bat` instead:
+
+```bat
+@echo off
+cd /d C:\ComfyUI\ComfyUI_windows_portable
+.\python_embeded\python.exe -s ComfyUI\main.py --listen 0.0.0.0 --port 8188 --windows-standalone-build
+```
+
+For it to survive reboots, put a shortcut to that file in `shell:startup`.
+Then confirm `http://192.168.1.40:8188` loads from another machine — and that
+`/system_stats` reports `cuda:0`, since a CPU fallback also loads fine and
+merely takes twenty minutes per image.
 
 ### 4. Open the firewall, narrowly
 
@@ -99,6 +145,34 @@ Then `make infra`. Open WebUI restarts with both backends enabled.
 Verify by *using* it, not by checking that the container is up: send a chat
 message and get a real reply, then generate an image from the same
 conversation. A green container proves nothing about whether inference works.
+
+## Sharing 24 GB between chat and image generation
+
+Measured on 2026-08-08, because the arithmetic suggests a worse answer than
+reality delivers:
+
+| State | VRAM used of 24564 MiB |
+|---|---|
+| Idle | ~2.5 GB |
+| `qwen3:30b` resident | ~22.8 GB |
+| Chat model resident **and** an SDXL image generating | ~22.8 GB, ~1.3 GB free |
+
+On paper a 21 GB chat model plus a 6.5 GB checkpoint cannot fit, and the
+expectation was that image generation would either fail or evict the chat
+model. **It does neither.** With `qwen3:30b` loaded at 100% GPU and 1.3 GB
+free, an SDXL generation completed in 10 seconds and the chat model was still
+resident afterwards — ComfyUI pages its weights against system RAM rather than
+demanding the whole card. Open WebUI's usual path, generating an image from
+inside a chat conversation, is therefore fine.
+
+What is genuinely tight is headroom. Both were verified together at 1024×1024;
+larger batches or a heavier checkpoint like Flux have not been tested, and
+`ollama stop qwen3:30b` frees ~20 GB instantly if something does hit an OOM.
+
+**Do not verify a generation by re-running an identical workflow.** ComfyUI
+caches by workflow hash and returns the previous image in ~2 seconds without
+running the sampler — indistinguishable from success unless you notice the
+identical filename and byte size. Change the seed every time.
 
 ## Continue for VSCode
 
@@ -133,6 +207,10 @@ models:
 
 Test autocomplete in a real file rather than trusting the model list to load —
 the list populates from `/api/tags` even when generation is broken.
+
+If you are running Continue **on the GPU host itself**, point `apiBase` at
+`http://localhost:11434` instead. Same models, one less network hop, and it
+keeps working regardless of what the Wi-Fi is doing.
 
 ## When the PC is off
 

@@ -102,7 +102,11 @@ Get-NetFirewallRule -DisplayName "Ollama (LAN)" |
   Get-NetFirewallAddressFilter | Select-Object RemoteAddress
 ```
 
-Expected: `192.168.1.0/24`. If this reads `Any`, delete the rule and recreate it — an unauthenticated inference server open to every interface is the one outcome this plan must not produce.
+Expected: `192.168.1.0/255.255.255.0`.
+
+**Windows normalises `/24` into full-netmask form**, so the value you typed in Step 3 is not the value that reads back. That is the same scope, not a drift — do not "fix" it. An automated equality check against the literal string `192.168.1.0/24` will fail here for no reason.
+
+If it reads `Any`, delete the rule and recreate it — an unauthenticated inference server open to every interface is the one outcome this plan must not produce.
 
 ---
 
@@ -305,7 +309,9 @@ Get-NetFirewallRule -DisplayName "ComfyUI (LAN)" |
   Get-NetFirewallAddressFilter | Select-Object RemoteAddress
 ```
 
-Expected: `192.168.1.0/24`. Same reasoning as Task 1 Step 6 — ComfyUI has no authentication either.
+Expected: `192.168.1.0/255.255.255.0`, for the normalisation reason in Task 1 Step 6. Same scope requirement — ComfyUI has no authentication either.
+
+**Practical note:** this rule needs the same elevation as Task 1 Step 3, so create both rules in that one admin prompt rather than opening a second one here. The port simply sits closed-but-ruled until Task 7 starts something listening on it.
 
 ---
 
