@@ -67,6 +67,15 @@ the weights alone exceed the card. It was the only uncensored coding model in
 the roster, so that use case is currently unserved; a smaller abliterated coder
 would be the way back to it.
 
+**Deleting it from Ollama did not delete it from Open WebUI.** As of
+2026-08-10 the `model` table on svc-infra still holds a row with id
+`aratan/qwen3.6-claude-coder-35b-A3b-mlx-Q4KM-abliterated:latest`,
+`is_active = 1`, while `/api/tags` on the GPU host lists eight models and
+not that one. Open WebUI's model list is its own table, not a view over
+Ollama, so removing a model upstream leaves the entry behind and a user who
+picks it gets a failure at generation time rather than an absence in the
+dropdown. Removing a model means removing it in both places.
+
 The coding default, `qwen3-coder:30b`, is **not** abliterated on purpose. Coding
 models rarely refuse, so abliteration buys almost nothing while costing
 measurable quality.
@@ -158,7 +167,17 @@ base models.
 allocation is inside the 17 GB resident figure, leaving ~3.6 GiB free on the
 card. Raising it eats headroom that is not there.
 
-### `Therapist`
+`Thera` in fact carries `num_ctx: 16384`, set by hand. On a 26b that is
+*below* the default rather than above it, so it costs headroom nothing and
+only shortens the conversation the persona can hold — the opposite of the
+failure this warning is about. Recorded because the live value and this
+paragraph would otherwise read as contradicting each other.
+
+### `Thera`
+
+Named `Thera` in the UI, id `thera`. It was created as `Therapist` and renamed;
+the name here was corrected on 2026-08-10 by reading the `model` table on
+svc-infra, which is the only authority on what a persona is actually called.
 
 ```
 You are a warm, direct, non-judgmental listener with a background in
