@@ -243,12 +243,19 @@ larger batches or a heavier checkpoint like Flux have not been tested, and
 `ollama stop <model>` frees the card instantly if something does hit an OOM.
 
 **That measurement predates the current roster and has not been repeated
-against it.** `qwen3:30b` has since been retired; the default chat model is now
-`huihui_ai/gemma-4-abliterated:26b` at 20339 MiB, which leaves a little more
-room than the 22.8 GB above rather than less. The conclusion — that ComfyUI
-pages rather than demanding the whole card — is expected to hold, but it has
-not been re-verified, and `docs/plans/uncensored-image-generation.md` records
-why a heavier checkpoint would not fit even so.
+against it.** The default chat model is now `huihui_ai/gemma-4-abliterated:26b`
+at 20339 MiB, which leaves a little more room than the 22.8 GB above rather
+than less. The conclusion — that ComfyUI pages rather than demanding the whole
+card — is expected to hold, but it has not been re-verified, and
+`docs/plans/uncensored-image-generation.md` records why a heavier checkpoint
+would not fit even so.
+
+`qwen3:30b` is still installed although it is no longer offered for chat. It is
+the only aligned model left on the host, which makes it the only thing that can
+calibrate the uncensored-model control in
+[chat-models.md](chat-models.md#verifying-the-models-are-uncensored). Keeping it
+costs 18.6 GB of a 2.2 TB disk; deleting it would mean sourcing a baseline from
+outside the roster.
 
 **Do not verify a generation by re-running an identical workflow.** ComfyUI
 caches by workflow hash and returns the previous image in ~2 seconds without

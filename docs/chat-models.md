@@ -89,9 +89,21 @@ result the first time:
   probe that could not look must not render as an all-clear — the same
   reasoning as the tri-state scan probes in `CLAUDE.md`.
 
-Re-calibrating this after `qwen3:30b` is gone means finding another model that
-still refuses the prompt. There is no aligned model left in the roster, so the
-baseline has to come from outside it.
+### `qwen3:30b` is kept deliberately, as the baseline
+
+The design said to retire it along with `qwen2.5-coder:14b`, and the stated
+reason was disk — about 27 GB back. That reason did not survive contact: the
+host has **2.2 TB free**, so the saving is meaningless, and `qwen3:30b` is now
+the only aligned model on the machine and therefore the only thing that can
+calibrate the control above.
+
+Delete it and re-calibrating means finding a baseline from outside the roster —
+every remaining chat model is abliterated and answers everything by design. An
+18.6 GB model that keeps a security check honest is worth more than 18.6 GB of
+a 2.2 TB disk.
+
+`qwen2.5-coder:14b` was retired as planned. It is strictly superseded by
+`qwen3-coder:30b` and has no such second use.
 
 ## Personas
 
