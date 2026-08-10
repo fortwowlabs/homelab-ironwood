@@ -86,15 +86,25 @@
   failed_when: false
   when: service_vm_drift_counts_valid
 
+# Both halves of the degradation above have to be tested here, and the rc test
+# alone does not do it. An UNREACHABLE delegate never runs the command, so
+# ignore_unreachable registers a result carrying `unreachable: true` and no `rc`
+# key at all — `rc | default(0) != 0` is then false and the warning silently
+# never fires, which is precisely the case the comment above claims is warned
+# about. The .prom then goes stale with nothing in the play output saying why.
 - name: Warn if the drift metrics could not be published
   ansible.builtin.debug:
     msg: >-
-      metric publish FAILED (rc={{ service_vm_drift_metrics.rc | default('none') }}):
-      {{ service_vm_drift_metrics.stderr | default('') }} —
+      metric publish FAILED
+      ({{ 'svc-infra was UNREACHABLE: ' ~ (service_vm_drift_metrics.msg | default('no detail'))
+          if service_vm_drift_metrics.unreachable | default(false)
+          else 'rc=' ~ (service_vm_drift_metrics.rc | default('none')) ~ ': '
+               ~ (service_vm_drift_metrics.stderr | default('')) }}) —
       the estate dashboard will show {{ inventory_hostname }} drift as stale
   when:
     - service_vm_drift_counts_valid
-    - (service_vm_drift_metrics.rc | default(0)) != 0
+    - service_vm_drift_metrics.unreachable | default(false)
+      or (service_vm_drift_metrics.rc | default(0)) != 0
 
 - name: Report the container drift result
   ansible.builtin.debug:
