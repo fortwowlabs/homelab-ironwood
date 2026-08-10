@@ -50,8 +50,8 @@ Set it under *System Properties → Environment Variables → System variables*,
 not in a shell — Ollama runs as a background service and will not see a
 variable set in one terminal. Restart Ollama afterwards.
 
-Pull the four chat models Open WebUI offers, the two coding models, and the
-two small models Continue needs for autocomplete and embeddings:
+Pull the four chat models Open WebUI offers, the coding model, and the two
+small models Continue needs for autocomplete and embeddings:
 
 ```powershell
 # Chat — all four are abliterated (see docs/chat-models.md)
@@ -60,14 +60,14 @@ ollama pull huihui_ai/Qwen3.6-abliterated:27b     # technical work
 ollama pull huihui_ai/gemma-4-abliterated:31b     # see the CPU-spill warning
 # Coding
 ollama pull qwen3-coder:30b                       # Continue chat/edit/apply
-ollama pull aratan/qwen3.6-claude-coder-35b-A3b-mlx-Q4KM-abliterated
+# (an abliterated coder was tried here and removed - see "What actually fits")
 # Small, always-on
 ollama pull qwen2.5-coder:1.5b-base               # Continue autocomplete
 ollama pull nomic-embed-text                      # Continue embeddings
 ```
 
-About 127 GB in total, which is why the disk check comes first:
-`Get-PSDrive C | Select-Object Used,Free`.
+About 112 GB in total once the DavidAU model below is added, which is why the
+disk check comes first: `Get-PSDrive C | Select-Object Used,Free`.
 
 **A model's download size is not its VRAM footprint**, and on this card the
 difference decides whether a model is usable at all. Ollama allocates a
@@ -207,17 +207,31 @@ visible.
 | `huihui_ai/Qwen3.6-abliterated:27b` | 18 GB | **100% GPU** | 20411 MiB |
 | `davidau-fable-fusion:27b-q4km` | 19 GB | **100% GPU** | 20800 MiB |
 | `qwen3-coder:30b` | 21 GB | **100% GPU** | 22634 MiB |
-| `huihui_ai/gemma-4-abliterated:31b` | 21 GB | ⚠️ 10%/90% CPU/GPU | 23896 MiB |
-| `aratan/qwen3.6-claude-coder-35b-…-abliterated` | **29 GB** | ⚠️ 23%/77% CPU/GPU | 23897 MiB |
+| `huihui_ai/gemma-4-abliterated:31b` @ `num_ctx` 16384 | 20 GB | **100% GPU** | 23465 MiB |
+| `huihui_ai/gemma-4-abliterated:31b` @ default 32768 | 21 GB | ⚠️ 10%/90% CPU/GPU | 23626 MiB |
 
 The practical ceiling is around **21 GB resident**. Above that Ollama offloads
-layers to system RAM and generation slows by roughly an order of magnitude —
-enough that the 31b's first verification run hit a 30-minute timeout before
-completing on a second attempt with the model already warm.
+layers to system RAM and generation slows by roughly an order of magnitude.
+
+**Two lessons from producing this table**, both of which cost time:
+
+- **Record the idle baseline before each measurement.** The first run of this
+  table was taken with a game holding VRAM, which invalidated it on its face.
+  Re-measured on an idle card (1920 MiB baseline) the numbers moved by ~250 MiB
+  and no verdict changed — but that could only be established by redoing it.
+- **A model that spills is not necessarily too big.** The 31b was written off
+  as not fitting; it fits entirely on the GPU once `num_ctx` drops from 32768
+  to 16384, because the KV cache — not the weights — was over the line. Test
+  the context before deleting a model.
+
+`aratan/qwen3.6-claude-coder-35b-A3b-mlx-Q4KM-abliterated` was installed and
+removed: 23 GB resident even at `num_ctx=2048`, never reaching 100% GPU. There
+the weights genuinely do not fit and no context setting helps.
 
 **Every estimate this roster was planned against was low**, which is why the
-table above exists: 26b was projected at ~15 GB and is 17 GB resident, and the
-abliterated coder was projected at ~20 GB and is 29 GB. Plan from measurements.
+table exists at all: 26b was projected at ~15 GB and is 17 GB resident; the
+abliterated coder was projected at ~20 GB and was 29 GB at default context.
+Plan from measurements.
 
 ### Sharing the card with image generation
 

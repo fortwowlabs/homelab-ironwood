@@ -23,9 +23,8 @@ GPU usage from `nvidia-smi`, one model at a time.
 | `huihui_ai/gemma-4-abliterated:26b` | 17 GB | ✅ 100% GPU | **Default.** Warmest prose — carries the personas |
 | `huihui_ai/Qwen3.6-abliterated:27b` | 18 GB | ✅ 100% GPU | Technical and agentic work |
 | `davidau-fable-fusion:27b-q4km` | 19 GB | ✅ 100% GPU | Creative writing, roleplay |
-| `huihui_ai/gemma-4-abliterated:31b` | 21 GB | ⚠️ 10% on CPU | Dense variant — see the warning below |
+| `huihui_ai/gemma-4-abliterated:31b` | 20 GB | ✅ 100% GPU **at `num_ctx` ≤ 16384** | Dense variant — stronger reasoning, see below |
 | `qwen3-coder:30b` | 21 GB | ✅ 100% GPU | Continue's default. Stock weights |
-| `aratan/qwen3.6-claude-coder-35b-A3b-…-abliterated` | **29 GB** | ⚠️ 23% on CPU | Uncensored coding, on demand |
 
 ### One model at a time
 
@@ -34,23 +33,43 @@ reloads, costing roughly 20–30 seconds. That is the deliberate trade: an
 occasional pause in exchange for never running a weaker model than the card can
 handle.
 
-### The two that spill
+### `gemma-4-abliterated:31b` needs its context capped
 
-`gemma-4-abliterated:31b` and the abliterated coder both exceed what the card
-holds, so Ollama offloads layers to system RAM. **Nothing warns you** — they
-load, they answer, they are simply slow, and `ollama ps` is the only place the
-split is visible. Generation drops by roughly an order of magnitude: the 31b's
+At Ollama's default 32768 context this model reports `10%/90% CPU/GPU` — it
+spills to system RAM and generation slows by roughly an order of magnitude. Its
 first verification run hit a 30-minute timeout before completing on a second
 attempt with the model already warm.
 
-Both were installed deliberately and both work. Treat them as "available if you
-need this specific thing", not as everyday choices. If neither earns its keep
-within a month, `ollama rm` them — that is 50 GB back.
+**The weights are not the problem; the KV cache is.** Measured 2026-08-10 on an
+idle card (1920 MiB baseline):
+
+| `num_ctx` | Resident | Processor | GPU used of 24564 MiB |
+|---|---|---|---|
+| 32768 | 21 GB | ⚠️ 10%/90% CPU/GPU | 23626 MiB |
+| **16384** | 20 GB | ✅ **100% GPU** | 23465 MiB |
+| 8192 | 20 GB | ✅ **100% GPU** | 22817 MiB |
+
+So set `num_ctx` to 16384 on any persona or request using this model. It then
+runs entirely on the GPU with about 1 GiB to spare. Left at the default it
+still works — it is just slow enough that you will assume something is broken.
+
+**Nothing warns you when this happens.** The model loads, answers, and only
+`ollama ps` shows the split. Check it after changing context on any model near
+the ceiling.
+
+### What was removed, and why
+
+`aratan/qwen3.6-claude-coder-35b-A3b-mlx-Q4KM-abliterated` was installed and
+then deleted. At 23.9 GB downloaded it is **23 GB resident even at
+`num_ctx=2048`** and never reached 100% GPU — 4%/96% at the smallest context
+tested, 23%/77% at the default. Unlike the 31b, no context setting rescues it:
+the weights alone exceed the card. It was the only uncensored coding model in
+the roster, so that use case is currently unserved; a smaller abliterated coder
+would be the way back to it.
 
 The coding default, `qwen3-coder:30b`, is **not** abliterated on purpose. Coding
 models rarely refuse, so abliteration buys almost nothing while costing
-measurable quality. The abliterated coder exists for the case where a stock
-model actually declines.
+measurable quality.
 
 ## Verifying the models are uncensored
 
