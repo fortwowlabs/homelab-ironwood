@@ -90,49 +90,74 @@ def render(svc_uid: str = "10001") -> str:
     return text.replace("{{ '{{' }}", "{{").replace("{{ '}}' }}", "}}")
 
 
+def setvar(text: str, name: str, value: str) -> str:
+    """Point one of the script's top-of-file assignments at a fixture path.
+
+    The replacement is passed as a FUNCTION, not as a string. re.sub treats a
+    string replacement as a template and interprets backslash escapes in it, so
+    a Windows temp directory (C:\\Users\\...\\AppData\\...) raised
+    `re.PatternError: bad escape \\U` and took `make validate` down with a
+    traceback before the drift gate ran at all. A function replacement is
+    substituted literally, so no path can ever be read as an escape.
+
+    Paths are handed in as POSIX anyway, because the thing consuming them is
+    bash.
+    """
+    return re.sub(rf"(?m)^{name}=.*$", lambda _m: f"{name}={value}", text)
+
+
+def write_sh(path: Path, text: str) -> None:
+    """Write a file that bash will read, with LF endings on every platform.
+
+    newline="" is not optional. Path.write_text otherwise applies the
+    platform's line separator, so on Windows every fixture gained CRLF: the
+    unit files' `Image=` values picked up a trailing \\r and compared unequal to
+    the identical string from podman, which made the `clean` case report two
+    DRIFTED containers whose running and declared digests printed the same. A
+    CR in the stub podman's shebang breaks it outright.
+    """
+    path.write_text(text, encoding="utf-8", newline="")
+
+
 def build(tmp: Path, *, units: bool = True, podman: bool = True) -> Path:
     (tmp / "bin").mkdir(parents=True, exist_ok=True)
     quadlet = tmp / "quadlet"
     quadlet.mkdir(parents=True, exist_ok=True)
 
     if units:
-        (quadlet / "sonarr.container").write_text(
-            f"[Container]\nImage={SONARR}\nContainerName=sonarr\n", encoding="utf-8")
+        write_sh(quadlet / "sonarr.container",
+                 f"[Container]\nImage={SONARR}\nContainerName=sonarr\n")
         # No ContainerName: Quadlet names the container systemd-<unit>, and the
         # script must derive that or every such unit reads as an orphan.
-        (quadlet / "noname.container").write_text(
-            f"[Container]\nImage={OTHER}\n", encoding="utf-8")
+        write_sh(quadlet / "noname.container", f"[Container]\nImage={OTHER}\n")
 
     if podman:
         stub = tmp / "bin/podman"
-        stub.write_text(
-            '#!/usr/bin/env bash\n'
-            '[[ -n "${DRIFT_FIXTURE:-}" ]] || exit 3\n'
-            'cat "$DRIFT_FIXTURE"\n', encoding="utf-8")
+        write_sh(stub,
+                 '#!/usr/bin/env bash\n'
+                 '[[ -n "${DRIFT_FIXTURE:-}" ]] || exit 3\n'
+                 'cat "$DRIFT_FIXTURE"\n')
         stub.chmod(0o755)
 
     script = tmp / "container-drift.sh"
     text = render()
-    text = re.sub(r"(?m)^ROOT_QUADLET_DIR=.*$",
-                  f"ROOT_QUADLET_DIR={quadlet if units else tmp / 'absent'}", text)
-    text = re.sub(r"(?m)^ROOTLESS_QUADLET_DIR=.*$",
-                  f"ROOTLESS_QUADLET_DIR={tmp / 'absent-rootless'}", text)
+    text = setvar(text, "ROOT_QUADLET_DIR", (quadlet if units else tmp / "absent").as_posix())
+    text = setvar(text, "ROOTLESS_QUADLET_DIR", (tmp / "absent-rootless").as_posix())
     # No rootless account in the test environment; the script must tolerate a
     # context that simply is not there, which is also true of svc-download.
-    text = re.sub(r"(?m)^ROOTLESS_USER=.*$",
-                  "ROOTLESS_USER=__no_such_user__", text)
-    script.write_text(text, encoding="utf-8")
+    text = setvar(text, "ROOTLESS_USER", "__no_such_user__")
+    write_sh(script, text)
     script.chmod(0o755)
     return script
 
 
 def run(script: Path, tmp: Path, fixture: str | None, *, podman: bool) -> tuple[int, str]:
     env = dict(os.environ)
-    env["PATH"] = f"{tmp / 'bin'}:/usr/bin:/bin" if podman else "/usr/bin:/bin"
+    env["PATH"] = f"{(tmp / 'bin').as_posix()}:/usr/bin:/bin" if podman else "/usr/bin:/bin"
     if fixture is not None:
         path = tmp / "fixture"
-        path.write_text(fixture, encoding="utf-8")
-        env["DRIFT_FIXTURE"] = str(path)
+        write_sh(path, fixture)
+        env["DRIFT_FIXTURE"] = path.as_posix()
     result = subprocess.run(["bash", str(script)], capture_output=True,
                             text=True, env=env, check=False)
     return result.returncode, result.stdout + result.stderr
