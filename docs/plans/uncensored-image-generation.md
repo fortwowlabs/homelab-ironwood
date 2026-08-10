@@ -9,6 +9,54 @@ The model roster it was split from shipped as
 
 ## There is a live defect here, independent of any new checkpoint
 
+**Corrected 2026-08-10 after measuring it on the deployed stack. The
+diagnosis below this paragraph was wrong in a way worth preserving:** it said
+in-chat image generation was producing *poor* output, and that setting
+`IMAGE_SIZE`/`IMAGE_STEPS` would fix it. Both claims were false. The feature
+has never produced an image at all, and those two variables cannot reach
+ComfyUI. The original reasoning is kept below because it is exactly the trap
+this repo keeps hitting — inferring a degraded result from a plausible
+config, without ever asking the service what it did.
+
+### What is actually true
+
+`IMAGE_SIZE` and `IMAGE_STEPS` are now set, deployed, and confirmed present
+in the container and in the seeded config table. They still change nothing.
+
+Open WebUI injects size, steps, prompt, negative prompt and checkpoint into
+a ComfyUI workflow **only** through `COMFYUI_WORKFLOW_NODES`. That variable
+is unset here. `config.py` reads it with `os.getenv(..., '')`, and `''`
+raises `json.JSONDecodeError`, so it lands as `[]`. `_apply_workflow_nodes`
+in `utils/images/comfyui.py` is a bare `for node in nodes:` over that empty
+list, so it substitutes nothing.
+
+What ComfyUI receives is therefore the default workflow verbatim:
+
+| Field | Submitted | Should be |
+|---|---|---|
+| `ckpt_name` | `model.safetensors` | `sd_xl_base_1.0.safetensors` |
+| positive prompt | the literal string `Prompt` | the user's text |
+| `width`/`height` | 512 / 512 | 1024 / 1024 |
+| `steps` | 20 | 28 |
+
+`model.safetensors` does not exist on the GPU host — `/object_info/
+CheckpointLoaderSimple` lists exactly one checkpoint,
+`sd_xl_base_1.0.safetensors` — so ComfyUI rejects the prompt at validation.
+The request does not succeed and the image is not merely bad.
+
+**The positive control that settled it:** ComfyUI's `/history` holds exactly
+one entry ever, `homelab-verify-063550`, hand-submitted during the GPU-host
+setup on 2026-08-09 at 06:35. Not one Open WebUI generation has ever
+reached ComfyUI. Had the feature been "quietly producing poor output" since
+it was enabled, that history would be full of 512×512 entries.
+
+So the fix is a `COMFYUI_WORKFLOW_NODES` mapping (and a checkpoint name that
+exists), not the two lines below. Those two lines are still correct and
+still required — they are simply not sufficient, and on their own they
+change nothing observable.
+
+### The original, incorrect entry, kept deliberately
+
 **Open WebUI's `IMAGE_SIZE` defaults to `512x512`, and this deployment does not
 set it.** The current checkpoint is stock SDXL, which is trained at 1024 and
 degrades badly below it. In-chat image generation has therefore been quietly

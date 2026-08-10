@@ -621,10 +621,21 @@ infra_secret_apps:
       # IMAGE_STEPS defaults to 50, roughly double what SDXL needs, so each
       # one also cost about twice the time it should.
       #
-      # Set here rather than in the admin UI because ENABLE_PERSISTENT_CONFIG
-      # is false above: the environment is re-read as authoritative on every
-      # container start, so a value clicked into the UI is discarded on the
-      # next restart. Same trap as the ENABLE_SIGNUP comment.
+      # Set here rather than in the admin UI so that a rebuild from a clean
+      # clone gets them. Note that with ENABLE_PERSISTENT_CONFIG now "true"
+      # above, these seed the config table on first start and the stored row
+      # wins afterwards — editing them here does NOT change a running
+      # instance that has already seeded. Same trap as the ENABLE_SIGNUP
+      # comment, in the opposite direction.
+      #
+      # ⚠️ Neither of these reaches ComfyUI today. Open WebUI injects size,
+      # steps, prompt and checkpoint into a ComfyUI workflow only through
+      # COMFYUI_WORKFLOW_NODES, which is unset, so it parses to [] and
+      # _apply_workflow_nodes iterates nothing. The default workflow is
+      # submitted verbatim: 512x512, 20 steps, the literal prompt "Prompt",
+      # and ckpt_name "model.safetensors" — which is not the checkpoint on
+      # the GPU host (sd_xl_base_1.0.safetensors). See docs/plans/
+      # uncensored-image-generation.md.
       IMAGE_SIZE: "1024x1024"
       IMAGE_STEPS: "28"
       ENABLE_WEB_SEARCH: "true"
