@@ -555,20 +555,56 @@ infra_secret_apps:
       WEBUI_URL: "https://chat.{{ service_domain }}"
       # Signs session JWTs. Must stay stable: rotating it logs everyone out.
       WEBUI_SECRET_KEY: "{{ vault_openwebui_secret_key }}"
-      ENABLE_PERSISTENT_CONFIG: "false"
+      # Deliberately TRUE as of 2026-08-10, reversing the earlier default.
+      #
+      # The agreed model for this app is: seeded from git, modified in the UI,
+      # captured by the backup. That requires UI changes to survive a restart,
+      # which is exactly what this flag controls.
+      #
+      # Understand the resolution order before changing anything below, because
+      # it is not "environment wins" any more (models/config.py):
+      #
+      #     no DB row for the key  -> the environment value is used
+      #     a DB row exists        -> the DB wins and the environment is IGNORED
+      #
+      # A row appears the moment a setting is touched in the admin UI. So
+      # editing a value here and running `make infra` silently does nothing for
+      # any key that has ever been changed in the UI — no error, and `changed=0`
+      # still reports success because the Quadlet really is up to date.
+      #
+      # That is a real hole in this repo's central guarantee, and closing it is
+      # tracked as the settings-as-code exporter (see the working TODO list).
+      # Until that exists, treat the values below as first-boot seeds rather
+      # than as enforced state.
+      ENABLE_PERSISTENT_CONFIG: "true"
       # Open WebUI keeps its own accounts rather than sitting behind Authelia
       # (see the `chat` entry in main.yml), so these two are the whole of its
-      # front door and they must be declared here rather than clicked in the
-      # admin UI. ENABLE_PERSISTENT_CONFIG=false above means the environment
-      # is re-read as authoritative on every container start: a signup toggle
-      # set in the UI is silently discarded on the next restart, and upstream
-      # defaults ENABLE_SIGNUP to true. Omitting it therefore reopens public
-      # registration on a podman auto-update or a reboot, on a host that will
-      # be wired to the GPU box.
+      # front door. Upstream defaults ENABLE_SIGNUP to true, so omitting it
+      # opens public registration on a host wired to the GPU box.
+      #
+      # WARNING — these are no longer enforced. Since ENABLE_PERSISTENT_CONFIG
+      # became true above, these two are first-boot seeds like everything else:
+      # once a row exists in the DB the environment is ignored, so a signup
+      # toggle flipped in the admin UI now SURVIVES restarts instead of being
+      # discarded, and re-running `make infra` will not turn it back off.
+      #
+      # This is the sharpest edge of the seed-then-drift model, because it is
+      # the one setting where drift is a security change rather than a
+      # preference. Until the settings-as-code exporter exists (working TODO
+      # list), the only check is looking: confirm `ui.enable_signup` is false
+      # in `GET /api/v1/configs/export` after any admin-settings session.
       ENABLE_SIGNUP: "false"
       # Belt and braces: if signup is ever turned back on deliberately, a new
       # account lands inert instead of usable until an admin promotes it.
       DEFAULT_USER_ROLE: pending
+      # Personas (Workspace → Models) are per-user private by default, which is
+      # why models created by the first account are invisible to everyone else.
+      # These two open that up: every user may create and manage their own
+      # personas, and may share one publicly so it appears in other users'
+      # model dropdowns. Both default to false upstream.
+      USER_PERMISSIONS_WORKSPACE_MODELS_ACCESS: "true"
+      USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_SHARING: "true"
+      USER_PERMISSIONS_WORKSPACE_MODELS_ALLOW_PUBLIC_SHARING: "true"
       ENABLE_OPENAI_API: "false"
       ENABLE_OLLAMA_API: "{{ 'true' if gpu_host_online | bool else 'false' }}"
       OLLAMA_BASE_URL: "http://{{ gpu_host_ip }}:11434"
