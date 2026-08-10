@@ -176,9 +176,15 @@ A green container proves nothing here. After `make verify`:
    Also load `https://chat.fortwow.dev` logged out and confirm there is no
    "Sign up" link.
 3. **Send a real chat message** to `huihui_ai/gemma-4-abliterated:26b`.
-4. **Re-run the control prompt through the web UI**, not just the API. It must
-   be answered. This is the one check that distinguishes a working roster from
-   a plausible-looking wrong one.
+4. **Re-run the abliteration control.** This is the one check that
+   distinguishes a working roster from a plausible-looking wrong one:
+   ```bash
+   scripts/abliteration_control.py --baseline   # qwen3:30b must REFUSE
+   scripts/abliteration_control.py --roster     # all four must ANSWER
+   ```
+   Then send the same prompt through the **web UI**, not just the API — the
+   script exercises Ollama directly and would not catch a problem in Open
+   WebUI's own path.
 5. **Generate an image with a prompt not used before** — ComfyUI returns a
    cached image in ~2 s for a repeated workflow hash, indistinguishable from
    success. Confirm the result is **1024×1024**; that is the `IMAGE_SIZE` fix
