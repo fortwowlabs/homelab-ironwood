@@ -50,23 +50,71 @@ Set it under *System Properties → Environment Variables → System variables*,
 not in a shell — Ollama runs as a background service and will not see a
 variable set in one terminal. Restart Ollama afterwards.
 
-Pull the general chat model Open WebUI uses, plus the three Continue needs —
-a coding model, a small completion model, and an embedding model:
+Pull the four chat models Open WebUI offers, the two coding models, and the
+two small models Continue needs for autocomplete and embeddings:
 
 ```powershell
-ollama pull qwen3:30b                  # Open WebUI chat
-ollama pull qwen2.5-coder:14b          # Continue chat/edit/apply
-ollama pull qwen2.5-coder:1.5b-base    # Continue autocomplete
-ollama pull nomic-embed-text           # Continue embeddings
+# Chat — all four are abliterated (see docs/chat-models.md)
+ollama pull huihui_ai/gemma-4-abliterated:26b     # default
+ollama pull huihui_ai/Qwen3.6-abliterated:27b     # technical work
+ollama pull huihui_ai/gemma-4-abliterated:31b     # see the CPU-spill warning
+# Coding
+ollama pull qwen3-coder:30b                       # Continue chat/edit/apply
+ollama pull aratan/qwen3.6-claude-coder-35b-A3b-mlx-Q4KM-abliterated
+# Small, always-on
+ollama pull qwen2.5-coder:1.5b-base               # Continue autocomplete
+ollama pull nomic-embed-text                      # Continue embeddings
 ```
 
-About 28 GB in total. `qwen3:30b` rather than `qwen3:32b` because the 32B buys
-little on a 24 GB card and costs an extra gigabyte on every reload.
+About 127 GB in total, which is why the disk check comes first:
+`Get-PSDrive C | Select-Object Used,Free`.
 
-**A model's download size is not its VRAM footprint.** `qwen3:30b` is an 18 GB
-download but occupies **21 GB resident**, because Ollama allocates a 32768-token
-KV cache alongside it (`ollama ps` reports both). Budget from the resident
-figure, not the tag.
+**A model's download size is not its VRAM footprint**, and on this card the
+difference decides whether a model is usable at all. Ollama allocates a
+32768-token KV cache alongside the weights, so budget from the resident figure
+in `ollama ps`, never from the tag. The measured table further down is the one
+to plan against.
+
+### The fourth chat model cannot be pulled the normal way
+
+`DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF`
+is a Hugging Face GGUF repo rather than an Ollama registry entry, so it needs
+the `hf.co/` prefix and an explicit quant tag. **That pull currently fails**,
+and it fails late and confusingly:
+
+```powershell
+# Downloads 18 GB + 927 MB successfully, then dies:
+#   Error: context deadline exceeded
+ollama pull hf.co/DavidAU/Qwen3.6-27B-Fable-Fusion-711-Uncensored-Heretic-NM-DAU-NEO-MAX-MTP-GGUF:Q4_K_M
+```
+
+The weights are not the problem. It is a **479-byte config blob** whose
+`hf.co/v2/.../blobs/sha256:2a30fe37...` endpoint consistently answers in ~40
+seconds — Hugging Face generates it on demand — against Ollama's hardcoded 30
+second deadline. Fetching that URL by hand returns HTTP 200 every time; Ollama
+simply gives up first. Retrying does not help.
+
+The weights *do* land in the blob store, so register them directly instead of
+downloading them again. Find the 16.81 GB blob and point a Modelfile at it:
+
+```powershell
+$blob = Get-ChildItem "$env:USERPROFILE\.ollama\models\blobs" -File |
+        Where-Object { $_.Length -gt 16.5GB -and $_.Length -lt 17GB -and $_.Name -notlike '*partial*' }
+"FROM $($blob.FullName)" | Out-File -Encoding utf8 Modelfile.davidau
+ollama create davidau-fable-fusion:27b-q4km -f Modelfile.davidau
+```
+
+Two things follow from this and both matter:
+
+- **The model is named `davidau-fable-fusion:27b-q4km`**, not the upstream
+  path. That name is local to this machine and appears in Open WebUI's
+  dropdown as such.
+- **`:Q4_K_M` resolves to the non-MTP build** (16.81 GB), not the 17.23 GB MTP
+  one — the two share a quant suffix and Ollama picks by that suffix alone.
+  Confirm by size if it ever matters.
+
+`ollama create` copies the blob rather than referencing it, so this leaves an
+orphaned ~17 GB copy from the failed pull. Harmless, reclaimable.
 
 Confirm from another machine, not from the PC itself — loopback would pass
 even with the default bind:
@@ -146,10 +194,35 @@ Verify by *using* it, not by checking that the container is up: send a chat
 message and get a real reply, then generate an image from the same
 conversation. A green container proves nothing about whether inference works.
 
-## Sharing 24 GB between chat and image generation
+## What actually fits on the card
 
-Measured on 2026-08-08, because the arithmetic suggests a worse answer than
-reality delivers:
+Measured 2026-08-09, one model at a time, each stopped before the next was
+loaded. **Two of the six do not fit and silently spill to CPU** — Ollama does
+not warn, it just runs slowly, so `ollama ps` is the only place this is
+visible.
+
+| Model | Resident | Processor | GPU used of 24564 MiB |
+|---|---|---|---|
+| `huihui_ai/gemma-4-abliterated:26b` | 17 GB | **100% GPU** | 20339 MiB |
+| `huihui_ai/Qwen3.6-abliterated:27b` | 18 GB | **100% GPU** | 20411 MiB |
+| `davidau-fable-fusion:27b-q4km` | 19 GB | **100% GPU** | 20800 MiB |
+| `qwen3-coder:30b` | 21 GB | **100% GPU** | 22634 MiB |
+| `huihui_ai/gemma-4-abliterated:31b` | 21 GB | ⚠️ 10%/90% CPU/GPU | 23896 MiB |
+| `aratan/qwen3.6-claude-coder-35b-…-abliterated` | **29 GB** | ⚠️ 23%/77% CPU/GPU | 23897 MiB |
+
+The practical ceiling is around **21 GB resident**. Above that Ollama offloads
+layers to system RAM and generation slows by roughly an order of magnitude —
+enough that the 31b's first verification run hit a 30-minute timeout before
+completing on a second attempt with the model already warm.
+
+**Every estimate this roster was planned against was low**, which is why the
+table above exists: 26b was projected at ~15 GB and is 17 GB resident, and the
+abliterated coder was projected at ~20 GB and is 29 GB. Plan from measurements.
+
+### Sharing the card with image generation
+
+Measured on 2026-08-08 against the previous chat model, because the arithmetic
+suggests a worse answer than reality delivers:
 
 | State | VRAM used of 24564 MiB |
 |---|---|
@@ -167,7 +240,15 @@ inside a chat conversation, is therefore fine.
 
 What is genuinely tight is headroom. Both were verified together at 1024×1024;
 larger batches or a heavier checkpoint like Flux have not been tested, and
-`ollama stop qwen3:30b` frees ~20 GB instantly if something does hit an OOM.
+`ollama stop <model>` frees the card instantly if something does hit an OOM.
+
+**That measurement predates the current roster and has not been repeated
+against it.** `qwen3:30b` has since been retired; the default chat model is now
+`huihui_ai/gemma-4-abliterated:26b` at 20339 MiB, which leaves a little more
+room than the 22.8 GB above rather than less. The conclusion — that ComfyUI
+pages rather than demanding the whole card — is expected to hold, but it has
+not been re-verified, and `docs/plans/uncensored-image-generation.md` records
+why a heavier checkpoint would not fit even so.
 
 **Do not verify a generation by re-running an identical workflow.** ComfyUI
 caches by workflow hash and returns the previous image in ~2 seconds without
@@ -188,9 +269,9 @@ name: homelab-gpu
 version: 0.0.1
 schema: v1
 models:
-  - name: qwen2.5-coder-14b
+  - name: qwen3-coder-30b
     provider: ollama
-    model: qwen2.5-coder:14b
+    model: qwen3-coder:30b
     apiBase: http://192.168.1.40:11434
     roles: [chat, edit, apply]
   - name: qwen2.5-coder-1.5b
