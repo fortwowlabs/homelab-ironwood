@@ -181,6 +181,46 @@ authentication. The `-RemoteAddress` scope is the only thing standing between
 them and the rest of the network, so do not widen it, and do not forward
 either port at the router.
 
+#### ⚠️ That scope is not currently holding — measured 2026-08-10
+
+**Both services answer on TERRA's tailnet address, unauthenticated.** Verified
+from `brandons-macbook-pro` (100.110.75.114), a tailnet peer:
+
+```
+curl http://100.107.5.66:11434/api/tags     -> 200, full model list
+curl http://100.107.5.66:8188/system_stats  -> 200, ComfyUI version + RAM
+```
+
+Ollama's installer adds its own `ollama.exe` rules with `Remote: Any` on both
+the Private and Public profiles, and those override the narrow LAN rule above.
+The tailnet has **8 peers**, so every one of them can run inference, pull
+against the 2.4 TB disk, or delete the model library.
+
+**This corrects an earlier claim that "ComfyUI is correctly scoped — this is
+Ollama-specific."** It is not. ComfyUI answered on the same tailnet address in
+the same test, so whatever is admitting the traffic is not unique to Ollama's
+installer rules. Both need scoping, and the ComfyUI half has no diagnosis yet.
+
+One honest caveat about the evidence. `tailscale status` reports the path to
+TERRA as `direct 192.168.1.40:41641` — the WireGuard transport rides the LAN,
+because both machines are on it. That does **not** invalidate the result:
+Windows Firewall evaluates the *decapsulated* packet as it leaves the Tailscale
+adapter, where the source address is `100.110.75.114`, which
+`-RemoteAddress 192.168.1.0/24` cannot match. A genuinely remote peer produces
+an identical inner packet. The airtight version of this test is the same two
+curls from a peer on cellular; every such peer was offline at the time.
+
+The fix needs an elevated shell **on TERRA**:
+
+```powershell
+Get-NetFirewallRule -DisplayName "ollama.exe" | Disable-NetFirewallRule
+```
+
+Then re-run both curls from a tailnet peer and require that they stop
+answering while `192.168.1.40` still does — a check that fails closed rather
+than one that merely looks quiet. Re-check after Ollama updates; the installer
+created these rules and may recreate them.
+
 ### 5. Tell the homelab it exists
 
 ```bash
