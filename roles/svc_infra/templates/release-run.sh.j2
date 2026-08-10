@@ -29,12 +29,23 @@ RUNNER={{ verify_runner_user | quote }}
 # once already, by an assert that passed on the workstation and failed on all
 # three hosts at 04:01.
 #
+# THIS SCRIPT DOES NOT SOURCE THAT FILE, and must not try. It did, guarded by
+# `[[ -r /etc/homelab-release.env ]] && .`, which was permission-denied every
+# single run: the file is 0600 root:root and this script runs as svcops. The
+# guard turned that into a silent skip, so the token was never set and the
+# whole rendering pipeline was dead config. Same trap as hc-ping.sh being 0750
+# root-owned under the svcops verify unit.
+#
+# homelab-release@.service now supplies it with EnvironmentFile=, which systemd
+# reads as root before dropping to User=%i. Run by hand as an ordinary user
+# there is simply no token, which is a supported state — see below.
+#
 # Absent is the normal case and is fine: unauthenticated GitHub allows 60
 # requests an hour and a full run costs about 45. That fits a weekly run and
 # nothing else, which is why the report prints the remaining quota and why
-# running it twice in an hour produces errors rather than an all-clear.
-# shellcheck source=/dev/null
-[[ -r /etc/homelab-release.env ]] && . /etc/homelab-release.env
+# running it twice in an hour produces errors rather than an all-clear. Whether
+# it actually arrived is published as homelab_release_authenticated rather than
+# left to inference.
 export GITHUB_TOKEN="${GITHUB_TOKEN:-}"
 
 if [[ ! -r "$SECRET_FILE" ]]; then

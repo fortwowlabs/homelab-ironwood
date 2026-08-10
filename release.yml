@@ -92,6 +92,21 @@
           --probed {{ release_report_dir }}/versions-probed.json
           --previous {{ release_state_file }}
           --state-out {{ release_state_file }}.next
+      # WITHOUT THIS BLOCK THE TOKEN NEVER ARRIVES. The wrapper exports
+      # GITHUB_TOKEN into the ansible-playbook process, but that is the
+      # CONTROLLER; this task executes on svc-infra through the connection
+      # plugin, and a controller environment variable does not cross it. So
+      # release_check.py read an unset GITHUB_TOKEN however carefully the file
+      # beside it was rendered, and the report stayed on the unauthenticated
+      # 60/hour budget that a full run of ~45 requests very nearly exhausts —
+      # visible only as the weekly DEGRADED alert nobody could act on.
+      #
+      # lookup('env') reads the CONTROLLER's environment, which is exactly
+      # where the wrapper and the systemd EnvironmentFile put it. It is not a
+      # vault_ reference, so rule 2 in this file's header still holds and the
+      # `git archive` checkout is unaffected.
+      environment:
+        GITHUB_TOKEN: "{{ lookup('env', 'GITHUB_TOKEN') }}"
       register: release_raw
       changed_when: false
       # Never fails the play on a nonzero exit. The script exits 1 when its own
@@ -99,8 +114,13 @@
       # that is a finding to publish loudly, not a reason to abort before
       # publishing it. The escalation below is what carries the news.
       failed_when: false
-      # It is a report, not a gate: no vault, no secrets, nothing to redact.
-      no_log: false
+      # Was deliberately false while this task had nothing to hide. It now
+      # carries a credential in `environment:`, and an -vvv run on the host
+      # would otherwise put it in the journal. The cost is that the raw report
+      # no longer prints here; the parsed summary, the report files and the
+      # ntfy message all still do, and `authenticated` below is what makes the
+      # token's arrival checkable without printing it.
+      no_log: true
 
     - name: Establish the report, distinguishing a bad run from a quiet week
       ansible.builtin.set_fact:
@@ -201,6 +221,19 @@
         # zero — "0 behind, 0 current, 0 new, 0 errors" — which is
         # indistinguishable from a genuinely quiet week. Suppressing them lets
         # the series go absent instead of reading as a clean run.
+        #
+        # homelab_release_authenticated joins the gated group, and it is the
+        # TOKEN'S POSITIVE CONTROL — the only way to tell from outside that the
+        # token arrived. release_check.py reports whether it actually saw a
+        # GITHUB_TOKEN, so this reads 1 when the whole chain held (vault ->
+        # rendered env file -> systemd EnvironmentFile -> wrapper -> controller
+        # -> this task's environment) and 0 when any link broke. Two of those
+        # links were broken independently, and neither was visible: the failure
+        # mode is a silent drop back to 60 requests/hour, which looks like a
+        # slightly worse week rather than like a break. Charted for that reason
+        # rather than alerted on. Gated because a run that produced no parseable
+        # output did not measure this either, and a 0 there would report a
+        # broken token that may be perfectly fine.
         stdin: |
           homelab_release_images_total {{ release.summary.images_examined | default(0) }}
           homelab_release_images_unmeasured {{ release_unmeasured | length }}
@@ -210,6 +243,7 @@
           homelab_release_images_current {{ release_counts.current | default(0) }}
           homelab_release_new {{ release_new | length }}
           homelab_release_errors {{ release_counts.error | default(0) }}
+          homelab_release_authenticated {{ 1 if release.summary.authenticated | default(false) else 0 }}
           {% endif %}
       register: release_metrics
       changed_when: false

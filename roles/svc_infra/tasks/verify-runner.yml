@@ -303,6 +303,13 @@
     # 0600 root, matching /etc/homelab-notify.env beside it. The file is
     # normally empty of secrets, but it is the place a GitHub token goes and
     # the mode must not depend on whether one happens to be set today.
+    #
+    # It is consumed by homelab-release@.service's EnvironmentFile=, which
+    # systemd reads as root before dropping to User=%i — NOT by the wrapper,
+    # which runs as svcops and could never read this mode. That was the
+    # original arrangement and it failed silently for exactly that reason; do
+    # not add a `. /etc/homelab-release.env` back to the wrapper, and do not
+    # loosen this mode to make one work.
     mode: "0600"
   no_log: true
   diff: false

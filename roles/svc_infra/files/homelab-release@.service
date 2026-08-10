@@ -17,6 +17,20 @@ After=network-online.target
 Type=oneshot
 User=%i
 WorkingDirectory=/opt/homelab-iac
+# GITHUB_TOKEN reaches the report through SYSTEMD, not through the wrapper, and
+# the difference is the whole reason this line exists. /etc/homelab-release.env
+# is 0600 root:root — correct for a credential, and the same mode as
+# /etc/homelab-healthchecks.env on the scan unit beside this one — but %i is
+# svcops, so the wrapper's `[[ -r … ]] && .` could never read it and skipped it
+# in silence. systemd parses EnvironmentFile as root during unit setup, before
+# dropping to User=, which is exactly the privilege split this needs.
+#
+# The leading `-` is deliberate and differs from homelab-scan@.service, which
+# hard-requires its file. A missing healthchecks env means the nightly ping is
+# broken and should fail loudly; a missing release env only means no token,
+# which is the documented normal case. Absence is reported instead by the
+# homelab_release_authenticated series the play emits.
+EnvironmentFile=-/etc/homelab-release.env
 ExecStartPre=/usr/bin/test -d /opt/homelab-iac/.venv
 ExecStart=/usr/local/sbin/homelab-release-run.sh
 # Type=oneshot disables the start timeout by default, and this unit makes about
