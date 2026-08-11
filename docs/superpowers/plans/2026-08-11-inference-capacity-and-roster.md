@@ -1540,15 +1540,21 @@ is not installed — an abliterated model that refuses is the wrong model.
 
 - [ ] **Step 8: Record both outcomes in the catalog**
 
-Add the accepted models. The vision entry (adjust `measured_mib` to the survey's
-figure):
+Add the accepted models. **`measured_mib` below is written as `REPLACE_ME` on
+purpose — do not paste a zero.** Task 1's validator rejects `measured_mib <= 0`
+precisely so a forgotten placeholder fails the gate instead of becoming a
+permanent lie in the catalog, and a non-integer fails YAML-to-int checking
+just as loudly. Substitute the figure from Step 1's survey before running the
+validator.
+
+The vision entry:
 
 ```yaml
   - name: huihui_ai/qwen3-vl-abliterated:8b
     tier: terra
     role: vision
     abliterated: true
-    measured_mib: 0  # replace with the survey figure
+    measured_mib: REPLACE_ME  # from pass-candidates.json
     measured_on: "2026-08-11"
     num_ctx: 32768
     why: >-
@@ -1567,7 +1573,7 @@ And the coder:
     tier: terra
     role: code
     abliterated: true
-    measured_mib: 0  # replace with the survey figure
+    measured_mib: REPLACE_ME  # from pass-candidates.json
     measured_on: "2026-08-11"
     num_ctx: 16384
     why: >-
