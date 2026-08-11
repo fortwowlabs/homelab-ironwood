@@ -61,6 +61,8 @@ FALLBACK_CASES = (
     ("identical - the classic silent fallback", 20339, 20339, "FALLBACK"),
     ("noise in the wrong direction", 20339, 20350, "FALLBACK"),
     ("impossibly worse", 20000, 21000, "UNKNOWN"),
+    ("exactly at the negative margin", 19900, 20000, "UNKNOWN"),
+    ("one MiB short of the negative margin", 19901, 20000, "FALLBACK"),
     ("no f16 measurement", None, 20000, "UNKNOWN"),
     ("no quantized measurement", 20000, None, "UNKNOWN"),
 )
@@ -113,17 +115,16 @@ def render(passes: list[dict]) -> str:
         "",
         "## Fit, by cache type",
         "",
-        "| Model | Context | f16 | " + " | ".join(p["cache_type"] for p in others)
-        + " |",
+        "| Model | Context | f16 " + ("| " + " | ".join(p["cache_type"] for p in others) + " |" if others else "|"),
         "|---|---|---|" + "---|" * len(others),
     ]
 
-    for key in sorted(base_rows):
+    for key in sorted(base_rows, key=lambda k: (k[0], k[1] if k[1] is not None else -1)):
         model, num_ctx = key
         row = base_rows[key]
         ctx = num_ctx if num_ctx is not None else "n/a"
         used = row["card_used_mib"]
-        cells = [f"{row['verdict']} ({used} MiB)" if used else row["verdict"]]
+        cells = [f"{row['verdict']} ({used} MiB)" if used is not None else row["verdict"]]
         for entry in others:
             match = {_key(r): r for r in entry["rows"]}.get(key)
             if match is None:
@@ -131,7 +132,7 @@ def render(passes: list[dict]) -> str:
                 continue
             state, _ = detect_fallback(used, match["card_used_mib"])
             cell = f"{match['verdict']}"
-            if match["card_used_mib"]:
+            if match["card_used_mib"] is not None:
                 cell += f" ({match['card_used_mib']} MiB)"
             if state == "FALLBACK":
                 cell += " ⚠️ **FALLBACK**"
