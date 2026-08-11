@@ -131,6 +131,10 @@ validate-catalog:
 	$(PYTHON) tests/validate_scan_image_coverage.py
 	$(PYTHON) tests/validate_image_provenance.py
 	$(PYTHON) tests/validate_release_overrides.py
+# The roster is the only description of which models exist on which host. It
+# sits with the catalog gates because it validates the same kind of artifact:
+# a data file this repo owns and other things read verbatim.
+	$(PYTHON) tests/validate_model_roster.py
 
 validate-provisioning:
 	$(PYTHON) tests/validate_pve_states.py
