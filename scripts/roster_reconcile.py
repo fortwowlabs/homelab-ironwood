@@ -67,7 +67,10 @@ RECONCILE_CASES = (
     ("BROKEN sorts above MISSING",
      {"a", "planned"}, {"a"}, {"a", "ghost"},
      [("BROKEN", "ghost"), ("MISSING", "planned")]),
-    ("empty everywhere is agreement, not an error", set(), set(), set(), []),
+    ("all three categories at once, in severity order and sorted within it",
+     {"a", "planned"}, {"a", "extra"}, {"a", "extra", "ghost", "zeta"},
+     [("BROKEN", "ghost"), ("BROKEN", "zeta"), ("UNDECLARED", "extra"),
+      ("MISSING", "planned")]),
 )
 
 
@@ -104,6 +107,11 @@ def ollama_names(base_url: str, timeout: int) -> set[str]:
 
 
 def webui_names(db_path: str) -> set[str]:
+    if not Path(db_path).is_file():
+        raise SystemExit(
+            f"{db_path}: no such file. That path is svc-infra's Open WebUI "
+            "database by default (make DB=... to point at a different one, "
+            "e.g. when running this off the workstation)")
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
         # `base_model_id IS NULL` is load-bearing, not a tidiness filter.

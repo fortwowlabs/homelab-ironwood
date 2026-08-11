@@ -225,9 +225,11 @@ image-release: ## What version is REF, and what has upstream released since?
 	@test -n "$(REF)" || { echo 'usage: make image-release REF=lscr.io/linuxserver/sonarr' >&2; exit 64; }
 	@scripts/image-release.sh "$(REF)"
 
-roster-check: ## Compare models.yml against Ollama and Open WebUI (needs both up)
+DB ?= /opt/homelab/appdata/open-webui/webui.db
+
+roster-check: ## Compare models.yml against Ollama and Open WebUI (needs both up; override DB= off svc-infra)
 	$(PYTHON) scripts/roster_reconcile.py \
-	  --webui-db /opt/homelab/appdata/open-webui/webui.db
+	  --webui-db $(DB)
 
 verify-disruptive: ## Explicitly run the fail-closed recovery drill
 	$(ANSIBLE) $(DISRUPTIVE_PLAYBOOK) $(VAULT) $(ARGS)

@@ -38,7 +38,6 @@ import urllib.error
 import urllib.request
 
 DEFAULT_HOST = "http://localhost:11434"
-CARD_TOTAL_MIB = 24564
 
 # docs/gpu-host.md records ~2.5 GB idle; docs/chat-models.md records a 1920 MiB
 # idle baseline on a clean card. 2560 sits above the observed idle with a
@@ -164,18 +163,34 @@ def ps_entry(host: str, model: str, timeout: int) -> dict | None:
     return None
 
 
-def unload(host: str, model: str, timeout: int) -> None:
+def unload(host: str, model: str, timeout: int) -> bool:
     """keep_alive 0 evicts immediately. Without this every measurement inherits
-    the previous model's residency and the numbers are cumulative nonsense."""
+    the previous model's residency and the numbers are cumulative nonsense.
+
+    Returns True only if eviction was actually confirmed via /api/ps. A timeout
+    or 500 on the evict call used to be swallowed by a bare `pass` with nothing
+    checking whether the model actually left the card - a ~20 GB model could
+    stay resident and inflate every later card_used_mib in the pass while the
+    per-model verdict kept reading MEASURED. If /api/ps itself cannot be read,
+    that is treated the same as "still resident": eviction was not confirmed,
+    so the caller cannot trust what comes after it either."""
     try:
         _post(host, "/api/generate", {"model": model, "keep_alive": 0}, timeout)
     except Exception:
         pass
     time.sleep(3)
+    try:
+        return ps_entry(host, model, timeout) is None
+    except Exception:
+        return False
 
 
 def measure(host: str, model: str, num_ctx: int | None, timeout: int,
-            embed: bool) -> dict:
+            embed: bool) -> tuple[dict, bool]:
+    """Returns (row, unload_confirmed). unload_confirmed is False whenever the
+    model may still be resident afterward - the row dict's schema is frozen
+    (scripts/vram_report.py consumes it), so this out-of-band signal is how a
+    stuck unload gets reported without changing that contract."""
     row: dict = {"model": model, "num_ctx": num_ctx}
     try:
         if embed:
@@ -189,13 +204,11 @@ def measure(host: str, model: str, num_ctx: int | None, timeout: int,
         # Unload even on the error path. A load that failed partway can leave the
         # model resident, and the next measurement would then include it — every
         # subsequent row in the pass would be silently inflated.
-        unload(host, model, timeout)
-        return row
+        return row, unload(host, model, timeout)
     except Exception as exc:
         row.update(verdict="INCONCLUSIVE", card_used_mib=None, size_total=None,
                    size_vram=None, evidence=f"{type(exc).__name__}: {exc}")
-        unload(host, model, timeout)
-        return row
+        return row, unload(host, model, timeout)
 
     try:
         entry = ps_entry(host, model, timeout) or {}
@@ -207,47 +220,95 @@ def measure(host: str, model: str, num_ctx: int | None, timeout: int,
         row.update(verdict="INCONCLUSIVE", card_used_mib=None, size_total=None,
                    size_vram=None,
                    evidence=f"HTTP {exc.code} reading state after load: {exc.read()[:200]!r}")
-        unload(host, model, timeout)
-        return row
+        return row, unload(host, model, timeout)
     except Exception as exc:
         row.update(verdict="INCONCLUSIVE", card_used_mib=None, size_total=None,
                    size_vram=None,
                    evidence=f"model loaded but could not read final state: {type(exc).__name__}: {exc}")
-        unload(host, model, timeout)
-        return row
+        return row, unload(host, model, timeout)
 
     row.update(verdict=state, card_used_mib=card_used_mib,
                size_total=size_total, size_vram=size_vram, evidence=evidence)
-    unload(host, model, timeout)
-    return row
+    return row, unload(host, model, timeout)
+
+
+def _probe_writable(path: str) -> str | None:
+    """Open the output path for writing before spending any GPU time on the
+    survey. A bad directory, a read-only path or a full disk used to surface
+    only after the entire ~45-minute grid had run, as a traceback with nothing
+    salvaged. Returns None if writable, or an error message otherwise."""
+    try:
+        with open(path, "w", encoding="utf-8"):
+            pass
+    except OSError as exc:
+        return f"cannot write to {path}: {exc}"
+    return None
+
+
+def _survey_payload(cache_type: str, flash_attention: bool, baseline: int,
+                    taken: str, rows: list[dict]) -> dict:
+    """The one place the pass-file shape is assembled, shared by the
+    incremental write (after every measurement) and the final write, so they
+    cannot drift apart into two different dict literals."""
+    return {
+        "cache_type": cache_type,
+        "flash_attention": flash_attention,
+        "baseline_mib": baseline,
+        "taken": taken,
+        "rows": rows,
+    }
 
 
 def run_survey(args) -> int:
+    problem = _probe_writable(args.out)
+    if problem:
+        print(problem, file=sys.stderr)
+        return 1
+
     baseline = nvidia_smi_used_mib()
     ok, evidence = baseline_verdict(baseline)
     print(f"baseline: {evidence}")
     if not ok:
         return 1
 
+    taken = datetime.date.today().isoformat()
     rows: list[dict] = []
+    stuck: list[tuple[str, int | None]] = []
+
+    def flush() -> None:
+        # Rewritten after every measurement, not just at the end: the payload
+        # is small, so ~48 rewrites cost nothing, and a crash, a Ctrl-C
+        # (KeyboardInterrupt is a BaseException and was never caught here) or
+        # a power cut preserves every row already taken instead of losing the
+        # whole pass.
+        with open(args.out, "w", encoding="utf-8") as handle:
+            json.dump(_survey_payload(args.cache_type, args.flash_attention,
+                                      baseline, taken, rows), handle, indent=2)
+            handle.write("\n")
+
+    def record(model: str, num_ctx: int | None, embed: bool) -> None:
+        row, unload_confirmed = measure(args.host, model, num_ctx, args.timeout, embed)
+        rows.append(row)
+        if not unload_confirmed:
+            stuck.append((model, num_ctx))
+            ctx_desc = num_ctx if num_ctx is not None else "n/a"
+            print(
+                f"WARNING: could not confirm {model} was evicted after the @ "
+                f"{ctx_desc} measurement (unload call failed, or /api/ps still "
+                "shows it resident). It may still be occupying the GPU, which "
+                "means every card_used_mib measured after this point in the "
+                "pass is potentially inflated by its footprint and should not "
+                "be trusted until the card is checked and cleared by hand.",
+                file=sys.stderr)
+        flush()
+
     for model in args.models:
         for num_ctx in CONTEXTS:
             print(f"  measuring {model} @ {num_ctx} ...", flush=True)
-            rows.append(measure(args.host, model, num_ctx, args.timeout, embed=False))
+            record(model, num_ctx, embed=False)
     for model in args.embed_only:
         print(f"  measuring {model} (embed, load-only) ...", flush=True)
-        rows.append(measure(args.host, model, None, args.timeout, embed=True))
-
-    payload = {
-        "cache_type": args.cache_type,
-        "flash_attention": args.flash_attention,
-        "baseline_mib": baseline,
-        "taken": datetime.date.today().isoformat(),
-        "rows": rows,
-    }
-    with open(args.out, "w", encoding="utf-8") as handle:
-        json.dump(payload, handle, indent=2)
-        handle.write("\n")
+        record(model, None, embed=True)
 
     print()
     for row in rows:
@@ -256,12 +317,19 @@ def run_survey(args) -> int:
         print(f"{'':<14} {row['evidence']}")
     inconclusive = [r for r in rows if r["verdict"] == "INCONCLUSIVE"]
     print(f"\n{len(rows)} measurements written to {args.out}")
+    if stuck:
+        print(f"\n{len(stuck)} unload(s) not confirmed - later measurements in "
+              "this pass may be inflated and untrustworthy:", file=sys.stderr)
+        for model, num_ctx in stuck:
+            print(f"  {model} @ {num_ctx if num_ctx is not None else 'n/a'}",
+                  file=sys.stderr)
     if inconclusive:
         print(f"\n{len(inconclusive)} INCONCLUSIVE - this pass is not complete:",
               file=sys.stderr)
         for row in inconclusive:
             print(f"  {row['model']} @ {row['num_ctx']}: {row['evidence']}",
                   file=sys.stderr)
+    if inconclusive or stuck:
         return 1
     return 0
 

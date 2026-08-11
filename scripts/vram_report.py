@@ -16,6 +16,9 @@ the survey: the detection is only possible across passes.
     scripts/vram_report.py --out docs/gpu-capacity.md pass-f16.json pass-q8_0.json
     scripts/vram_report.py --self-check
 
+(docs/gpu-capacity.md is not generated yet - that is a later task on this
+branch. This script writes it; it does not exist until that task runs.)
+
 Exit codes:
     0  report written
     1  a pass could not be read, or the f16 pass was missing
@@ -68,25 +71,24 @@ FALLBACK_CASES = (
 )
 
 
-def self_check() -> list[str]:
-    problems: list[str] = []
-    for description, f16, quant, expected in FALLBACK_CASES:
-        got, _ = detect_fallback(f16, quant)
-        if got != expected:
-            problems.append(
-                f"detect_fallback {description!r}: got {got}, expected {expected} "
-                "— the detector is broken, so a setting that silently did "
-                "nothing would be reported as a working saving")
-    return problems
-
-
 def _key(row: dict) -> tuple:
     return (row["model"], row["num_ctx"])
+
+
+def _adjusted(card_used_mib: int | None, baseline_mib: int) -> int | None:
+    """nvidia-smi delta against this pass's own idle baseline - the measurement
+    of record for FALLBACK detection. card_used_mib is whole-card and includes
+    the baseline, so two passes taken minutes apart with different baselines
+    are not comparable until this is subtracted from each independently."""
+    if card_used_mib is None:
+        return None
+    return card_used_mib - baseline_mib
 
 
 def render(passes: list[dict]) -> str:
     base = next(p for p in passes if p["cache_type"] == "f16")
     base_rows = {_key(r): r for r in base["rows"]}
+    base_baseline = base["baseline_mib"]
     others = [p for p in passes if p["cache_type"] != "f16"]
 
     lines = [
@@ -113,24 +115,41 @@ def render(passes: list[dict]) -> str:
         "card is invalid on its face, which is how the first version of this",
         "table was produced.",
         "",
+        "The `FALLBACK` comparison below is baseline-adjusted — each pass's own",
+        "idle baseline is subtracted before the two passes are compared — but the",
+        "MiB figure shown in each cell is the absolute `nvidia-smi` reading, same",
+        "as what an operator sees on the card. Do not treat the two as the same",
+        "number.",
+        "",
         "## Fit, by cache type",
         "",
         "| Model | Context | f16 " + ("| " + " | ".join(p["cache_type"] for p in others) + " |" if others else "|"),
         "|---|---|---|" + "---|" * len(others),
     ]
 
-    for key in sorted(base_rows, key=lambda k: (k[0], k[1] if k[1] is not None else -1)):
+    other_rows = [{_key(r): r for r in entry["rows"]} for entry in others]
+    all_keys = set(base_rows)
+    for rows in other_rows:
+        all_keys |= set(rows)
+
+    for key in sorted(all_keys, key=lambda k: (k[0], k[1] if k[1] is not None else -1)):
         model, num_ctx = key
-        row = base_rows[key]
+        row = base_rows.get(key)
         ctx = num_ctx if num_ctx is not None else "n/a"
-        used = row["card_used_mib"]
-        cells = [f"{row['verdict']} ({used} MiB)" if used is not None else row["verdict"]]
-        for entry in others:
-            match = {_key(r): r for r in entry["rows"]}.get(key)
+        if row is None:
+            cells = ["not measured"]
+            used_adjusted = None
+        else:
+            used = row["card_used_mib"]
+            cells = [f"{row['verdict']} ({used} MiB)" if used is not None else row["verdict"]]
+            used_adjusted = _adjusted(used, base_baseline)
+        for entry, rows in zip(others, other_rows):
+            match = rows.get(key)
             if match is None:
                 cells.append("not measured")
                 continue
-            state, _ = detect_fallback(used, match["card_used_mib"])
+            match_adjusted = _adjusted(match["card_used_mib"], entry["baseline_mib"])
+            state, _ = detect_fallback(used_adjusted, match_adjusted)
             cell = f"{match['verdict']}"
             if match["card_used_mib"] is not None:
                 cell += f" ({match['card_used_mib']} MiB)"
@@ -153,6 +172,71 @@ def render(passes: list[dict]) -> str:
         "",
     ]
     return "\n".join(lines)
+
+
+def _pass(cache_type: str, baseline_mib: int, rows: list[dict],
+          flash_attention: bool = True, taken: str = "2026-08-11") -> dict:
+    return {"cache_type": cache_type, "baseline_mib": baseline_mib, "taken": taken,
+            "flash_attention": flash_attention, "rows": rows}
+
+
+def _row(model: str = "m/model:1b", num_ctx: int | None = 16384,
+         verdict: str = "MEASURED", card_used_mib: int | None = 20000) -> dict:
+    return {"model": model, "num_ctx": num_ctx, "verdict": verdict,
+            "card_used_mib": card_used_mib}
+
+
+def _marker_present(output: str) -> bool:
+    return "FALLBACK" in output and "⚠️" in output
+
+
+def _equal_column_counts(output: str) -> bool:
+    header = next(line for line in output.splitlines() if line.startswith("| Model"))
+    separator = next(line for line in output.splitlines() if line.startswith("|---"))
+    return header.count("|") == separator.count("|")
+
+
+# Each case is (description, passes, check). check receives the rendered
+# markdown and returns True if the case passed. Without this table `render`
+# has no test at all: FALLBACK_CASES only proves detect_fallback is correct in
+# isolation, not that render actually calls it correctly or displays what it
+# returns.
+RENDER_CASES = (
+    ("identical memory, same baseline, improved verdict must still warn",
+     [_pass("f16", 2000, [_row(verdict="SPILLED", card_used_mib=22000)]),
+      _pass("q8_0", 2000, [_row(verdict="MEASURED", card_used_mib=22000)])],
+     _marker_present),
+    ("a real saving with the same baseline must not warn",
+     [_pass("f16", 2000, [_row(card_used_mib=22000)]),
+      _pass("q8_0", 2000, [_row(card_used_mib=20000)])],
+     lambda out: not _marker_present(out)),
+    ("baseline drift masking no real change - the Finding 1 regression test",
+     [_pass("f16", 2400, [_row(card_used_mib=23000)]),
+      _pass("q8_0", 1920, [_row(card_used_mib=22520)])],
+     _marker_present),
+    ("f16-only pass keeps header and separator column counts equal",
+     [_pass("f16", 2000, [_row()])],
+     _equal_column_counts),
+)
+
+
+def self_check() -> list[str]:
+    problems: list[str] = []
+    for description, f16, quant, expected in FALLBACK_CASES:
+        got, _ = detect_fallback(f16, quant)
+        if got != expected:
+            problems.append(
+                f"detect_fallback {description!r}: got {got}, expected {expected} "
+                "— the detector is broken, so a setting that silently did "
+                "nothing would be reported as a working saving")
+    for description, passes, check in RENDER_CASES:
+        output = render(passes)
+        if not check(output):
+            problems.append(
+                f"render {description!r}: the rendered report did not satisfy "
+                "its expectation — render's own logic, not just "
+                "detect_fallback, can silently stop warning about a fallback")
+    return problems
 
 
 def main() -> int:

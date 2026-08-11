@@ -104,12 +104,20 @@ def check_roster(roster: list[dict], control_roster: tuple[str, ...]) -> list[st
                     "taken with")
             elif not DATE_RE.match(str(on)):
                 problems.append(f"{name}: measured_on {on!r} is not YYYY-MM-DD")
-            if mib <= 0:
+            if isinstance(mib, bool) or not isinstance(mib, (int, float)):
+                # A quoted number ("20000") is a realistic authoring mistake in
+                # YAML. Without this guard `mib <= 0` below raises TypeError -
+                # a traceback instead of a reported problem - the first time
+                # someone quotes it.
+                problems.append(
+                    f"{name}: measured_mib {mib!r} is not a number — it looks "
+                    "like it was written as a quoted string in the YAML")
+            elif mib <= 0:
                 problems.append(
                     f"{name}: measured_mib {mib} is not a measurement. A model "
                     "occupies memory, so zero means a placeholder was never "
                     "filled in from a survey run")
-            if tier == "terra" and mib >= CARD_TOTAL_MIB:
+            elif tier == "terra" and mib >= CARD_TOTAL_MIB:
                 problems.append(
                     f"{name}: measured_mib {mib} exceeds the card ({CARD_TOTAL_MIB} "
                     "MiB), which is not a possible measurement")
@@ -176,6 +184,20 @@ SELF_CHECK_CASES = (
     ("measurement larger than the card",
      [_ok_entry(measured_mib=30000, measured_on="2026-08-11")],
      ("example/model:1b",), "exceeds the card"),
+    ("measured_mib one MiB under the card total is accepted",
+     [_ok_entry(measured_mib=CARD_TOTAL_MIB - 1, measured_on="2026-08-11")],
+     ("example/model:1b",), None),
+    ("measured_mib one MiB over the card total is flagged",
+     [_ok_entry(measured_mib=CARD_TOTAL_MIB + 1, measured_on="2026-08-11")],
+     ("example/model:1b",), "exceeds the card"),
+    ("mbp tier above the terra card total is not flagged - different host, "
+     "different memory",
+     [_ok_entry(tier="mbp", measured_mib=CARD_TOTAL_MIB + 1000,
+                measured_on="2026-08-11")],
+     (), None),
+    ("measured_mib quoted as a YAML string is a reported problem, not a crash",
+     [_ok_entry(measured_mib="20000", measured_on="2026-08-11")],
+     ("example/model:1b",), "is not a number"),
     ("bad date format",
      [_ok_entry(measured_mib=20000, measured_on="11/08/2026")],
      ("example/model:1b",), "YYYY-MM-DD"),
