@@ -303,7 +303,7 @@
       "type": "timeseries",
       "title": "Release coverage",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 0, "y": 21 },
+      "gridPos": { "h": 7, "w": 9, "x": 0, "y": 21 },
       "fieldConfig": {
         "defaults": {
           "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 }
@@ -333,7 +333,7 @@
       "type": "timeseries",
       "title": "Scan coverage",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 7, "w": 12, "x": 12, "y": 21 },
+      "gridPos": { "h": 7, "w": 9, "x": 9, "y": 21 },
       "fieldConfig": {
         "defaults": {
           "custom": { "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10 }
@@ -356,6 +356,50 @@
           "datasource": { "type": "prometheus", "uid": "prometheus" },
           "expr": "homelab_scan_images_total",
           "legendFormat": "pinned total"
+        }
+      ]
+    },
+    {
+      "type": "stat",
+      "title": "Release check auth",
+      "description": "The token's positive control. 1 means the whole chain held (vault -> rendered /etc/homelab-release.env -> systemd EnvironmentFile -> wrapper -> controller -> the release task's environment); 0 means a link broke OR no vault_github_token is set at all, which is the documented default. Unauthenticated is 60 GitHub requests/hour against a run that costs ~45, so a silent drop to 0 reads as a slightly worse week rather than as a break — that is why it is charted. Sits beside release coverage because authentication is what decides whether those numbers are complete. NOT coloured red at 0: with no token configured, 0 is correct, and a permanently red tile is a tile nobody reads. No data means the run did not measure this (the series is gated on release_ok).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 7, "w": 6, "x": 18, "y": 21 },
+      "fieldConfig": {
+        "defaults": {
+          "noValue": "not measured",
+          "color": { "mode": "thresholds" },
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": { "text": "unauthenticated", "index": 0 },
+                "1": { "text": "authenticated", "index": 1 }
+              }
+            }
+          ],
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "text", "value": null },
+              { "color": "green", "value": 1 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "homelab_release_authenticated",
+          "instant": true
         }
       ]
     },
