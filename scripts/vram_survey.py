@@ -31,8 +31,10 @@ from __future__ import annotations
 import argparse
 import datetime
 import json
+import os
 import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -119,6 +121,68 @@ def self_check() -> list[str]:
                 f"baseline {description!r}: got {got}, expected {expected} — the "
                 "idle gate is broken and a survey taken against a busy card "
                 "would be accepted")
+    problems.extend(_self_check_probe_writable())
+    return problems
+
+
+def _self_check_probe_writable() -> list[str]:
+    """_probe_writable cases, kept apart from CLASSIFY_CASES/BASELINE_CASES
+    above: those two are pure functions checked against static tuples, but
+    _probe_writable does real filesystem I/O, so these cases run against a
+    real TemporaryDirectory that is created and torn down right here.
+    Nothing this writes may survive the check or land in the repo."""
+    problems: list[str] = []
+    with tempfile.TemporaryDirectory(prefix="vram_survey_self_check_") as tmp:
+        # Case 1 (the regression test): an existing file's content must
+        # survive the probe byte-for-byte. This fails against the old
+        # `open(path, "w")` implementation, which truncates the file the
+        # instant it opens even though the probe never writes anything.
+        existing = os.path.join(tmp, "pass-f16.json")
+        original = b'{"rows": ["a completed 45-minute survey pass"]}'
+        with open(existing, "wb") as handle:
+            handle.write(original)
+        result = _probe_writable(existing)
+        if result is not None:
+            problems.append(
+                f"_probe_writable existing writable file: got error {result!r}, "
+                "expected None")
+        with open(existing, "rb") as handle:
+            survived = handle.read()
+        if survived != original:
+            problems.append(
+                "_probe_writable existing writable file: content changed after "
+                f"the probe (was {len(original)} bytes, now {len(survived)} "
+                "bytes) — the probe truncated a completed survey pass just to "
+                "check the path was writable")
+
+        # Case 2: the containing directory does not exist.
+        missing_dir = os.path.join(tmp, "no-such-dir", "pass-f16.json")
+        result = _probe_writable(missing_dir)
+        if result is None:
+            problems.append(
+                "_probe_writable missing directory: got None, expected an "
+                "error — a bad --out directory would only surface after the "
+                "~45-minute survey ran")
+
+        # Case 3: the path is itself an existing directory.
+        as_dir = os.path.join(tmp, "a-directory")
+        os.mkdir(as_dir)
+        result = _probe_writable(as_dir)
+        if result is None:
+            problems.append(
+                "_probe_writable path is a directory: got None, expected an "
+                "error — writing rows there would fail deep into the survey "
+                "instead of before it starts")
+
+        # Case 4: a writable path that does not exist yet - the normal
+        # first-run case, which must not be mistaken for a missing directory.
+        fresh = os.path.join(tmp, "new-pass.json")
+        result = _probe_writable(fresh)
+        if result is not None:
+            problems.append(
+                f"_probe_writable new path in existing directory: got error "
+                f"{result!r}, expected None — the first run of a survey "
+                "targets a path that does not exist yet and must be allowed")
     return problems
 
 
@@ -233,12 +297,35 @@ def measure(host: str, model: str, num_ctx: int | None, timeout: int,
 
 
 def _probe_writable(path: str) -> str | None:
-    """Open the output path for writing before spending any GPU time on the
-    survey. A bad directory, a read-only path or a full disk used to surface
-    only after the entire ~45-minute grid had run, as a traceback with nothing
-    salvaged. Returns None if writable, or an error message otherwise."""
+    """Confirm the output path can be written before spending any GPU time on
+    the survey. A bad directory, a read-only path or a full disk used to
+    surface only after the entire ~45-minute grid had run, as a traceback
+    with nothing salvaged.
+
+    This must never disturb an existing file at `path`. An earlier version
+    opened it with `open(path, "w")`, which truncates the file the instant it
+    is called - before a single byte is written, and before the idle-card
+    baseline check that runs right after this probe. A re-run against a busy
+    card would pass this probe, truncate a previous completed pass sitting at
+    that path, and then abort at the baseline check - destroying a finished
+    45-minute survey to report that the GPU was busy. That is worse than the
+    slow failure this probe exists to prevent, so instead it probes
+    writability of the *containing directory* with a throwaway temp file that
+    is created and removed, and if `path` itself already exists it only
+    stats it - confirming it is a regular, writable file - without ever
+    opening it in a truncating mode. Returns None if writable, or an error
+    message otherwise."""
+    if os.path.isdir(path):
+        return f"cannot write to {path}: is a directory"
+    if os.path.exists(path):
+        if not os.path.isfile(path):
+            return f"cannot write to {path}: not a regular file"
+        if not os.access(path, os.W_OK):
+            return f"cannot write to {path}: not writable"
+        return None
+    directory = os.path.dirname(path) or "."
     try:
-        with open(path, "w", encoding="utf-8"):
+        with tempfile.NamedTemporaryFile(dir=directory, prefix=".vram_survey_probe_"):
             pass
     except OSError as exc:
         return f"cannot write to {path}: {exc}"
