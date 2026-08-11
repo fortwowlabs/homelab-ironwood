@@ -197,11 +197,26 @@ def measure(host: str, model: str, num_ctx: int | None, timeout: int,
         unload(host, model, timeout)
         return row
 
-    entry = ps_entry(host, model, timeout) or {}
-    size_total = entry.get("size")
-    size_vram = entry.get("size_vram")
-    state, evidence = classify(size_total, size_vram)
-    row.update(verdict=state, card_used_mib=nvidia_smi_used_mib(),
+    try:
+        entry = ps_entry(host, model, timeout) or {}
+        size_total = entry.get("size")
+        size_vram = entry.get("size_vram")
+        state, evidence = classify(size_total, size_vram)
+        card_used_mib = nvidia_smi_used_mib()
+    except urllib.error.HTTPError as exc:
+        row.update(verdict="INCONCLUSIVE", card_used_mib=None, size_total=None,
+                   size_vram=None,
+                   evidence=f"HTTP {exc.code} reading state after load: {exc.read()[:200]!r}")
+        unload(host, model, timeout)
+        return row
+    except Exception as exc:
+        row.update(verdict="INCONCLUSIVE", card_used_mib=None, size_total=None,
+                   size_vram=None,
+                   evidence=f"model loaded but could not read final state: {type(exc).__name__}: {exc}")
+        unload(host, model, timeout)
+        return row
+
+    row.update(verdict=state, card_used_mib=card_used_mib,
                size_total=size_total, size_vram=size_vram, evidence=evidence)
     unload(host, model, timeout)
     return row
