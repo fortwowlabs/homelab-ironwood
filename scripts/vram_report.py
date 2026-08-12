@@ -155,6 +155,16 @@ def render(passes: list[dict]) -> str:
                 cell += f" ({match['card_used_mib']} MiB)"
             if state == "FALLBACK":
                 cell += " ⚠️ **FALLBACK**"
+            elif state == "UNKNOWN":
+                # UNKNOWN used to render as a bare number, which is the exact
+                # thing this whole file argues against: a reading that means
+                # "these two passes cannot be compared" looked identical to one
+                # that means "compression worked". Real case that exposed it -
+                # nomic-embed-text measured 2216/2603/2708 MiB across f16, q8_0
+                # and q4_0, i.e. MORE memory with a smaller cache, which is not
+                # a thing compression does. Marked so it reads as unexplained
+                # rather than as an all-clear.
+                cell += " ⚠️ **UNKNOWN**"
             cells.append(cell)
         lines.append(f"| `{model}` | {ctx} | " + " | ".join(cells) + " |")
 
@@ -163,6 +173,20 @@ def render(passes: list[dict]) -> str:
         "`FALLBACK` means the quantized cache setting silently did nothing on",
         "this architecture — the memory did not move. It is not an error state",
         "you can see any other way.",
+        "",
+        "`UNKNOWN` means the quantized pass used **more** memory than `f16`,",
+        "which is not something compression does. Treat it as a reading that",
+        "could not be compared rather than as a result: it usually means the",
+        "model is too small for its cache to matter and the number is dominated",
+        "by allocator noise. Re-measure on an idle card before drawing anything",
+        "from it.",
+        "",
+        "A row that reads `SPILLED` under `f16` is a special case: its `f16`",
+        "figure was capped by the card, because the part that did not fit was",
+        "in system RAM and never counted. The memory delta for such a row",
+        "therefore **understates** the saving, sometimes badly. The verdict",
+        "changing from `SPILLED` to `MEASURED` is the real result there; the",
+        "MiB difference is not.",
         "",
         "## What this cannot tell you",
         "",
@@ -187,7 +211,13 @@ def _row(model: str = "m/model:1b", num_ctx: int | None = 16384,
 
 
 def _marker_present(output: str) -> bool:
-    return "FALLBACK" in output and "⚠️" in output
+    # Matches the cell marker, not the word: the prose below the table also
+    # says FALLBACK, so a bare substring test would be true of every report.
+    return "⚠️ **FALLBACK**" in output
+
+
+def _unknown_marker_present(output: str) -> bool:
+    return "⚠️ **UNKNOWN**" in output
 
 
 def _equal_column_counts(output: str) -> bool:
@@ -217,6 +247,20 @@ RENDER_CASES = (
     ("f16-only pass keeps header and separator column counts equal",
      [_pass("f16", 2000, [_row()])],
      _equal_column_counts),
+    # A quantized pass that used MORE memory than f16 is not a saving and not a
+    # fallback - it is a reading that cannot be explained, and detect_fallback
+    # returns UNKNOWN for it. render used to drop that state on the floor and
+    # print a bare number, so "these two passes cannot be compared" looked
+    # exactly like "compression worked". Found in the real 2026-08-12 survey:
+    # nomic-embed-text read 2216/2603/2708 MiB across f16/q8_0/q4_0.
+    ("a quantized pass using MORE memory must be marked, not shown bare",
+     [_pass("f16", 2000, [_row(card_used_mib=20000)]),
+      _pass("q8_0", 2000, [_row(card_used_mib=21500)])],
+     _unknown_marker_present),
+    ("an UNKNOWN cell must not be mislabelled as a FALLBACK",
+     [_pass("f16", 2000, [_row(card_used_mib=20000)]),
+      _pass("q8_0", 2000, [_row(card_used_mib=21500)])],
+     lambda out: not _marker_present(out)),
 )
 
 

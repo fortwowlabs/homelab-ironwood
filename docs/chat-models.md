@@ -15,16 +15,20 @@ orthogonalising the refusal direction out of the weights, rather than by
 retraining. "Heretic" in a model name refers to the tool that automates this;
 it is a category label now, not a brand.
 
-Measured 2026-08-09. Resident size and processor split come from `ollama ps`,
-GPU usage from `nvidia-smi`, one model at a time.
+**Sizes and fit are in [gpu-capacity.md](gpu-capacity.md), which is generated
+from a measurement run.** They used to be duplicated here and in
+`gpu-host.md`, and the two copies had drifted. The roster itself — which
+models exist, on which host, and why — is declared in
+`inventory/group_vars/all/models.yml` and gated by
+`tests/validate_model_roster.py`.
 
-| Model | Resident | Fits card? | Role |
-|---|---|---|---|
-| `huihui_ai/gemma-4-abliterated:26b` | 17 GB | ✅ 100% GPU | **Default.** Warmest prose — carries the personas |
-| `huihui_ai/Qwen3.6-abliterated:27b` | 18 GB | ✅ 100% GPU | Technical and agentic work |
-| `davidau-fable-fusion:27b-q4km` | 19 GB | ✅ 100% GPU | Creative writing, roleplay |
-| `huihui_ai/gemma-4-abliterated:31b` | 20 GB | ✅ 100% GPU **at `num_ctx` ≤ 16384** | Dense variant — stronger reasoning, see below |
-| `qwen3-coder:30b` | 21 GB | ✅ 100% GPU | Continue's default. Stock weights |
+| Model | Role |
+|---|---|
+| `huihui_ai/gemma-4-abliterated:26b` | **Default.** Warmest prose — carries the personas |
+| `huihui_ai/Qwen3.6-abliterated:27b` | Technical and agentic work |
+| `davidau-fable-fusion:27b-q4km` | Creative writing, roleplay |
+| `huihui_ai/gemma-4-abliterated:31b` | Dense variant — stronger reasoning, see below |
+| `qwen3-coder:30b` | Continue's default. Stock weights |
 
 ### One model at a time
 
@@ -33,25 +37,30 @@ reloads, costing roughly 20–30 seconds. That is the deliberate trade: an
 occasional pause in exchange for never running a weaker model than the card can
 handle.
 
-### `gemma-4-abliterated:31b` needs its context capped
+### `gemma-4-abliterated:31b` no longer needs its context capped
 
-At Ollama's default 32768 context this model reports `10%/90% CPU/GPU` — it
-spills to system RAM and generation slows by roughly an order of magnitude. Its
-first verification run hit a 30-minute timeout before completing on a second
-attempt with the model already warm.
+**Resolved 2026-08-12. The cap is gone.** It stood for months and the reason it
+stood was correct: at Ollama's default 32768 context this model reported
+`10%/90% CPU/GPU`, spilling to system RAM and slowing by roughly an order of
+magnitude. Its first verification run hit a 30-minute timeout. **The weights
+were never the problem; the KV cache was.**
 
-**The weights are not the problem; the KV cache is.** Measured 2026-08-10 on an
-idle card (1920 MiB baseline):
+The fix chosen at the time was to halve the context to 16384. The fix that
+actually addresses the cause is to shrink the cache instead of the
+conversation: the host now runs `OLLAMA_KV_CACHE_TYPE=q8_0`, and under it this
+model measures **100% GPU at the full 32768**. See
+[gpu-capacity.md](gpu-capacity.md) for the three-way f16/q8_0/q4_0 comparison
+and [gpu-host.md](gpu-host.md#the-kv-cache-is-quantized-on-this-host) for how
+the setting is applied and verified.
 
-| `num_ctx` | Resident | Processor | GPU used of 24564 MiB |
-|---|---|---|---|
-| 32768 | 21 GB | ⚠️ 10%/90% CPU/GPU | 23626 MiB |
-| **16384** | 20 GB | ✅ **100% GPU** | 23465 MiB |
-| 8192 | 20 GB | ✅ **100% GPU** | 22817 MiB |
+Worth keeping in mind, because it is the kind of thing that gets forgotten:
+**this depends on the host setting.** If the KV cache ever goes back to `f16`,
+this model spills again at 32768 and the 16384 cap has to come back with it.
+`models.yml` says so on the entry itself.
 
-So set `num_ctx` to 16384 on any persona or request using this model. It then
-runs entirely on the GPU with about 1 GiB to spare. Left at the default it
-still works — it is just slow enough that you will assume something is broken.
+The independent survey reproduced the original hand measurement exactly —
+`SPILLED` at 90% GPU under f16 — which is the main reason to trust the rest of
+the generated table.
 
 **Nothing warns you when this happens.** The model loads, answers, and only
 `ollama ps` shows the split. Check it after changing context on any model near

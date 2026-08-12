@@ -236,22 +236,70 @@ conversation. A green container proves nothing about whether inference works.
 
 ## What actually fits on the card
 
-Measured 2026-08-09, one model at a time, each stopped before the next was
-loaded. **Two of the six do not fit and silently spill to CPU** — Ollama does
-not warn, it just runs slowly, so `ollama ps` is the only place this is
-visible.
+**The table that used to live here has moved to
+[gpu-capacity.md](gpu-capacity.md), which is generated rather than
+hand-written.** There were two copies of it — one here, one in
+`chat-models.md` — and they had already drifted apart. Regenerate it with
+`scripts/vram_survey.py` and `scripts/vram_report.py`; do not re-add a copy.
 
-| Model | Resident | Processor | GPU used of 24564 MiB |
-|---|---|---|---|
-| `huihui_ai/gemma-4-abliterated:26b` | 17 GB | **100% GPU** | 20339 MiB |
-| `huihui_ai/Qwen3.6-abliterated:27b` | 18 GB | **100% GPU** | 20411 MiB |
-| `davidau-fable-fusion:27b-q4km` | 19 GB | **100% GPU** | 20800 MiB |
-| `qwen3-coder:30b` | 21 GB | **100% GPU** | 22634 MiB |
-| `huihui_ai/gemma-4-abliterated:31b` @ `num_ctx` 16384 | 20 GB | **100% GPU** | 23465 MiB |
-| `huihui_ai/gemma-4-abliterated:31b` @ default 32768 | 21 GB | ⚠️ 10%/90% CPU/GPU | 23626 MiB |
+The shape of the problem has not changed: exceeding the card does not fail, it
+silently spills layers to system RAM and slows generation by roughly an order
+of magnitude, and `ollama ps` is the only place that shows. The practical
+ceiling is around **21 GB resident**.
 
-The practical ceiling is around **21 GB resident**. Above that Ollama offloads
-layers to system RAM and generation slows by roughly an order of magnitude.
+### The KV cache is quantized on this host
+
+`OLLAMA_KV_CACHE_TYPE=q8_0` with `OLLAMA_FLASH_ATTENTION=1`, adopted
+2026-08-12 on the evidence in `gpu-capacity.md`. It frees 0.4–1.2 GB on every
+large model and — the reason it was adopted — makes
+`huihui_ai/gemma-4-abliterated:31b` fit entirely on the GPU at the full 32768
+context, which it could not do under `f16`. Its `num_ctx` cap is gone.
+
+`q4_0` was measured too and saves a further ~400 MB, but it changed no
+verdict that `q8_0` had not already changed, so the extra memory bought
+nothing while carrying more quality risk. Upstream calls `q8_0` no noticeable
+loss and `q4_0` small-to-medium.
+
+**The setting is server-global.** There is no per-model override, so this
+applies to the coding model as much as to chat, and changing it means
+restarting Ollama.
+
+#### Setting it is not the same as it taking effect
+
+This is the trap, and it is a sharper version of the `OLLAMA_HOST` warning
+further up this page. Writing the variable to the User or Machine environment
+and restarting Ollama **is not sufficient.** Windows builds a process's
+environment from the registry at *launch*, so anything started from a shell
+that predates the write — including `Start-Process` from such a shell — gets
+the old values. Observed 2026-08-12: the variables were set, Ollama was
+restarted, and the server still reported `OLLAMA_FLASH_ATTENTION:false` with
+an empty cache type.
+
+Set the variables in the launching process, then start the tray app:
+
+```powershell
+[Environment]::SetEnvironmentVariable('OLLAMA_FLASH_ATTENTION','1','User')
+[Environment]::SetEnvironmentVariable('OLLAMA_KV_CACHE_TYPE','q8_0','User')
+Get-Process ollama,'ollama app' -EA SilentlyContinue | Stop-Process -Force
+$env:OLLAMA_FLASH_ATTENTION='1'; $env:OLLAMA_KV_CACHE_TYPE='q8_0'
+Start-Process 'C:\Users\tv\AppData\Local\Programs\Ollama\ollama app.exe'
+```
+
+The User-scope write is what makes it survive a reboot; the `$env:` pair is
+what makes it apply *now*. **Verify, every time** — do not infer that it
+worked from having set it:
+
+```powershell
+Select-String 'server config' "$env:LOCALAPPDATA\Ollama\server.log" | Select-Object -Last 1
+```
+
+Require `OLLAMA_FLASH_ATTENTION:true` and `OLLAMA_KV_CACHE_TYPE:q8_0` in that
+line. Why this matters more than it looks: upstream documents that an
+unsupported architecture falls back to `f16` **without saying so**. A survey
+run against a server that never received the variable produces exactly the
+same output as a card that cannot do quantized cache — every model unchanged,
+`FALLBACK` across the board. The wrong conclusion, "this card does not support
+it", is the one you would reach and record.
 
 **Two lessons from producing this table**, both of which cost time:
 
