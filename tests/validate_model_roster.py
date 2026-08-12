@@ -28,6 +28,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 ROSTER_PATH = ROOT / "inventory/group_vars/all/models.yml"
 CONTROL_PATH = ROOT / "scripts/abliteration_control.py"
+VISION_CONTROL_PATH = ROOT / "scripts/vision_control.py"
 
 CARD_TOTAL_MIB = 24564
 TIERS = {"terra", "mbp"}
@@ -51,7 +52,8 @@ def _ok_entry(**overrides) -> dict:
     return entry
 
 
-def check_roster(roster: list[dict], control_roster: tuple[str, ...]) -> list[str]:
+def check_roster(roster: list[dict], control_roster: tuple[str, ...],
+                 vision_roster: tuple[str, ...] = ()) -> list[str]:
     """Return every problem with this roster. Empty list means valid."""
     problems: list[str] = []
     seen: set[str] = set()
@@ -141,6 +143,25 @@ def check_roster(roster: list[dict], control_roster: tuple[str, ...]) -> list[st
             f"{name}: in abliteration_control.py's ROSTER but not in the catalog "
             "as an abliterated terra chat/code model — the control would fail "
             "against a model nobody declared")
+
+    # Same shape of drift, different control. A model declared `role: vision`
+    # that nobody ever sends an image to is the worst case here, because a
+    # vision model whose image half did not load answers TEXT questions
+    # perfectly - it is indistinguishable from a working one until something
+    # asks it to look at a picture.
+    should_see = {
+        e["name"] for e in roster
+        if e.get("tier") == "terra" and e.get("role") == "vision"
+    }
+    for name in sorted(should_see - set(vision_roster)):
+        problems.append(
+            f"{name}: declared `role: vision` but not in vision_control.py's "
+            "ROSTER — nothing would ever verify it can actually see")
+    for name in sorted(set(vision_roster) - should_see):
+        problems.append(
+            f"{name}: in vision_control.py's ROSTER but not in the catalog as a "
+            "terra vision model — the control would fail against a model nobody "
+            "declared")
     return problems
 
 
@@ -208,9 +229,66 @@ SELF_CHECK_CASES = (
 )
 
 
+def _seer(**overrides) -> dict:
+    """A minimal valid vision entry, for the vision cross-check cases.
+
+    `default` is set because the exactly-one-default rule is global and would
+    otherwise fire on every case here and mask the rule under test.
+    """
+    entry = _ok_entry(name="seer:1b", role="vision", abliterated=False,
+                      alignment_exception="stock weights, deliberately aligned")
+    entry.update(overrides)
+    return entry
+
+
+# The vision cross-check needs its own table because it varies a third
+# argument the cases above do not. Same reasoning as SELF_CHECK_CASES: without
+# these, both directions of the vision drift check could be deleted and this
+# gate would still pass everything.
+# Each case is (description, roster, vision_roster, expected substring or None).
+VISION_SELF_CHECK_CASES = (
+    ("a declared vision model that the control never asks about",
+     [_seer()], (), "not in vision_control.py"),
+    ("declared and controlled is fine",
+     [_seer()], ("seer:1b",), None),
+    ("vision control names a model the catalog does not declare",
+     [_seer()], ("seer:1b", "ghost-eye:1b"),
+     "not in the catalog as a terra vision model"),
+    ("a non-vision model is not expected in the vision control",
+     [_ok_entry()], (), None),
+)
+
+
+def _matching_control(roster: list[dict]) -> tuple[str, ...]:
+    """The abliteration roster that would satisfy `roster`.
+
+    Deliberately mirrors check_roster's own selection so the vision cases can
+    vary ONE thing. Without it every vision case would also trip the
+    abliteration cross-check and the substring assertions would pass for the
+    wrong reason.
+    """
+    return tuple(
+        e["name"] for e in roster
+        if e.get("tier") == "terra" and e.get("abliterated") is True
+        and e.get("role") in {"chat", "code"})
+
+
 def self_check() -> list[str]:
     """Prove each rule still fires. A gate must not be able to fail silently."""
     problems: list[str] = []
+    for description, roster, vision, expected in VISION_SELF_CHECK_CASES:
+        got = check_roster(roster, _matching_control(roster), vision)
+        if expected is None:
+            if got:
+                problems.append(
+                    f"vision self-check {description!r}: expected no problems, "
+                    f"got {got}")
+        elif not any(expected in p for p in got):
+            problems.append(
+                f"vision self-check {description!r}: expected a problem "
+                f"containing {expected!r}, got {got or 'no problems at all'} — "
+                "the vision drift check is not firing, so a model nobody sends "
+                "an image to would pass as verified")
     for description, roster, control, expected in SELF_CHECK_CASES:
         got = check_roster(roster, control)
         if expected is None:
@@ -235,19 +313,19 @@ def load_roster() -> list[dict]:
     return roster
 
 
-def load_control_roster() -> tuple[str, ...]:
-    """Read the ROSTER tuple out of abliteration_control.py without importing it.
+def load_control_roster(path: Path = CONTROL_PATH) -> tuple[str, ...]:
+    """Read the ROSTER tuple out of a control script without importing it.
 
     Importing would be simpler but that script talks to the network at import
     time in future revisions; parsing the literal keeps this gate offline.
     """
-    tree = ast.parse(CONTROL_PATH.read_text(encoding="utf-8"))
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     for node in tree.body:
         if isinstance(node, ast.Assign) and any(
                 isinstance(t, ast.Name) and t.id == "ROSTER" for t in node.targets):
             return tuple(ast.literal_eval(node.value))
     raise SystemExit(
-        f"{CONTROL_PATH}: no ROSTER assignment found. It was renamed or removed, "
+        f"{path}: no ROSTER assignment found. It was renamed or removed, "
         "and this cross-check silently stopped covering anything")
 
 
@@ -259,7 +337,8 @@ def main() -> int:
             print(f"  {problem}", file=sys.stderr)
         return 1
 
-    problems = check_roster(load_roster(), load_control_roster())
+    problems = check_roster(load_roster(), load_control_roster(),
+                            load_control_roster(VISION_CONTROL_PATH))
     if problems:
         print(f"{ROSTER_PATH.name}: {len(problems)} problem(s)", file=sys.stderr)
         for problem in problems:
