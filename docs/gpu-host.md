@@ -50,6 +50,36 @@ Set it under *System Properties → Environment Variables → System variables*,
 not in a shell — Ollama runs as a background service and will not see a
 variable set in one terminal. Restart Ollama afterwards.
 
+**That advice is necessary but not sufficient, and the gap bit us.** See
+[the KV cache section](#setting-it-is-not-the-same-as-it-taking-effect) below:
+writing the variable to the registry does not reach a process launched from a
+shell that predates the write. The same failure applies to `OLLAMA_HOST`.
+
+### Minimum version: 0.32.9
+
+`muse-glimmer:30b` needs **Ollama ≥ 0.32.9** (released 2026-08-11, the first
+build handling it). On 0.32.6 the pull fails with a bare *"Please download the
+latest version"* and no mention of which model or why.
+
+The upgrade is a per-user install — `OllamaSetup.exe /VERYSILENT /NORESTART`
+into `%LOCALAPPDATA%\Programs\Ollama`, no administrator needed. Two things
+follow it, neither optional:
+
+- **Re-apply and verify the KV cache setting**, which the installer drops.
+- **Re-check the firewall.** The installer creates `ollama.exe` rules scoped
+  to `Remote: Any` on the Private and Public profiles, which override the
+  narrow LAN rule entirely. They were found enabled again on 2026-08-12 and
+  disabled by hand:
+
+  ```powershell
+  Get-NetFirewallRule -DisplayName "ollama.exe" | Disable-NetFirewallRule
+  ```
+
+  That needs an elevated shell. Confirm afterwards from a **tailnet peer**
+  that `http://100.107.5.66:11434/api/tags` stops answering while
+  `http://192.168.1.40:11434/api/tags` still does — both halves, because the
+  first alone cannot distinguish a narrowed scope from a dead service.
+
 Pull the four chat models Open WebUI offers, the coding model, and the two
 small models Continue needs for autocomplete and embeddings:
 
@@ -58,6 +88,8 @@ small models Continue needs for autocomplete and embeddings:
 ollama pull huihui_ai/gemma-4-abliterated:26b     # default
 ollama pull huihui_ai/Qwen3.6-abliterated:27b     # technical work
 ollama pull huihui_ai/gemma-4-abliterated:31b     # see the CPU-spill warning
+# Vision + agentic. NEEDS OLLAMA >= 0.32.9 - see the version note below.
+ollama pull muse-glimmer:30b                      # the only model here that can see
 # Coding
 ollama pull qwen3-coder:30b                       # Continue chat/edit/apply
 # (an abliterated coder was tried here and removed - see "What actually fits")
@@ -288,6 +320,16 @@ Start-Process 'C:\Users\tv\AppData\Local\Programs\Ollama\ollama app.exe'
 The User-scope write is what makes it survive a reboot; the `$env:` pair is
 what makes it apply *now*. **Verify, every time** — do not infer that it
 worked from having set it:
+
+**An Ollama upgrade silently reverts this.** Measured on 2026-08-12 upgrading
+0.32.6 → 0.32.9: the installer relaunches Ollama from its own environment,
+which does not carry the User-scope variables, and the server came back
+reporting `OLLAMA_FLASH_ATTENTION:false` with an empty cache type. Nothing
+errored. The visible consequence would have been `gemma-4-abliterated:31b`
+quietly spilling again at 32768 — an order of magnitude slower — while
+`models.yml` and `chat-models.md` both assert it fits. So the rule is broader
+than "verify after changing it": **verify after anything that restarts Ollama**,
+upgrades included.
 
 ```powershell
 Select-String 'server config' "$env:LOCALAPPDATA\Ollama\server.log" | Select-Object -Last 1
