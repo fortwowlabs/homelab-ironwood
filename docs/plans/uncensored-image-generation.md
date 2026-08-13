@@ -256,6 +256,63 @@ load, unlike the `.ckpt` pickles it replaced, and the checksum above pins
 exactly which bytes were reviewed. The alternative is a CivitAI API token and a
 download from source.
 
+## Requested but deferred: MiniMax H3 and Qwen Image Edit
+
+**Requested 2026-08-12. Deliberately not started, and the reason is the same
+for both: they would be added to a pipeline that has never worked.**
+
+The defect at the top of this page is still live — `COMFYUI_WORKFLOW_NODES` is
+unset, so Open WebUI submits the default workflow verbatim with a checkpoint
+name that does not exist on the host, and ComfyUI rejects it at validation.
+ComfyUI's `/history` holds exactly one entry ever, hand-submitted during setup.
+**Fix the node mapping first.** A better checkpoint behind a broken mapping
+produces exactly the same nothing.
+
+### MiniMax H3 — image *and* video generation
+
+Video is a new axis for this estate; nothing here generates it today. Answer
+these before committing, and answer the first by measuring:
+
+- **VRAM, measured rather than claimed.** The card holds one 17–21 GB chat
+  model, and `docs/gpu-capacity.md` puts the remaining headroom at roughly
+  3.5–4.5 GiB with one resident under q8_0. Chroma1-HD was already rejected on
+  this page for needing ~13.4 GB; a video model is unlikely to do better.
+  Expect the honest answer to be "stop the chat model first", which is the
+  conclusion Chroma reached.
+- **Where it runs.** ComfyUI, a separate runtime, or its own server? Open WebUI
+  holds exactly one ComfyUI workflow at a time and its per-request dropdown can
+  only switch between checkpoints of the same architecture — the constraint
+  that already stopped Pony and Chroma coexisting. A video model almost
+  certainly cannot share the image workflow.
+- **Storage and retention.** Video output is large and slow. Neither the backup
+  paths nor a retention story has been thought about.
+
+**One model on this host already fits alongside image generation:**
+`huihui_ai/qwen3-vl-abliterated:8b` at ~7.5 GB above idle plus SDXL's ~6.5 GB
+fits inside 24 GB. That is the only coexistence this estate has measured, and
+it is worth knowing before assuming a heavier stack will also fit.
+
+### Qwen Image Edit — a different feature, not a checkpoint swap
+
+Image *editing* uses Open WebUI's separate `IMAGES_EDIT_COMFYUI_*` settings,
+listed under "Not investigated" below and never examined here. So this needs
+that config path understood first — but it is plausibly **independent** of the
+generation pipeline rather than downstream of it. Worth checking whether
+editing can be made to work even while generation is broken; if so it is a
+smaller, self-contained piece and a better first move than H3.
+
+### Order that makes sense
+
+1. Fix `COMFYUI_WORKFLOW_NODES` so generation works at all — everything else
+   on this page is blocked behind it.
+2. Qwen Image Edit — smaller, separate config surface, possibly independent.
+3. MiniMax H3 — largest unknown, needs its own VRAM measurements and possibly
+   its own runtime.
+
+`scripts/vram_survey.py` measures Ollama models only. Anything here needs its
+footprint taken by hand with `nvidia-smi`, against an idle card, recording the
+baseline first — the same discipline `docs/gpu-capacity.md` documents.
+
 ## Not investigated
 
 - **WAI-Illustrious v17** — anime/illustration specialist, SDXL-based ~7 GB.
