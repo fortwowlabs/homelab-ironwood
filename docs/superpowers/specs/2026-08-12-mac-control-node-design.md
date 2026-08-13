@@ -144,25 +144,41 @@ through a play is a mechanism that can put it in a log, against CLAUDE.md's
 standing rule. This is the same honesty CLAUDE.md already applies: the
 commit pins the code, not the secrets.
 
-**`mac-control` generates its own ed25519 keypair locally.** The private key
-never crosses the network and exists nowhere else, and it can be revoked
-independently without touching the working laptop's access.
+**`mac-control` reuses the existing admin SSH key.** This reverses the
+original design, and the reason is worth recording because it was found by
+building the thing rather than by thinking about it.
 
-That requires closing a latent gap. `admin_ssh_pubkey` is currently a
-**scalar**, referenced in exactly one place —
-[roles/pve_vm/templates/user-data.yaml.j2](../../../roles/pve_vm/templates/user-data.yaml.j2)
-line 18, cloud-init, at *provision* time. Nothing manages `authorized_keys`
-on a running VM, so today adding or rotating a key means re-provisioning the
-VM, and revoking one is impossible without doing so again.
+The intent was for `mac-control` to generate its own ed25519 keypair, so the
+private key never crossed the network and could be revoked independently.
+That needed `authorized_keys` managed on *running* VMs with
+`exclusive: true`, so that deleting a key from the list actually revoked it.
 
-So:
+**`exclusive: true` is not available on that file.**
+[roles/svc_infra/tasks/verify-runner.yml](../../../roles/svc_infra/tasks/verify-runner.yml)
+already authorizes a second key onto all three service VMs — a keypair
+generated on svc-infra, pushed by `delegate_to`, scoped with
+`key_options: 'from="192.168.1.32"'`, and added `state: present`. An
+exclusive task on the same file would:
 
-- `admin_ssh_pubkey` becomes `admin_ssh_pubkeys`, a list.
-- `service_vm` gains an `authorized_keys` task, managing keys on running VMs.
-- `pve_vm`'s cloud-init template renders from the same list.
+1. strip that key on every `make dl`, silently killing the nightly
+   verification runner; and
+2. put two roles in a fight over one file, so **no play could report
+   `changed=0` again** — destroying the signal CLAUDE.md leans on hardest.
 
-This is deliberate scope creep, accepted because the alternative design
-makes key rotation require rebuilding three VMs.
+So the key work is dropped. `mac-control` uses the working laptop's key.
+
+What survives: `admin_ssh_pubkey` becomes `admin_ssh_pubkeys`, a list,
+rendered key-by-key by `pve_vm`'s cloud-init template. That is worth keeping
+on its own — the provisioning path now accepts several keys instead of one.
+
+**What does not survive, stated plainly:** nothing manages `authorized_keys`
+on a running VM. Adding or rotating a key still means re-provisioning, and
+revoking one is still impossible without doing so. `mac-control` therefore
+holds a copy of an existing private key rather than one of its own, and
+cannot be de-authorized independently. Closing that properly needs admin
+keys in their own `AuthorizedKeysFile`, which means an sshd change on three
+production VMs — its own spec, not a step buried in this one. It is listed
+under follow-ups.
 
 ### The idempotence discipline
 
@@ -443,8 +459,8 @@ than automated.
 `admin_ssh_pubkeys`); `inventory/group_vars/all/infra-apps.yml` (Open WebUI
 `OLLAMA_BASE_URLS`, gating); `site.yml` (control_nodes play, deploy lock
 pre_tasks); `verify.yml` (control_nodes checks); `preflight.yml`
-(address-uniqueness covers `control_nodes`); `roles/service_vm`
-(`authorized_keys` task); `roles/pve_vm/templates/user-data.yaml.j2`
+(address-uniqueness covers `control_nodes`);
+`roles/pve_vm/templates/user-data.yaml.j2`
 (pubkey list); `requirements.yml` (`community.general`, pinned); `Makefile`
 (`make mac`, `make deploy-unlock`); `README.md`; `CLAUDE.md` (two control
 nodes, deploy lock, `main`-push rule); `docs/gpu-host.md` (bind correction).
@@ -471,3 +487,10 @@ nodes, deploy lock, `main`-push rule); `docs/gpu-host.md` (bind correction).
 - **An unprivileged monitoring account on the VMs** — would create the
   read-only tier that does not exist today, and would let a future design
   withhold root SSH from an always-on box.
+- **Admin keys in their own `AuthorizedKeysFile`** — `/etc/ssh/authorized_keys.d/%u`,
+  owned exclusively, leaving the verify-runner key in `~/.ssh/authorized_keys`
+  untouched. This is what would make deleting a line actually revoke a key,
+  and it is the prerequisite for `mac-control` ever holding a key of its own.
+  It changes sshd on all three service VMs — the service Ansible connects
+  over — so it needs its own spec, its own `sshd -t` gate, and its own
+  recovery plan.

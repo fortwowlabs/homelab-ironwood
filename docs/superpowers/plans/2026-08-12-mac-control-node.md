@@ -505,7 +505,21 @@ In `site.yml`, update the prerequisite comment on line 23:
 Run: `.venv/bin/python tests/validate_admin_keys.py`
 Expected: PASS — "admin ssh keys: OK (2 cases, including that a one-key list renders one key)"
 
-- [ ] **Step 5: Manage authorized_keys on running VMs**
+> **RULING 2026-08-13 — Steps 5 and 6 are CANCELLED. Do not implement them.**
+>
+> `exclusive: true` is not available on `~/.ssh/authorized_keys`.
+> `roles/svc_infra/tasks/verify-runner.yml` already pushes a second key there
+> (generated on svc-infra, `state: present`, scoped
+> `from="192.168.1.32"`). An exclusive task would strip it on every
+> `make dl`, killing the nightly verification runner, and would put two roles
+> in a fight over one file so **no play could report `changed=0` again**.
+>
+> Task 2 ends after Step 4, plus the Step 7 commit covering Steps 1-4 only.
+> `mac-control` uses the working laptop's existing key. Managing keys on
+> running VMs needs admin keys in their own `AuthorizedKeysFile`, which is a
+> separate spec — see the spec's follow-ups.
+
+- [ ] ~~**Step 5: Manage authorized_keys on running VMs**~~ (CANCELLED)
 
 Create `roles/service_vm/tasks/authorized-keys.yml`:
 
@@ -537,21 +551,14 @@ In `roles/service_vm/tasks/main.yml`, add this import immediately after the `Val
   tags: [files]
 ```
 
-- [ ] **Step 6: Validate and deploy to one VM**
-
-Run: `make validate`
-Expected: PASS.
-
-Run: `make dl`
-Expected: `changed=1` on the authorized_key task the first time (cloud-init's file has a different trailing form), `changed=0` on a second `make dl`.
-
-**Confirm the key still works before moving on:** `ssh straderb@192.168.1.31 true` must succeed. An `exclusive: true` mistake locks you out of the VM, and the deploy will happily report success while doing it.
+- [ ] ~~**Step 6: Validate and deploy to one VM**~~ (CANCELLED — see the ruling above; no deploy is needed, since nothing about a running VM changes)
 
 - [ ] **Step 7: Commit**
 
+Run `make validate` first — it must pass.
+
 ```bash
 git add inventory/group_vars/all/main.yml roles/pve_vm/templates/user-data.yaml.j2 \
-        roles/service_vm/tasks/authorized-keys.yml roles/service_vm/tasks/main.yml \
         site.yml tests/validate_admin_keys.py
 git commit -m "feat: manage admin SSH keys as a list on running VMs
 
@@ -3166,16 +3173,21 @@ and `make mac` fails with instructions if any is missing.
    Neither is ever written, read or logged by the role. The vault password
    cannot live in the vault, and any mechanism threading it through a play is
    a mechanism that can put it in a log.
-8. **Generate this machine's own keypair** and add the public half to
-   `admin_ssh_pubkeys` in `inventory/group_vars/all/main.yml`, then
-   `make deploy` from the working laptop:
+8. **Copy the working laptop's admin SSH private key** to `~/.ssh/` here, so
+   this machine can reach the service VMs.
 
-   ```bash
-   ssh-keygen -t ed25519 -C "mac-control" -f ~/.ssh/id_ed25519
-   ```
+   This is not what the design originally wanted. The intent was a keypair
+   generated here that never left the machine and could be revoked on its
+   own — but that needs `authorized_keys` managed exclusively on running VMs,
+   and `roles/svc_infra/tasks/verify-runner.yml` already owns a key in that
+   same file non-exclusively. An exclusive task would strip the verification
+   runner's key and make `changed=0` unreachable.
 
-   The private key is generated here and never leaves. Revoking it is one
-   deleted line plus a deploy.
+   So: **this machine holds a copy of an existing private key and cannot be
+   de-authorized on its own.** Revoking its access means rotating the admin
+   key everywhere, which today means re-provisioning the VMs. Fixing that
+   properly is a follow-up spec (admin keys in their own
+   `AuthorizedKeysFile`).
 9. **Install the superpowers plugin** — `claude`, then `/plugin`.
 
 ## Routine operation
