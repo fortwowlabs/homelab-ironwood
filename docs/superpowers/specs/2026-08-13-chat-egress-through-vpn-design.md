@@ -242,6 +242,21 @@ rendered rule matches the rendered unit name.
 Recorded because it was asked for and because the absence of this list is what
 made the chat gap surprising.
 
+**Read the two halves of this appendix differently.** The tiering below was
+verified from the repo: `service_guarded_egress`, the backstop's output chain,
+the netns assertions, and Syncthing's host networking with no relay or
+discovery configuration are all facts on disk. **The per-service traffic column
+is not.** It is inferred from each product's documented default behavior and was
+confirmed against neither the pinned digests nor the running containers. Treat
+it as a list of things to go and check, not as a measurement — several entries
+would evaporate if the feature turns out to be disabled here.
+
+The cheap way to settle it is a consequence of this very change: once the jail
+proxy is running, its log is an authoritative record of every destination chat
+attempts. The same trick — point a service at a logging proxy and read what it
+asks for — answers the question for any row below, and is worth doing before
+anyone acts on this table.
+
 **Tier 1 — VPN by construction.** The nine containers in svc-download's `vpn`
 netns. Only route is `wg0`, `ip_forward=0`, and `vpn-netns-up.sh` fails the unit
 if any unexpected route appears.
@@ -257,7 +272,7 @@ directly:
 | Service | Traffic |
 |---|---|
 | syncthing | Host networking, no relay/discovery config in the repo, so stock defaults: announces to public discovery servers, can relay through third parties. Continuous and identifying. |
-| open-webui | Result-page fetches (this spec), RAG embedding-model downloads, version checks |
+| open-webui | Result-page fetches — the subject of this spec, and the one row here that is measured rather than inferred. Upstream defaults also govern its RAG embedding backend and its update checking, neither of which is set in the catalog and neither of which was confirmed to reach the network at all. |
 | home-assistant | Host networking; integration clouds |
 | vaultwarden | Website icon fetching — contacts the favicon of every domain held in the vault |
 | mealie | Recipe import by URL; same shape as the chat gap |
