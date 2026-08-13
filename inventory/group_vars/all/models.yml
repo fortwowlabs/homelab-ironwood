@@ -91,6 +91,28 @@ model_roster:
       reasoning model, so a small num_predict spends the whole budget in the
       `thinking` field and returns an empty `response` - budget ~1200.
 
+  - name: huihui_ai/qwen3-vl-abliterated:8b
+    tier: terra
+    role: vision
+    abliterated: true
+    measured_mib: 10040
+    measured_on: "2026-08-12"
+    num_ctx: 32768
+    why: >-
+      Uncensored vision, which muse-glimmer is not - Glimmer is stock Meta and
+      refuses. That is the whole reason both are here: they are the same
+      capability with opposite alignment, and on a host whose entire chat
+      roster is deliberately abliterated, a vision model that refuses is a gap.
+      The 8B was chosen over the 30B/32B builds because reading documents is
+      the use case and the 8B leads DocVQA. Verified with
+      scripts/vision_control.py, which it passed while spacing the string as
+      "HOME LAB - VISION - OK - 4711".
+
+      At 10040 MiB it cannot sit alongside a 20 GB chat model - that argument
+      for the small build does not survive measurement. What it CAN share the
+      card with is image generation: ~7.5 GB above idle plus SDXL's ~6.5 GB
+      fits, which no other vision option here allows.
+
   - name: qwen3-coder:30b
     tier: terra
     role: code

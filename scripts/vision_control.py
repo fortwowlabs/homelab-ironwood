@@ -12,8 +12,11 @@ So this sends an image containing a string whose value is known in advance and
 requires that string back. A model that loaded is not a model that can see.
 
     scripts/vision_control.py --roster
-    scripts/vision_control.py --model huihui_ai/qwen3-vl-abliterated:8b
+    scripts/vision_control.py huihui_ai/qwen3-vl-abliterated:8b   # positional
     scripts/vision_control.py --self-check
+
+Models are positional, matching abliteration_control.py. Add
+`--host http://localhost:11434` when running on the GPU host itself.
 
 Exit codes:
     0  every model asked read the fixture correctly
@@ -58,6 +61,7 @@ PROMPT = "Read the text in this image. Reply with only that text, nothing else."
 # --model instead.
 ROSTER = (
     "muse-glimmer:30b",
+    "huihui_ai/qwen3-vl-abliterated:8b",
 )
 
 
