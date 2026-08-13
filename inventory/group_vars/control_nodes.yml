@@ -1,0 +1,11 @@
+---
+# macOS admin accounts require a password for sudo. `| default(omit)` keeps
+# vault-less runs (which verify.yml supports) from failing on an undefined
+# variable — they fail on the become prompt instead, which is an honest
+# failure rather than a template error.
+ansible_become_password: "{{ vault_mac_become_password | default(omit) }}"
+
+# Absolute paths on the control node. Everything the role manages lives under
+# these two, so a rebuild has one place to look.
+mac_control_home: /Users/straderb
+mac_control_checkout: /Users/straderb/homelab-iac

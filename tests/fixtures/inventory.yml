@@ -32,3 +32,9 @@ all:
       vars:
         ansible_user: fixture
         ansible_become: false
+    control_nodes:
+      hosts:
+        mac-control:
+          ansible_connection: local
+          ansible_host: 127.0.0.4
+          ansible_python_interpreter: "{{ ansible_playbook_python }}"

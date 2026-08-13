@@ -307,3 +307,12 @@ vault_hc_ping_scan:      ""
 # (read-only)", is the right shape. Granting more buys nothing and widens what
 # a leak would cost.
 vault_github_token: ""
+
+# --- mac-control (the always-on second control node) ---------------------
+# straderb's macOS login password. Needed because macOS admin accounts
+# require a password for sudo and this repo does not weaken that with a
+# NOPASSWD sudoers entry.
+vault_mac_become_password: "REPLACE_macos_login_password"
+# Tailscale auth key for enrolling mac-control. Generate a reusable,
+# non-ephemeral key in the Tailscale admin console.
+vault_tailscale_auth_key: "REPLACE_tskey_auth_value"

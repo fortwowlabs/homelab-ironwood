@@ -56,7 +56,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 
 .PHONY: help deps deps-dev validate validate-tools validate-syntax \
 	validate-ansible validate-yaml validate-shell validate-links \
-	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
+	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve mac \
 	check check-diff verify verify-disruptive scan image-digest image-check image-bump \
 	release-check release-report image-release drift reconcile access ping lint \
 	vault-edit clean
@@ -134,6 +134,7 @@ validate-catalog:
 
 validate-provisioning:
 	$(PYTHON) tests/validate_pve_states.py
+	$(PYTHON) tests/validate_preflight_addressing.py
 
 validate-systemd:
 	$(PYTHON) tests/validate_systemd_units.py
@@ -179,6 +180,9 @@ infra: ## Configure and verify the infra VM
 
 pve: ## Configure and verify hypervisor monitoring (disk, SMART, ZFS events)
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit pve_mon_hosts $(ARGS)
+
+mac: ## Configure and verify the always-on control node (mac-control)
+	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit control_nodes $(ARGS)
 
 check: ## Safe check mode without displaying file diffs
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --check $(ARGS)
