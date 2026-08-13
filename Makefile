@@ -135,6 +135,11 @@ validate-catalog:
 validate-provisioning:
 	$(PYTHON) tests/validate_pve_states.py
 	$(PYTHON) tests/validate_preflight_addressing.py
+# Sits with the provisioning gates because the cloud-init template is what it
+# renders, but it guards the running VMs too: the same list drives an
+# exclusive authorized_keys task, so a template that quietly drops a key here
+# is a revocation nobody asked for there.
+	$(PYTHON) tests/validate_admin_keys.py
 
 validate-systemd:
 	$(PYTHON) tests/validate_systemd_units.py

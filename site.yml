@@ -20,7 +20,7 @@
 #     allowlist if it predates this VM)
 #   - PVE pool `homelab-svc` + scoped API token created; vault filled
 #   - Mullvad configs generated; vault filled
-#   - admin_ssh_pubkey set in inventory/group_vars/all/main.yml
+#   - admin_ssh_pubkeys set in inventory/group_vars/all/main.yml (a LIST)
 #   - vault_romm_* filled (RomM DB + optional metadata keys)
 # After deploy, complete the DNS and Caddy CA steps in docs/deployment.md.
 # ============================================================================

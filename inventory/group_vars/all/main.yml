@@ -121,9 +121,21 @@ rocky_image_name: "Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2"
 rocky_image_url:  "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2"
 rocky_image_sha256: "9fc9e9ff16888bb68ac39b0392e25c9c92684d50c85f1cce6ab549363bbc4b48"
 
-# --- Admin SSH key injected into both VMs (public key CONTENT, not a path) ---
-# Paste your MBP ed25519 public key here (safe — it's a public key):
-admin_ssh_pubkey: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMjZAEI+FfdW74JRrWjUbSK9HmF7AVHaa8qlYsN9YSLB straderb@Mac.fort.wow"
+# --- Admin SSH keys injected into every VM (public key CONTENT, not paths) ---
+# A LIST, not a scalar. Every entry is installed on each service VM on every
+# run by roles/service_vm/tasks/authorized-keys.yml, and baked into cloud-init
+# at provision time by roles/pve_vm.
+#
+# It became a list on 2026-08-12 so mac-control could hold a key of its own —
+# generated on that machine, never copied, and revocable by deleting one line
+# here and running `make deploy`. While this was a scalar consumed only by
+# cloud-init, adding a key meant rebuilding a VM and revoking one was not
+# possible at all.
+#
+# Removing an entry REVOKES it: the authorized_keys task is exclusive.
+admin_ssh_pubkeys:
+  # The working laptop — the only machine that merges to main.
+  - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMjZAEI+FfdW74JRrWjUbSK9HmF7AVHaa8qlYsN9YSLB straderb@Mac.fort.wow"
 
 # --- Mullvad in-tunnel DNS (public constant, not a secret) ---
 mullvad_dns: "10.64.0.1"

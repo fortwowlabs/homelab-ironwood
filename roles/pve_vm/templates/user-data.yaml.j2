@@ -15,7 +15,9 @@ users:
     sudo: ALL=(ALL) NOPASSWD:ALL
     lock_passwd: true
     ssh_authorized_keys:
-      - {{ admin_ssh_pubkey }}
+{% for pubkey in admin_ssh_pubkeys %}
+      - {{ pubkey }}
+{% endfor %}
   # Service account matching TrueNAS dataset ownership. No login, no keys.
   - name: homelab
     uid: {{ svc_uid }}
