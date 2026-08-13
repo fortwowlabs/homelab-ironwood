@@ -745,49 +745,77 @@ Make it executable: `chmod +x scripts/deploy-lock.sh`
 Run: `.venv/bin/python tests/validate_deploy_lock.py`
 Expected: PASS — "deploy lock: OK (4 cases, ...)"
 
-- [ ] **Step 5: Wire it into site.yml**
+- [ ] **Step 5: Wrap the deploy targets, NOT site.yml**
 
-Add a new play at the very top of `site.yml`, immediately after the header comment block and before `- name: Provision service VMs`:
+**Do not put the lock in `site.yml`.** An earlier draft of this plan did, as a play targeting `pve_mon_hosts` with the release in the `localhost` announce play. That is broken: every scoped target (`make dl`, `media`, `infra`, `mac`) passes `--limit`, so both plays match no hosts and are skipped entirely. The lock would engage only on a full `make deploy` — and since the release play is skipped on the same runs, any scoped deploy that *did* take it would leave it stale. A lock that is absent from the commands people actually use, and that leaks when it does engage, is worse than no lock.
 
-```yaml
-# ---------- Deploy lock: one control node at a time ----------
-# Two control nodes (the working laptop and mac-control) can both reach this
-# estate. A documented rule would not hold, so the lock is real. It is taken
-# on thurgadin because that host runs every VM — it is up whenever deploying
-# is meaningful — and holding it there keeps it off the machines being
-# deployed to.
-- name: Acquire the deploy lock
-  hosts: pve_mon_hosts
-  gather_facts: false
-  any_errors_fatal: true
-  tasks:
-    - name: Take the estate-wide deploy lock
-      ansible.builtin.script:
-        cmd: >-
-          scripts/deploy-lock.sh acquire /var/lock/homelab-deploy.lock
-          {{ lookup('pipe', 'hostname') }}
-      changed_when: true
+The wrapper sits outside Ansible instead, so it covers every target identically and releases on failure and on interrupt.
+
+Create `scripts/with-deploy-lock.sh`:
+
+```bash
+#!/usr/bin/env bash
+# Run a deploy command while holding the estate-wide lock.
+#
+# The lock lives on thurgadin: it hosts every VM, so it is up whenever
+# deploying is meaningful, and holding it there keeps it off the machines
+# being deployed to.
+#
+# This wraps the Make targets rather than living inside site.yml, because
+# every scoped target passes --limit and a play that matches no hosts is
+# silently skipped — the lock would then be missing from exactly the commands
+# used day to day.
+#
+# scripts/deploy-lock.sh is piped to the remote shell rather than installed,
+# so the logic under test locally is byte-identical to the logic that runs.
+set -euo pipefail
+
+lock_host=${DEPLOY_LOCK_HOST:-192.168.1.10}
+lock_user=${DEPLOY_LOCK_USER:-root}
+lock_path=${DEPLOY_LOCK_PATH:-/var/lock/homelab-deploy.lock}
+here=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+holder="$(hostname -s):$$"
+
+remote() {
+  ssh -o BatchMode=yes -o ConnectTimeout=10 "${lock_user}@${lock_host}" \
+    bash -s -- "$1" "$lock_path" "$holder" < "${here}/deploy-lock.sh"
+}
+
+remote acquire
+
+# Release on success, failure, and interrupt alike. Without the trap, a
+# Ctrl-C during a deploy strands the lock and the next run is refused by a
+# holder that no longer exists.
+trap 'remote release >/dev/null 2>&1 || true' EXIT
+
+"$@"
 ```
 
-Add the release to the `Announce success` play at the end of `site.yml`, as its final task:
+Make it executable: `chmod +x scripts/with-deploy-lock.sh`
 
-```yaml
-    - name: Release the deploy lock
-      ansible.builtin.script:
-        cmd: >-
-          scripts/deploy-lock.sh release /var/lock/homelab-deploy.lock
-          {{ lookup('pipe', 'hostname') }}
-      delegate_to: "{{ groups['pve_mon_hosts'] | first }}"
-      changed_when: true
+In `Makefile`, wrap the five deploy targets. Add near the other variables:
+
+```makefile
+# Serializes deploys between the two control nodes. See scripts/deploy-lock.sh.
+DEPLOY_LOCK := scripts/with-deploy-lock.sh
 ```
 
-Add to `Makefile`, after the `mac:` target, and add `deploy-unlock` to `.PHONY`:
+Then prefix the recipe of each of `deploy`, `dl`, `media`, `infra`, `mac` with `$(DEPLOY_LOCK) `. For example:
+
+```makefile
+infra: ## Configure and verify the infra VM
+	$(DEPLOY_LOCK) $(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit infra_vms $(ARGS)
+```
+
+Leave `verify`, `scan`, `preflight` and the `image-*` targets unwrapped — they change nothing, and making read-only checks contend for a deploy lock would mean a running deploy blocks the very verification you use to watch it.
+
+Add the unlock target after `mac:`, and add `deploy-unlock` to `.PHONY`:
 
 ```makefile
 deploy-unlock: ## Clear a stale deploy lock left by a crashed run
-	$(ANSIBLE_ADHOC) pve_mon_hosts -i inventory/hosts.yml $(VAULT) \
-	  -m ansible.builtin.script \
-	  -a "cmd='scripts/deploy-lock.sh release /var/lock/homelab-deploy.lock manual'"
+	@ssh -o BatchMode=yes root@192.168.1.10 \
+	  bash -s -- release /var/lock/homelab-deploy.lock manual \
+	  < scripts/deploy-lock.sh
 ```
 
 Add the validator to `validate-ci` in the Makefile:
@@ -802,13 +830,26 @@ Run: `make validate`
 Expected: PASS, including "deploy lock: OK (4 cases, ...)".
 
 Run: `make infra`
-Expected: succeeds, lock taken and released.
+Expected: succeeds. Then confirm the trap released it — a lock that is taken but never freed turns the first deploy into the last one:
+
+```bash
+ssh root@192.168.1.10 "test -e /var/lock/homelab-deploy.lock && echo STALE || echo released"
+```
+Expected: `released`.
+
+Prove the release also fires on failure, since that is the path a real crash takes:
+
+```bash
+scripts/with-deploy-lock.sh false ; echo "exit=$?"
+ssh root@192.168.1.10 "test -e /var/lock/homelab-deploy.lock && echo STALE || echo released"
+```
+Expected: non-zero exit, then `released`.
 
 Now prove the refusal actually fires against the live estate — this is the whole point of the task, and a lock nobody has seen say no is a lock nobody should trust:
 
 ```bash
 ssh root@192.168.1.10 "printf 'someone-else\n2026-08-12T00:00:00Z\n' > /var/lock/homelab-deploy.lock"
-make infra   # expected: FAILS, naming someone-else
+make infra   # expected: FAILS, naming someone-else, BEFORE ansible starts
 make deploy-unlock
 make infra   # expected: succeeds again
 ```
@@ -816,7 +857,8 @@ make infra   # expected: succeeds again
 - [ ] **Step 7: Commit**
 
 ```bash
-git add scripts/deploy-lock.sh tests/validate_deploy_lock.py site.yml Makefile
+git add scripts/deploy-lock.sh scripts/with-deploy-lock.sh \
+        tests/validate_deploy_lock.py Makefile
 git commit -m "feat: serialize deploys behind a lock on thurgadin
 
 Two control nodes can now reach this estate, and a documented rule that only
