@@ -28,7 +28,7 @@ model_roster:
     role: chat
     default: true
     abliterated: true
-    measured_mib: 20716
+    measured_mib: 19876
     measured_on: "2026-08-12"
     num_ctx: 32768
     why: >-
@@ -39,7 +39,7 @@ model_roster:
     tier: terra
     role: chat
     abliterated: true
-    measured_mib: 20222
+    measured_mib: 19408
     measured_on: "2026-08-12"
     num_ctx: 32768
     why: Technical and agentic work.
@@ -48,7 +48,7 @@ model_roster:
     tier: terra
     role: chat
     abliterated: true
-    measured_mib: 20678
+    measured_mib: 19864
     measured_on: "2026-08-12"
     num_ctx: 32768
     why: >-
@@ -59,7 +59,7 @@ model_roster:
     tier: terra
     role: chat
     abliterated: true
-    measured_mib: 23763
+    measured_mib: 23324
     measured_on: "2026-08-12"
     num_ctx: 32768
     why: >-
@@ -78,7 +78,7 @@ model_roster:
       scripts/abliteration_control.py's control prompt on 2026-08-12, which
       makes it a second aligned baseline alongside qwen3:30b rather than a
       single point of failure for that control.
-    measured_mib: 20233
+    measured_mib: 19206
     measured_on: "2026-08-12"
     num_ctx: 32768
     why: >-
@@ -91,11 +91,19 @@ model_roster:
       reasoning model, so a small num_predict spends the whole budget in the
       `thinking` field and returns an empty `response` - budget ~1200.
 
+      The host's q8_0 KV cache does NOTHING for this model - it measured 159
+      MiB WORSE at 16384 and 61 MiB worse at 32768, which gpu-capacity.md
+      flags as UNKNOWN/FALLBACK. Consistent with its cache growing only ~126
+      MiB across a context doubling while every other model here grows 1-1.6
+      GB: whatever attention scheme it uses leaves nothing for quantisation to
+      shrink. It costs nothing either, so this is a note rather than a
+      problem - but do not cite this model as evidence that q8_0 works.
+
   - name: huihui_ai/qwen3-vl-abliterated:8b
     tier: terra
     role: vision
     abliterated: true
-    measured_mib: 10040
+    measured_mib: 10864
     measured_on: "2026-08-12"
     num_ctx: 32768
     why: >-
@@ -117,7 +125,7 @@ model_roster:
     tier: terra
     role: code
     abliterated: true
-    measured_mib: 21112
+    measured_mib: 21136
     measured_on: "2026-08-12"
     num_ctx: 32768
     why: >-
@@ -140,7 +148,7 @@ model_roster:
     alignment_exception: >-
       Coding models rarely refuse, so abliteration buys almost nothing while
       costing measurable quality. Deliberately stock weights.
-    measured_mib: 21575
+    measured_mib: 21136
     measured_on: "2026-08-12"
     num_ctx: 32768
     why: Continue's chat/edit/apply model.
@@ -153,7 +161,7 @@ model_roster:
       Deliberately aligned. It is the only aligned model left on the host and
       therefore the only thing that can calibrate the abliteration control -
       every other chat model answers everything by design.
-    measured_mib: 21585
+    measured_mib: 21146
     measured_on: "2026-08-12"
     num_ctx: 32768
     why: Positive control baseline for scripts/abliteration_control.py.
@@ -165,7 +173,7 @@ model_roster:
     alignment_exception: >-
       A base completion model, not an instruct model. Refusal behaviour does not
       apply to it.
-    measured_mib: 3893
+    measured_mib: 3454
     measured_on: "2026-08-12"
     num_ctx: 32768
     why: Continue's autocomplete.
@@ -173,7 +181,7 @@ model_roster:
   - name: nomic-embed-text
     tier: terra
     role: embed
-    measured_mib: 2603
+    measured_mib: 2164
     measured_on: "2026-08-12"
     abliterated: false
     alignment_exception: >-

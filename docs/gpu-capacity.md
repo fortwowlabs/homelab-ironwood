@@ -9,8 +9,8 @@ apart from each other.
 A model's download size is not its VRAM footprint. Budget from the
 resident figure here, never from the tag.
 
-- **f16** pass taken 2026-08-11, idle baseline 2182 MiB, flash attention off
-- **q8_0** pass taken 2026-08-12, idle baseline 2315 MiB, flash attention on
+- **f16** pass taken 2026-08-13, idle baseline 1717 MiB, flash attention off
+- **q8_0** pass taken 2026-08-13, idle baseline 1464 MiB, flash attention on
 - **q4_0** pass taken 2026-08-12, idle baseline 2012 MiB, flash attention on
 
 The idle baseline matters: a survey taken while something else held the
@@ -27,21 +27,27 @@ number.
 
 | Model | Context | f16 | q8_0 | q4_0 |
 |---|---|---|---|---|
-| `davidau-fable-fusion:27b-q4km` | 16384 | MEASURED (20416 MiB) | MEASURED (20054 MiB) | MEASURED (19528 MiB) |
-| `davidau-fable-fusion:27b-q4km` | 32768 | MEASURED (21456 MiB) | MEASURED (20678 MiB) | MEASURED (19896 MiB) |
-| `huihui_ai/Qwen3.6-abliterated:27b` | 16384 | MEASURED (19960 MiB) | MEASURED (19598 MiB) | MEASURED (19072 MiB) |
-| `huihui_ai/Qwen3.6-abliterated:27b` | 32768 | MEASURED (21000 MiB) | MEASURED (20222 MiB) | MEASURED (19440 MiB) |
-| `huihui_ai/gemma-4-abliterated:26b` | 16384 | MEASURED (20608 MiB) | MEASURED (20460 MiB) | MEASURED (20006 MiB) |
-| `huihui_ai/gemma-4-abliterated:26b` | 32768 | MEASURED (20944 MiB) | MEASURED (20716 MiB) | MEASURED (20186 MiB) |
-| `huihui_ai/gemma-4-abliterated:31b` | 16384 | MEASURED (23680 MiB) | MEASURED (23314 MiB) | MEASURED (22424 MiB) |
-| `huihui_ai/gemma-4-abliterated:31b` | 32768 | SPILLED (23754 MiB) | MEASURED (23763 MiB) | MEASURED (22928 MiB) |
-| `nomic-embed-text:latest` | n/a | MEASURED (2216 MiB) | MEASURED (2603 MiB) ⚠️ **UNKNOWN** | MEASURED (2708 MiB) ⚠️ **UNKNOWN** |
-| `qwen2.5-coder:1.5b-base` | 16384 | MEASURED (3442 MiB) | MEASURED (3623 MiB) ⚠️ **FALLBACK** | MEASURED (3616 MiB) ⚠️ **UNKNOWN** |
-| `qwen2.5-coder:1.5b-base` | 32768 | MEASURED (3922 MiB) | MEASURED (3893 MiB) | MEASURED (3774 MiB) ⚠️ **FALLBACK** |
-| `qwen3-coder:30b` | 16384 | MEASURED (21070 MiB) | MEASURED (20739 MiB) | MEASURED (20460 MiB) |
-| `qwen3-coder:30b` | 32768 | MEASURED (22622 MiB) | MEASURED (21575 MiB) | MEASURED (20912 MiB) |
-| `qwen3:30b` | 16384 | MEASURED (21080 MiB) | MEASURED (20749 MiB) | MEASURED (20470 MiB) |
-| `qwen3:30b` | 32768 | MEASURED (22632 MiB) | MEASURED (21585 MiB) | MEASURED (20922 MiB) |
+| `davidau-fable-fusion:27b-q4km` | 16384 | MEASURED (19946 MiB) | MEASURED (19240 MiB) | MEASURED (19528 MiB) |
+| `davidau-fable-fusion:27b-q4km` | 32768 | MEASURED (20986 MiB) | MEASURED (19864 MiB) | MEASURED (19896 MiB) |
+| `huihui_ai/Qwen3.6-abliterated:27b` | 16384 | MEASURED (19493 MiB) | MEASURED (18784 MiB) | MEASURED (19072 MiB) |
+| `huihui_ai/Qwen3.6-abliterated:27b` | 32768 | MEASURED (20530 MiB) | MEASURED (19408 MiB) | MEASURED (19440 MiB) |
+| `huihui_ai/gemma-4-abliterated:26b` | 16384 | MEASURED (20142 MiB) | MEASURED (19626 MiB) | MEASURED (20006 MiB) |
+| `huihui_ai/gemma-4-abliterated:26b` | 32768 | MEASURED (20477 MiB) | MEASURED (19876 MiB) | MEASURED (20186 MiB) |
+| `huihui_ai/gemma-4-abliterated:31b` | 16384 | MEASURED (23874 MiB) | MEASURED (22500 MiB) | MEASURED (22424 MiB) |
+| `huihui_ai/gemma-4-abliterated:31b` | 32768 | SPILLED (23910 MiB) | MEASURED (23324 MiB) | MEASURED (22928 MiB) |
+| `huihui_ai/qwen3-coder-abliterated:30b-a3b-instruct-q4_K_M` | 16384 | MEASURED (20968 MiB) | MEASURED (20300 MiB) | not measured |
+| `huihui_ai/qwen3-coder-abliterated:30b-a3b-instruct-q4_K_M` | 32768 | MEASURED (22520 MiB) | MEASURED (21136 MiB) | not measured |
+| `huihui_ai/qwen3-vl-abliterated:8b` | 16384 | MEASURED (10626 MiB) | MEASURED (9592 MiB) | not measured |
+| `huihui_ai/qwen3-vl-abliterated:8b` | 32768 | MEASURED (12962 MiB) | MEASURED (10864 MiB) | not measured |
+| `muse-glimmer:30b` | 16384 | MEASURED (19174 MiB) | MEASURED (19080 MiB) ⚠️ **UNKNOWN** | not measured |
+| `muse-glimmer:30b` | 32768 | MEASURED (19398 MiB) | MEASURED (19206 MiB) ⚠️ **FALLBACK** | not measured |
+| `nomic-embed-text:latest` | n/a | MEASURED (2115 MiB) | MEASURED (2164 MiB) ⚠️ **UNKNOWN** | MEASURED (2708 MiB) ⚠️ **UNKNOWN** |
+| `qwen2.5-coder:1.5b-base` | 16384 | MEASURED (3341 MiB) | MEASURED (3184 MiB) ⚠️ **FALLBACK** | MEASURED (3616 MiB) ⚠️ **FALLBACK** |
+| `qwen2.5-coder:1.5b-base` | 32768 | MEASURED (3821 MiB) | MEASURED (3454 MiB) | MEASURED (3774 MiB) |
+| `qwen3-coder:30b` | 16384 | MEASURED (20968 MiB) | MEASURED (20300 MiB) | MEASURED (20460 MiB) |
+| `qwen3-coder:30b` | 32768 | MEASURED (22520 MiB) | MEASURED (21136 MiB) | MEASURED (20912 MiB) |
+| `qwen3:30b` | 16384 | MEASURED (20978 MiB) | MEASURED (20310 MiB) | MEASURED (20470 MiB) |
+| `qwen3:30b` | 32768 | MEASURED (22530 MiB) | MEASURED (21146 MiB) | MEASURED (20922 MiB) |
 
 `FALLBACK` means the quantized cache setting silently did nothing on
 this architecture — the memory did not move. It is not an error state
