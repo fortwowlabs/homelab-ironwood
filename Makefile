@@ -27,6 +27,9 @@ YAMLLINT := $(BIN)yamllint
 SHELLCHECK ?= shellcheck
 GITLEAKS ?= gitleaks
 
+# Serializes deploys between the two control nodes. See scripts/deploy-lock.sh.
+DEPLOY_LOCK := scripts/with-deploy-lock.sh
+
 # Keep Ansible's controller-side scratch data inside the checkout. This makes
 # validation work in restricted runners and `clean` removes it predictably.
 export ANSIBLE_LOCAL_TEMP := $(CURDIR)/.ansible/tmp
@@ -59,7 +62,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve mac \
 	check check-diff verify verify-disruptive scan image-digest image-check image-bump \
 	release-check release-report image-release drift reconcile access ping lint \
-	vault-edit clean
+	vault-edit clean deploy-unlock
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
@@ -168,28 +171,34 @@ validate-ci:
 	$(PYTHON) tests/validate_ci_safety.py
 	$(PYTHON) tests/validate_verify_safety.py
 	$(PYTHON) tests/validate_scan_readonly.py
+	$(PYTHON) tests/validate_deploy_lock.py
 
 preflight: ## Authenticate, show the safe inventory graph, and require VM connectivity
 	$(INVENTORY_CMD) --graph $(VAULT)
 	$(ANSIBLE) $(PREFLIGHT_PLAYBOOK) $(VAULT) $(ARGS)
 
 deploy: ## Full provision, configuration, and verification
-	$(ANSIBLE) $(PLAYBOOK) $(VAULT) $(ARGS)
+	$(DEPLOY_LOCK) $(ANSIBLE) $(PLAYBOOK) $(VAULT) $(ARGS)
 
 dl: ## Configure and verify the download VM
-	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit download_vms $(ARGS)
+	$(DEPLOY_LOCK) $(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit download_vms $(ARGS)
 
 media: ## Configure and verify the media VM
-	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit media_vms $(ARGS)
+	$(DEPLOY_LOCK) $(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit media_vms $(ARGS)
 
 infra: ## Configure and verify the infra VM
-	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit infra_vms $(ARGS)
+	$(DEPLOY_LOCK) $(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit infra_vms $(ARGS)
 
 pve: ## Configure and verify hypervisor monitoring (disk, SMART, ZFS events)
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit pve_mon_hosts $(ARGS)
 
 mac: ## Configure and verify the always-on control node (mac-control)
-	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit control_nodes $(ARGS)
+	$(DEPLOY_LOCK) $(ANSIBLE) $(PLAYBOOK) $(VAULT) --limit control_nodes $(ARGS)
+
+deploy-unlock: ## Clear a stale deploy lock left by a crashed run
+	@ssh -o BatchMode=yes root@192.168.1.10 \
+	  bash -s -- release /var/lock/homelab-deploy.lock manual \
+	  < scripts/deploy-lock.sh
 
 check: ## Safe check mode without displaying file diffs
 	$(ANSIBLE) $(PLAYBOOK) $(VAULT) --check $(ARGS)
