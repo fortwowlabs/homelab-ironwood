@@ -10,8 +10,22 @@ that can run Ansible and reach svc-infra over SSH, which TERRA cannot — see
 Pick this up with:
 
 ```bash
-git fetch origin && git switch docs/inference-capacity-roster
+git fetch origin --prune && git switch docs/inference-capacity-roster
 ```
+
+**If that branch does not appear**, the clone is almost certainly restricted to
+a subset of refs — `git clone --single-branch`, or a `--depth` clone, both of
+which write a narrow fetch refspec. Check and widen it:
+
+```bash
+git config --get-all remote.origin.fetch   # want: +refs/heads/*:refs/remotes/origin/*
+git remote set-branches origin '*'
+git fetch origin --prune
+```
+
+The branch exists on `origin` — confirmed with
+`git ls-remote --heads origin` at handoff time. If it is missing locally, the
+problem is the fetch, not the push.
 
 The spec is
 [`docs/superpowers/specs/2026-08-11-inference-capacity-and-roster-design.md`](../specs/2026-08-11-inference-capacity-and-roster-design.md)
@@ -127,12 +141,29 @@ Open WebUI knows them. Confirm each returns a real reply at
 
 ### 3. Deploy and merge (Task 7)
 
+**`main` moved while this branch was in flight.** It was at `0f1e86d` when the
+branch started and is at `68dbbc2` or later now — `fix/review-findings` merged
+and was deleted, among others. So **rebase before anything else**, or the
+`--ff-only` merge at the end will refuse:
+
+```bash
+git fetch origin --prune
+git rebase origin/main            # checked 2026-08-12: no overlapping files, no conflicts
+```
+
+Checked at handoff time: this branch and the new `main` commits touch
+**disjoint file sets**, so the rebase is expected to be clean. If it is not,
+`main` has moved further since — resolve normally, and re-run `make validate`
+afterwards rather than trusting a pre-rebase result.
+
+Then, in this order — the sequence matters and `CLAUDE.md` explains why:
+
 ```bash
 make validate            # full gate; see below for what TERRA could not run
 make infra               # expect changed=3 (git archive sync)
 make infra               # expect changed=0 — required before merging
 make verify
-git status --porcelain   # must print nothing
+git status --porcelain   # must print nothing; untracked files count
 git switch main && git merge --ff-only docs/inference-capacity-roster && git push
 git branch -d docs/inference-capacity-roster
 git push origin --delete docs/inference-capacity-roster
