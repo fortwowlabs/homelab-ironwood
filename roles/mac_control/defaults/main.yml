@@ -1,0 +1,31 @@
+---
+# The wired LAN address. Ollama binds THIS specifically, never 0.0.0.0 —
+# see roles/mac_control/tasks/ollama.yml for why that distinction matters.
+mac_control_lan_ip: "{{ hostvars['mac-control'].ansible_host }}"
+mac_control_ollama_port: 11434
+
+# The two "small, always-on" models, relocated from TERRA (docs/gpu-host.md)
+# — a machine that gets rebooted, gamed on and turned off. Relocated rather
+# than duplicated, deliberately: their presence in Open WebUI's model list is
+# then proof that the second endpoint works.
+mac_control_models:
+  - qwen2.5-coder:1.5b-base
+  - nomic-embed-text
+
+# Bound Ollama so it can never starve this machine's primary job. 16 GB splits
+# roughly: macOS 3-4 GB, agent sessions 1-1.5 GB each, these two models ~2 GB.
+# A 7-8B chat model with a 32k KV cache would want 6-7 GB and change that.
+mac_control_ollama_max_loaded_models: 1
+mac_control_ollama_keep_alive: 5m
+
+mac_control_brew_packages:
+  - git
+  - tmux
+  - node
+  - shellcheck
+  - gitleaks
+  # Ansible connects through /usr/bin/python3 (the Xcode CLT one, because
+  # Homebrew is installed BY this role and depending on it would be circular).
+  # This one is different: it builds the checkout's .venv, which is what makes
+  # this machine a control node rather than a laptop with the repo on it.
+  - python@3.13

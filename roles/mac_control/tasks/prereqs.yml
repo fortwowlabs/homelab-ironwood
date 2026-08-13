@@ -1,0 +1,67 @@
+---
+# A control node may not deploy to itself. Reconfiguring Ollama, Tailscale and
+# pmset underneath your own SSH session loses the session mid-play and leaves
+# the box half-built — with no readable screen to inspect. The circularity is
+# broken by direction, not by cleverness.
+- name: Collect the addresses of the machine running Ansible
+  ansible.builtin.command: /usr/sbin/ipconfig getifaddr en0
+  register: mac_control_local_addr
+  changed_when: false
+  failed_when: false
+  delegate_to: localhost
+  become: false
+
+- name: Refuse to configure a control node from itself
+  ansible.builtin.assert:
+    that:
+      - mac_control_local_addr.stdout | trim != mac_control_lan_ip
+    fail_msg: >-
+      This play is running ON {{ mac_control_lan_ip }}, the machine it would
+      reconfigure. Run `make mac` from the other control node. Restarting
+      Ollama, Tailscale and pmset underneath your own SSH session leaves this
+      host half-configured with no screen to read.
+
+# Xcode Command Line Tools are the analog of cloud-init for the VMs: without
+# them there is no /usr/bin/python3 for Ansible to run through, so this cannot
+# self-heal — it can only say so clearly.
+- name: Check for the Xcode Command Line Tools
+  ansible.builtin.command: /usr/bin/xcode-select -p
+  register: mac_control_clt
+  changed_when: false
+  failed_when: false
+
+- name: Require the Xcode Command Line Tools
+  ansible.builtin.assert:
+    that:
+      - mac_control_clt.rc == 0
+    fail_msg: >-
+      Xcode Command Line Tools are missing. Run `xcode-select --install` on
+      mac-control and complete the GUI prompt (Screen Sharing works for this),
+      then re-run `make mac`.
+
+# The two secret files are placed BY HAND, out of band. The role asserts they
+# exist with the right mode and never reads, renders or logs their contents.
+# The vault password cannot live in the vault, and any mechanism threading it
+# through a play is a mechanism that can put it in a log.
+- name: Stat the out-of-band secret files
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ mac_control_checkout }}/.vault_pass"
+    - "{{ mac_control_checkout }}/inventory/group_vars/all/vault.yml"
+  register: mac_control_secret_files
+  no_log: true
+  diff: false
+
+- name: Require the secret files to exist at mode 0600
+  ansible.builtin.assert:
+    that:
+      - item.stat.exists
+      - item.stat.mode == '0600'
+    fail_msg: >-
+      {{ item.item }} must exist at mode 0600 on mac-control. Both are placed
+      by hand, out of band — see docs/mac-control-node.md. The commit pins the
+      code, not the secrets.
+  loop: "{{ mac_control_secret_files.results }}"
+  loop_control:
+    label: "{{ item.item }}"

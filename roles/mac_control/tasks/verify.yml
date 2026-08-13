@@ -1,0 +1,4 @@
+---
+- name: Mark control node verification complete
+  ansible.builtin.set_fact:
+    mac_control_verified: true

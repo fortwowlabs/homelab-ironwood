@@ -5,3 +5,8 @@ collections:
     version: "2.0.0"
   - name: ansible.posix
     version: "2.2.2"
+  # Added 2026-08-12 for the `homebrew` module, which roles/mac_control needs.
+  # Doing packages with `command` instead would mean hand-rolling idempotence
+  # for every one of them, which is exactly what makes changed=0 unreliable.
+  - name: community.general
+    version: "11.4.0"

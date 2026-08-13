@@ -96,6 +96,10 @@ validate-syntax:
 
 validate-ansible:
 	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE_LINT) --offline --profile min $(PLAYBOOK) $(PREFLIGHT_PLAYBOOK) $(VERIFY_PLAYBOOK) $(DISRUPTIVE_PLAYBOOK) $(SCAN_PLAYBOOK) $(RELEASE_PLAYBOOK)
+# macOS state is mostly not file-shaped, so roles/mac_control is largely
+# command tasks — and Ansible reports every one of them as changed unless
+# told otherwise. This keeps changed=0 meaningful for that role too.
+	$(PYTHON) tests/validate_mac_idempotence.py
 
 validate-yaml:
 	$(YAMLLINT) $(YAML_FILES)

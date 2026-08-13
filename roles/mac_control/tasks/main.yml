@@ -1,0 +1,9 @@
+---
+- name: Validate control node prerequisites
+  ansible.builtin.import_tasks: prereqs.yml
+  tags: [always]
+
+- name: Verify control node invariants
+  ansible.builtin.import_tasks: verify.yml
+  when: not ansible_check_mode
+  tags: [verify]
