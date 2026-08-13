@@ -80,6 +80,11 @@ follow it, neither optional:
   `http://192.168.1.40:11434/api/tags` still does — both halves, because the
   first alone cannot distinguish a narrowed scope from a dead service.
 
+  **Do not assume disabling them closes the tailnet path.** It was done on
+  2026-08-12 and the path still answered on 2026-08-13 — see
+  [the measurement below](#-that-fix-was-applied-and-it-did-not-work--measured-2026-08-13).
+  Run the confirmation, and believe the curl rather than the rule state.
+
 Pull the four chat models Open WebUI offers, the coding model, and the two
 small models Continue needs for autocomplete and embeddings:
 
@@ -242,7 +247,7 @@ adapter, where the source address is `100.110.75.114`, which
 an identical inner packet. The airtight version of this test is the same two
 curls from a peer on cellular; every such peer was offline at the time.
 
-The fix needs an elevated shell **on TERRA**:
+The obvious fix needs an elevated shell **on TERRA**:
 
 ```powershell
 Get-NetFirewallRule -DisplayName "ollama.exe" | Disable-NetFirewallRule
@@ -252,6 +257,41 @@ Then re-run both curls from a tailnet peer and require that they stop
 answering while `192.168.1.40` still does — a check that fails closed rather
 than one that merely looks quiet. Re-check after Ollama updates; the installer
 created these rules and may recreate them.
+
+#### ⚠️ That fix was applied and it did not work — measured 2026-08-13
+
+The `ollama.exe` rules were disabled on TERRA on 2026-08-12 and read back as
+`enabled=False` from that machine. **The tailnet path still answers.** Verified
+2026-08-13 from `brandons-macbook-pro`, the same peer as before:
+
+```
+curl http://100.107.5.66:11434/api/tags     -> 200, 12 models, Ollama 0.32.9
+curl http://100.107.5.66:8188/system_stats  -> 200
+curl http://192.168.1.40:11434/api/tags     -> 200  (LAN still works, as required)
+```
+
+`route -n get 100.107.5.66` resolves to `utun6`, the Tailscale adapter, so this
+is genuinely the tailnet path and not the LAN one under a different address.
+
+**So disabling the `ollama.exe` rules is not sufficient, and the diagnosis
+above is incomplete.** That was already implied by the ComfyUI half — ComfyUI
+has no `ollama.exe` rule and answered anyway — but it is now measured for both.
+Something other than Ollama's installer rules is admitting decapsulated
+Tailscale traffic. Candidates not yet eliminated, in the order worth checking:
+
+1. A Tailscale-created firewall rule. The client adds its own allow rules, and
+   they are scoped to the tailnet interface rather than to a remote subnet.
+2. The Tailscale adapter landing in the **Private** profile, where a broad
+   inbound allow would match traffic that `-RemoteAddress 192.168.1.0/24`
+   was written to exclude.
+3. Tailscale Serve or a subnet-router/exit-node setting forwarding the ports.
+
+Until one of those is confirmed, treat **both services as reachable by all 8
+tailnet peers, unauthenticated**. The reliable containment is at the Tailscale
+layer rather than the Windows one — a tailnet ACL denying `:11434` and `:8188`
+to every peer, which is enforced by the coordination server and cannot be
+reverted by an Ollama installer. That is the recommended next step, and unlike
+the firewall edit it does not need administrator rights on TERRA.
 
 ### 5. Tell the homelab it exists
 
