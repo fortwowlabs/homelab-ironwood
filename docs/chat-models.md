@@ -88,6 +88,36 @@ the card, which no setting can fix. The 31b's problem was its **KV cache**,
 which quantizing did fix. Those are different failures that look identical in
 `ollama ps`, and telling them apart is what the survey is for.
 
+### An abliterated Muse Glimmer was tried and rejected — 2026-08-12
+
+`hf.co/Blackfrost-AI/Muse-Glimmer-30B-Abliterated-GGUF:Q4_K_M`. It downloaded
+cleanly, registered, and **fits the card easily** — 19915 MiB at 16384 and
+20041 at 32768, both 100% GPU, better headroom than the stock Glimmer it would
+have replaced.
+
+It is nonetheless unusable. **It emits the literal string ` to=self` and stops
+after three tokens, for every prompt tried** — a trivial arithmetic question, a
+haiku request, the control prompt. `/api/chat` returns an empty string. That
+token is an agentic channel marker, so the likely cause is a chat template
+Ollama 0.32.9 cannot drive; the model card asks for "a recent llama.cpp
+(`master`) with `llama-server`", which is probably the real requirement rather
+than the optional speed note it appears to be.
+
+**The interesting part is that the control initially passed it.** ` to=self`
+contains no refusal marker and is not empty, so the original two rules returned
+`ANSWERED` — a broken model certified as working uncensored. That is the exact
+"probe that succeeds at asking the wrong question" failure `CLAUDE.md` warns
+about, and it went undetected because this script had no self-check of its own.
+It has one now, plus a minimum-length rule, and the case that would have caught
+this is in the table.
+
+**This is why a fits-the-card verdict is not an acceptance.** Three gates, not
+one: it must fit, it must answer, and — for a vision model — it must see. This
+model passed the first and failed the second.
+
+Re-check when llama.cpp support lands upstream and Ollama vendors it. The
+weights are on disk if that happens; nothing about them is known to be wrong.
+
 **Deleting it from Ollama did not delete it from Open WebUI.** As of
 2026-08-10 the `model` table on svc-infra still holds a row with id
 `aratan/qwen3.6-claude-coder-35b-A3b-mlx-Q4KM-abliterated:latest`,
