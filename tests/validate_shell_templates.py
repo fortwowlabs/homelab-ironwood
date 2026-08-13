@@ -39,6 +39,7 @@ TEMPLATES = (
     "roles/svc_media/templates/certwatch.sh.j2",
     "roles/svc_media/templates/heartbeat.sh.j2",
     "roles/svc_infra/templates/alert-canary.sh.j2",
+    "roles/mac_control/templates/ollama-binding-check.sh.j2",
 )
 
 # Templates that render a DIFFERENT script depending on the host, rendered a
@@ -137,6 +138,8 @@ def main() -> int:
         # (nothing in TEMPLATES branches on which service VM it is), it just
         # needs to be defined.
         "inventory_hostname": "fixture-host",
+        # ollama-binding-check.sh.j2's only variable besides ansible_managed.
+        "mac_control_ollama_port": 11434,
     }
 
     renders = [(name, context) for name in TEMPLATES]

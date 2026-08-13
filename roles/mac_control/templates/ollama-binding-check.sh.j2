@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+#
+# Is Ollama reachable on the tailnet, where it would answer unauthenticated to
+# every peer? Ollama has no authentication at all, so the bind address is the
+# whole of its access control.
+#
+# The LAN address must answer FIRST. Without that positive control this check
+# passes for the wrong reason most of the time: a stopped Ollama, an unplugged
+# USB-C adapter, or a host that is simply switched off all produce a silent
+# tailnet address, and all would render as "correctly scoped".
+#
+# Both addresses are ARGUMENTS rather than baked in, so the same check serves
+# mac-control and TERRA. TERRA is the one that needs the tri-state most: it is
+# switched off half the time, and an off machine answers nothing at all.
+#
+# Usage: ollama-binding-check.sh <lan-address> <tailnet-address>
+#
+# Exit codes are the verdict:
+#   0  ok            LAN answers, tailnet silent
+#   1  exposed       both answer — the finding
+#   2  inconclusive  LAN does not answer, so nothing can be concluded
+set -euo pipefail
+
+lan_addr=${1:?usage: ollama-binding-check.sh <lan-address> <tailnet-address>}
+tailnet_addr=${2:?usage: ollama-binding-check.sh <lan-address> <tailnet-address>}
+lan_url="http://${lan_addr}:{{ mac_control_ollama_port }}/api/tags"
+tailnet_url="http://${tailnet_addr}:{{ mac_control_ollama_port }}/api/tags"
+
+if ! curl -fsS --max-time 5 "$lan_url" >/dev/null 2>&1; then
+  echo "verdict=inconclusive reason=lan-address-did-not-answer url=${lan_url}"
+  exit 2
+fi
+
+if curl -fsS --max-time 5 "$tailnet_url" >/dev/null 2>&1; then
+  echo "verdict=exposed reason=answers-on-tailnet url=${tailnet_url}"
+  exit 1
+fi
+
+echo "verdict=ok reason=lan-only lan=${lan_url}"
+exit 0
