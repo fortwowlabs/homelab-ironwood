@@ -783,10 +783,27 @@ remote() {
 
 remote acquire
 
-# Release on success, failure, and interrupt alike. Without the trap, a
-# Ctrl-C during a deploy strands the lock and the next run is refused by a
-# holder that no longer exists.
-trap 'remote release >/dev/null 2>&1 || true' EXIT
+# Release on a NORMAL exit only — success or a failed deploy alike.
+#
+# Deliberately NOT on a signal. This wrapper exiting does not prove the deploy
+# exited: a targeted `kill <pid>` never reaches the child at all, and
+# ansible-playbook handles SIGINT itself rather than dying at once. Releasing
+# there would hand the lock to the other control node while changes are still
+# being applied — the exact collision this exists to prevent.
+#
+# So a signalled wrapper leaves the lock held. That is the safe failure: a
+# stale lock is visible, refuses the next deploy loudly, and `make
+# deploy-unlock` clears it once you have confirmed nothing is running. Two
+# deploys applying at once is none of those things.
+signalled=0
+trap 'signalled=1; exit 130' INT TERM
+trap 'if [ "$signalled" -eq 0 ]; then
+        remote release >/dev/null 2>&1 || true
+      else
+        echo "deploy-lock: signalled — lock deliberately NOT released, because" >&2
+        echo "  the deploy may still be running. Confirm it has stopped, then:" >&2
+        echo "      make deploy-unlock" >&2
+      fi' EXIT
 
 "$@"
 ```
@@ -844,6 +861,18 @@ scripts/with-deploy-lock.sh false ; echo "exit=$?"
 ssh root@192.168.1.10 "test -e /var/lock/homelab-deploy.lock && echo STALE || echo released"
 ```
 Expected: non-zero exit, then `released`.
+
+Prove the signal path does **not** release, which is the fail-safe behaviour:
+
+```bash
+scripts/with-deploy-lock.sh sleep 30 &
+wrapper=$!
+sleep 3 && kill -TERM "$wrapper"
+sleep 2
+ssh root@192.168.1.10 "test -e /var/lock/homelab-deploy.lock && echo 'held (correct)' || echo 'RELEASED — WRONG'"
+make deploy-unlock
+```
+Expected: `held (correct)`, then the unlock clears it. A signalled wrapper must never release, because it cannot prove the deploy stopped.
 
 Now prove the refusal actually fires against the live estate — this is the whole point of the task, and a lock nobody has seen say no is a lock nobody should trust:
 
