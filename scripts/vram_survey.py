@@ -73,6 +73,51 @@ def classify(size_total: int | None, size_vram: int | None) -> tuple[str, str]:
         "magnitude slower")
 
 
+def gpu_process_names() -> str:
+    """Who is holding the card, for the abort message.
+
+    "Something else is holding the card" is correct and useless. On 2026-08-12
+    it cost a manual hunt through process working sets to discover the holder
+    was `llama-server` - which is OLLAMA'S OWN inference subprocess, left
+    orphaned by an earlier restart while `/api/ps` reported nothing resident.
+    Reading it as a foreign process led to killing it and taking the inference
+    backend down. Naming the holder here is what makes that a one-line answer.
+
+    Best-effort by design: nvidia-smi reports per-process memory as
+    "[Insufficient Permissions]" for processes owned by other users, so this
+    returns names without sizes rather than pretending to a precision it does
+    not have. A failure to enumerate must not stop the abort from happening.
+    """
+    try:
+        out = subprocess.run(
+            ["nvidia-smi", "--query-compute-apps=pid,process_name",
+             "--format=csv,noheader"],
+            capture_output=True, text=True, timeout=30)
+        lines = [ln.strip() for ln in out.stdout.splitlines() if ln.strip()]
+    except Exception as exc:
+        return f" (could not list GPU processes: {type(exc).__name__})"
+    if not lines:
+        return (" No process is listed as using the GPU, which usually means "
+                "the holder is owned by another user or the display driver "
+                "itself.")
+
+    # The desktop compositor, Explorer, Task Manager and the NVIDIA overlay are
+    # ALWAYS on this list and never the thing holding 20 GB. Listing them
+    # unfiltered buries the one name that matters under ten that do not - which
+    # defeats the point of naming anything at all.
+    noise = ("c:\\windows\\", "\\nvidia corporation\\", "\\windowsapps\\")
+    interesting = [ln for ln in lines
+                   if not any(n in ln.lower() for n in noise)]
+    if not interesting:
+        return (f" GPU compute processes: {len(lines)} listed, all of them "
+                "desktop/driver components. The holder is most likely a "
+                "process owned by another user, which nvidia-smi will not "
+                "name.")
+    hidden = len(lines) - len(interesting)
+    suffix = f" ({hidden} desktop/driver processes not shown)" if hidden else ""
+    return " Likely holder(s): " + "; ".join(interesting[:6]) + suffix
+
+
 def baseline_verdict(mib: int) -> tuple[bool, str]:
     """Refuse to survey a card that is not idle."""
     if mib > IDLE_ABORT_MIB:
@@ -80,7 +125,12 @@ def baseline_verdict(mib: int) -> tuple[bool, str]:
             f"{mib} MiB already in use, above the {IDLE_ABORT_MIB} MiB idle "
             "threshold. Something else is holding the card - close it and "
             "re-run. The first version of the table in docs/gpu-host.md was "
-            "taken with a game resident and was invalid on its face")
+            "taken with a game resident and was invalid on its face."
+            + gpu_process_names()
+            + " If `llama-server` appears here while `ollama ps` shows nothing "
+              "loaded, that is an ORPHANED OLLAMA RUNNER, not a foreign "
+              "process - restart Ollama rather than killing it, or you take "
+              "the inference backend down with it.")
     return True, f"{mib} MiB baseline, card is idle"
 
 
