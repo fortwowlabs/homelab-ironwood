@@ -1076,18 +1076,31 @@ Create `roles/mac_control/tasks/prereqs.yml`:
 # pmset underneath your own SSH session loses the session mid-play and leaves
 # the box half-built — with no readable screen to inspect. The circularity is
 # broken by direction, not by cleverness.
-- name: Collect the addresses of the machine running Ansible
-  ansible.builtin.command: /usr/sbin/ipconfig getifaddr en0
-  register: mac_control_local_addr
+# EVERY local IPv4 address, not one interface's. Asking `ipconfig getifaddr
+# en0` looks right and is not: on Apple Silicon en0 is built-in Wi-Fi, while
+# mac-control reaches the LAN over a USB-C 1GbE adapter that enumerates
+# further along. With Wi-Fi off — the normal state for a headless box in a
+# closet — that returns an empty string, and a guard comparing against an
+# empty string can never fire. The protection would be gone precisely on the
+# machine it exists to protect.
+#
+# There is deliberately NO `failed_when: false` here. If the addresses cannot
+# be enumerated then the guard cannot be evaluated, and a guard that cannot be
+# evaluated must stop the run rather than wave it through.
+- name: Collect every address of the machine running Ansible
+  ansible.builtin.shell:
+    cmd: set -o pipefail; /sbin/ifconfig | awk '/inet /{print $2}'
+  register: mac_control_local_addrs
   changed_when: false
-  failed_when: false
   delegate_to: localhost
   become: false
 
 - name: Refuse to configure a control node from itself
   ansible.builtin.assert:
     that:
-      - mac_control_local_addr.stdout | trim != mac_control_lan_ip
+      # Fail closed: no addresses read means the check did not run.
+      - mac_control_local_addrs.stdout_lines | length > 0
+      - mac_control_lan_ip not in (mac_control_local_addrs.stdout_lines | map('trim') | list)
     fail_msg: >-
       This play is running ON {{ mac_control_lan_ip }}, the machine it would
       reconfigure. Run `make mac` from the other control node. Restarting
