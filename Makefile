@@ -172,6 +172,7 @@ validate-ci:
 	$(PYTHON) tests/validate_verify_safety.py
 	$(PYTHON) tests/validate_scan_readonly.py
 	$(PYTHON) tests/validate_deploy_lock.py
+	$(PYTHON) tests/validate_with_deploy_lock.py
 
 preflight: ## Authenticate, show the safe inventory graph, and require VM connectivity
 	$(INVENTORY_CMD) --graph $(VAULT)

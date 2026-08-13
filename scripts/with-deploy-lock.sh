@@ -27,9 +27,22 @@ remote() {
 
 remote acquire
 
-# Release on success, failure, and interrupt alike. Without the trap, a
-# Ctrl-C during a deploy strands the lock and the next run is refused by a
-# holder that no longer exists.
-trap 'remote release >/dev/null 2>&1 || true' EXIT
+# Release on normal exit (success or failure) but NOT on a signal: the
+# wrapper dying does not prove the wrapped deploy died. A targeted `kill`
+# hits only this process — ansible-playbook handles SIGINT/SIGTERM itself
+# and keeps running for several more seconds — so releasing here would hand
+# the lock to the other control node while the first deploy is still
+# applying. A stale lock merely refuses the next run loudly; an early
+# release is silent and worse. Ctrl-C at a terminal is unaffected: the whole
+# process group receives the signal together, wrapper and child alike.
+signalled=0
+trap 'signalled=1; exit 130' INT TERM
+trap 'if [ "$signalled" -eq 0 ]; then
+        remote release >/dev/null 2>&1 || true
+      else
+        echo "deploy-lock: signalled — lock deliberately NOT released, because" >&2
+        echo "  the deploy may still be running. Confirm it has stopped, then:" >&2
+        echo "      make deploy-unlock" >&2
+      fi' EXIT
 
 "$@"
