@@ -34,7 +34,8 @@ CARD_TOTAL_MIB = 24564
 TIERS = {"terra", "mbp"}
 ROLES = {"chat", "code", "vision", "embed", "autocomplete", "baseline"}
 REQUIRED = {"name", "tier", "role", "abliterated", "why"}
-OPTIONAL = {"default", "alignment_exception", "measured_mib", "measured_on", "num_ctx"}
+OPTIONAL = {"default", "alignment_exception", "measured_mib", "measured_on",
+            "num_ctx", "held", "held_reason"}
 DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -93,6 +94,33 @@ def check_roster(roster: list[dict], control_roster: tuple[str, ...],
                 "purpose, so an un-abliterated one is either a decision or an "
                 "oversight and the catalog has to say which")
 
+        # `held` means the weights are deliberately on disk but must not be
+        # served - a model tried, rejected, and kept for a later re-check. It
+        # exists so that retention stops reading as undeclared drift in
+        # roster_reconcile.py; without it a deliberate decision leaves that
+        # check permanently red, and nobody reads a check that is always red.
+        held = entry.get("held")
+        if held is not None and not isinstance(held, bool):
+            problems.append(
+                f"{name}: `held` is {held!r}, not a boolean — anything truthy "
+                "would silently shelve a model that is meant to be served")
+        if held is True and not str(entry.get("held_reason", "")).strip():
+            problems.append(
+                f"{name}: is `held` and must carry `held_reason`. Weights kept "
+                "on disk without a written reason are indistinguishable from "
+                "weights nobody got round to deleting, and the whole point of "
+                "the state is to record which")
+        if held is not True and str(entry.get("held_reason", "")).strip():
+            problems.append(
+                f"{name}: carries `held_reason` but is not `held: true` — the "
+                "reason has no effect, so the model is still served and still "
+                "expected to pass the controls")
+        if held is True and entry.get("default"):
+            problems.append(
+                f"{name}: is both `held` and `default: true` — the default is "
+                "what Open WebUI hands every user, and this one is on disk "
+                "precisely because it does not work")
+
         if entry.get("default"):
             defaults.append(name)
 
@@ -129,10 +157,15 @@ def check_roster(roster: list[dict], control_roster: tuple[str, ...],
             f"expected exactly one entry with `default: true`, found {defaults} "
             "— Open WebUI needs one and only one default")
 
+    # `held` models are exempt from both controls, and that exemption is the
+    # only part of this state with teeth. A held model is on disk BECAUSE it is
+    # known broken, so it cannot answer a control prompt or see an image —
+    # requiring it to would make the gate unpassable and invite someone to
+    # delete the rule rather than the entry.
     should_control = {
         e["name"] for e in roster
         if e.get("tier") == "terra" and e.get("abliterated") is True
-        and e.get("role") in {"chat", "code"}
+        and e.get("role") in {"chat", "code"} and e.get("held") is not True
     }
     for name in sorted(should_control - set(control_roster)):
         problems.append(
@@ -152,6 +185,7 @@ def check_roster(roster: list[dict], control_roster: tuple[str, ...],
     should_see = {
         e["name"] for e in roster
         if e.get("tier") == "terra" and e.get("role") == "vision"
+        and e.get("held") is not True
     }
     for name in sorted(should_see - set(vision_roster)):
         problems.append(
@@ -226,6 +260,36 @@ SELF_CHECK_CASES = (
      [_ok_entry()], (), "not in abliteration_control.py"),
     ("control script names a model not in the catalog",
      [_ok_entry()], ("example/model:1b", "ghost:7b"), "not in the catalog"),
+    # The `held` state. The exemption case is the one that matters: if a held
+    # model were still required in the control roster, `make validate` could
+    # never pass with one declared.
+    ("a held model is exempt from the abliteration control",
+     [_ok_entry(), _ok_entry(name="shelved:1b", default=False, held=True,
+                             held_reason="emits a channel marker and stops")],
+     ("example/model:1b",), None),
+    # Inlined rather than built from _seer(), which is defined below this table
+    # and would NameError at import time.
+    ("a held vision model is exempt from the vision control",
+     [_ok_entry(), _ok_entry(name="shelved-eye:1b", role="vision",
+                             default=False, held=True,
+                             held_reason="image half never loads")],
+     ("example/model:1b",), None),
+    ("held without a reason",
+     [_ok_entry(held=True)], ("example/model:1b",), "must carry `held_reason`"),
+    ("held with a whitespace-only reason",
+     [_ok_entry(held=True, held_reason="  ")],
+     ("example/model:1b",), "must carry `held_reason`"),
+    ("held_reason written without held: true has no effect",
+     [_ok_entry(held_reason="looks documented, changes nothing")],
+     ("example/model:1b",), "has no effect"),
+    ("held: false is still served and still controlled",
+     [_ok_entry(held=False)], (), "not in abliteration_control.py"),
+    ("held written as a YAML string instead of a boolean",
+     [_ok_entry(held="true", held_reason="a reason")],
+     ("example/model:1b",), "not a boolean"),
+    ("the held model cannot also be the default",
+     [_ok_entry(held=True, held_reason="known broken")],
+     ("example/model:1b",), "both `held` and `default: true`"),
 )
 
 
@@ -270,7 +334,7 @@ def _matching_control(roster: list[dict]) -> tuple[str, ...]:
     return tuple(
         e["name"] for e in roster
         if e.get("tier") == "terra" and e.get("abliterated") is True
-        and e.get("role") in {"chat", "code"})
+        and e.get("role") in {"chat", "code"} and e.get("held") is not True)
 
 
 def self_check() -> list[str]:

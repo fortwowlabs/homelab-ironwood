@@ -20,6 +20,21 @@
 # also cross-checks that every abliterated terra model appears in
 # scripts/abliteration_control.py's ROSTER.
 #
+# `held: true` means the weights are deliberately on disk but must NOT be
+# served - a model tried, rejected, and kept so it can be re-checked when the
+# reason it failed is fixed upstream. It REQUIRES `held_reason`.
+#
+# The state exists because of what happens without it. scripts/roster_reconcile.py
+# compares this catalog against what Ollama actually has installed, so weights
+# retained on purpose read as UNDECLARED drift - and a check that reports a
+# deliberate decision as a fault is red forever, which in this repo is the same
+# as a check nobody reads. A held entry is declared (so: not drift) but exempt
+# from the abliteration and vision controls, because it is on disk precisely
+# BECAUSE it is broken and could never pass them. It also cannot be `default`.
+#
+# Deleting the weights is the other valid answer, and it is the right one once
+# the reason for keeping them expires. Held is not a parking space.
+#
 # tier: terra = the RTX 4090 desktop, on-demand, one model at a time.
 #       mbp   = the M1 Pro laptop, always-on, small models. NOT YET PROVISIONED.
 model_roster:
@@ -193,3 +208,25 @@ model_roster:
       measured_mib is almost entirely idle baseline - the model itself is
       ~0.3 GB - which is why gpu-capacity.md marks its quantized readings
       UNKNOWN rather than claiming a saving.
+
+  # Held: on disk, not served. See the `held:` note at the top of this file.
+  - name: hf.co/Blackfrost-AI/Muse-Glimmer-30B-Abliterated-GGUF:Q4_K_M
+    tier: terra
+    role: vision
+    abliterated: true
+    held: true
+    held_reason: >-
+      Emits the literal string ` to=self` and stops after three tokens for
+      every prompt tried, under Ollama 0.32.9; /api/chat returns an empty
+      string. The likely cause is a chat template Ollama cannot drive - the
+      model card asks for a recent llama.cpp master. The weights are kept so
+      this can be re-checked when that support lands upstream and Ollama
+      vendors it; delete the entry and the weights together if it never does.
+      Full reasoning in docs/chat-models.md.
+    why: >-
+      Would have replaced muse-glimmer:30b as an uncensored vision model, and
+      fits the card more comfortably than the stock build it would have
+      replaced. Rejected on output, not on size - which is the point of
+      recording it here rather than deleting it quietly. No measured_mib: it
+      was never carried through a survey pass, so there is no figure this file
+      is allowed to state. The ad-hoc readings are in docs/chat-models.md.
