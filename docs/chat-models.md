@@ -72,9 +72,21 @@ the ceiling.
 then deleted. At 23.9 GB downloaded it is **23 GB resident even at
 `num_ctx=2048`** and never reached 100% GPU — 4%/96% at the smallest context
 tested, 23%/77% at the default. Unlike the 31b, no context setting rescues it:
-the weights alone exceed the card. It was the only uncensored coding model in
-the roster, so that use case is currently unserved; a smaller abliterated coder
-would be the way back to it.
+the weights alone exceed the card.
+
+**That gap is now filled**, and the way back was exactly what this paragraph
+predicted — a smaller abliterated coder.
+`huihui_ai/qwen3-coder-abliterated:30b-a3b-instruct-q4_K_M` is a 30B-A3B MoE at
+18.6 GB, and it runs at 100% GPU at the **full 32768** context, not merely at
+the 16384 its acceptance rule required. It answered the control prompt, so it
+is confirmed uncensored rather than assumed to be. Sizes are in
+[gpu-capacity.md](gpu-capacity.md); the entry and its reasoning are in
+`inventory/group_vars/all/models.yml`.
+
+Worth keeping the contrast: `aratan` failed because its **weights** exceeded
+the card, which no setting can fix. The 31b's problem was its **KV cache**,
+which quantizing did fix. Those are different failures that look identical in
+`ollama ps`, and telling them apart is what the survey is for.
 
 **Deleting it from Ollama did not delete it from Open WebUI.** As of
 2026-08-10 the `model` table on svc-infra still holds a row with id

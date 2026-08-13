@@ -113,6 +113,26 @@ model_roster:
       card with is image generation: ~7.5 GB above idle plus SDXL's ~6.5 GB
       fits, which no other vision option here allows.
 
+  - name: huihui_ai/qwen3-coder-abliterated:30b-a3b-instruct-q4_K_M
+    tier: terra
+    role: code
+    abliterated: true
+    measured_mib: 21112
+    measured_on: "2026-08-12"
+    num_ctx: 32768
+    why: >-
+      Uncensored coding, which docs/chat-models.md recorded as unserved after
+      aratan/qwen3.6-claude-coder-35b was deleted for not fitting the card at
+      any context. This is a different architecture at a smaller size - a
+      30B-A3B MoE, 18.6 GB on disk - and it fits at 100% GPU at the FULL 32768,
+      not merely at the 16384 the acceptance rule demanded. Confirmed
+      uncensored by scripts/abliteration_control.py, not by its name.
+
+      Two `role: code` entries is deliberate. qwen3-coder:30b below is stock
+      and stays Continue's default, because coding models rarely refuse and
+      abliteration costs measurable quality; this one exists for the cases
+      where that assumption fails.
+
   - name: qwen3-coder:30b
     tier: terra
     role: code
