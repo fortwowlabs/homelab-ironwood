@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Prove the admin SSH key list renders every key, not just the first.
 
-admin_ssh_pubkey used to be a scalar, consumed only by cloud-init at provision
-time. That made key rotation require rebuilding a VM and made revocation
-impossible without doing so again — so mac-control, which generates its own
-keypair, could not be granted access at all.
+admin_ssh_pubkey used to be a scalar. It became a list on 2026-08-12 so more
+than one key could be expressed, but its reach did not change: cloud-init, at
+provision time, is still the only consumer. Nothing reads it on a running VM,
+so this file proves one narrow thing — that every key in the list reaches the
+rendered cloud-init, one key per line.
 
-Turning it into a list is easy to get subtly wrong in two ways, and both look
-fine on a healthy first deploy:
+That is easy to get subtly wrong, and wrong looks fine until someone needs the
+second key:
 
   - the template renders `{{ admin_ssh_pubkeys }}` (a Python list repr) or
     only `[0]`, so the second key silently never lands;
-  - service_vm manages authorized_keys with `exclusive: true` against a single
-    key, quietly evicting the others on the next run.
+  - a `join(' ')` puts every key on one line, which cloud-init accepts without
+    complaint as a single malformed key — authorising nobody, on a
+    provisioning run that reports success.
 
 So this asserts a two-key list renders two keys AND a one-key list renders
 exactly one. The second case is the positive control: a template that emitted

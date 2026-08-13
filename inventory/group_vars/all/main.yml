@@ -121,18 +121,33 @@ rocky_image_name: "Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2"
 rocky_image_url:  "https://dl.rockylinux.org/pub/rocky/10/images/x86_64/Rocky-10-GenericCloud-Base-10.2-20260525.0.x86_64.qcow2"
 rocky_image_sha256: "9fc9e9ff16888bb68ac39b0392e25c9c92684d50c85f1cce6ab549363bbc4b48"
 
-# --- Admin SSH keys injected into every VM (public key CONTENT, not paths) ---
-# A LIST, not a scalar. Every entry is installed on each service VM on every
-# run by roles/service_vm/tasks/authorized-keys.yml, and baked into cloud-init
-# at provision time by roles/pve_vm.
+# --- Admin SSH keys baked into new VMs (public key CONTENT, not paths) ---
+# A LIST, not a scalar. It became one on 2026-08-12 so more than one key could
+# be expressed; nothing else about its reach changed.
 #
-# It became a list on 2026-08-12 so mac-control could hold a key of its own —
-# generated on that machine, never copied, and revocable by deleting one line
-# here and running `make deploy`. While this was a scalar consumed only by
-# cloud-init, adding a key meant rebuilding a VM and revoking one was not
-# possible at all.
+# SCOPE — read this before trusting it with a key rotation. This list has
+# exactly ONE consumer: roles/pve_vm's cloud-init template, which runs at
+# PROVISION time. Nothing reads it on a running VM.
 #
-# Removing an entry REVOKES it: the authorized_keys task is exclusive.
+# So:
+#   - Adding a key here affects VMs provisioned AFTER the change. Existing
+#     VMs are untouched until they are rebuilt. To add a key to a running VM,
+#     append it to ~/.ssh/authorized_keys on that host by hand as well.
+#   - DELETING AN ENTRY REVOKES NOTHING. `make deploy` will not remove the key
+#     from any running VM — it stays authorised until someone edits
+#     ~/.ssh/authorized_keys on each host directly. A compromised key is not
+#     retired by deleting a line here. Do that by hand, on every service VM,
+#     and confirm it is gone by reading the file back.
+#
+# Why it stops at provision time, rather than being enforced every run: an
+# exclusive authorized_keys task driven by this list would delete every key
+# not in it, and roles/svc_infra/tasks/verify-runner.yml already installs a
+# verify-runner key into the same straderb ~/.ssh/authorized_keys on all three
+# service VMs, non-exclusively. Two roles would fight over one file — the
+# runner key stripped on `make dl` (silently ending nightly verification) and
+# re-added on `make infra`, so no play could ever report changed=0 again.
+# Closing this gap properly needs ONE source of truth for both keys; until
+# that exists, the honest description of this list is the one above.
 admin_ssh_pubkeys:
   # The working laptop — the only machine that merges to main.
   - "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIMjZAEI+FfdW74JRrWjUbSK9HmF7AVHaa8qlYsN9YSLB straderb@Mac.fort.wow"

@@ -135,10 +135,12 @@ validate-catalog:
 validate-provisioning:
 	$(PYTHON) tests/validate_pve_states.py
 	$(PYTHON) tests/validate_preflight_addressing.py
-# Sits with the provisioning gates because the cloud-init template is what it
-# renders, but it guards the running VMs too: the same list drives an
-# exclusive authorized_keys task, so a template that quietly drops a key here
-# is a revocation nobody asked for there.
+# Sits with the provisioning gates because provision time is the only time
+# admin_ssh_pubkeys is read. The narrow thing it proves: the cloud-init
+# template renders one key per line. A bare `{{ admin_ssh_pubkeys }}` renders
+# Python's list repr instead, which cloud-init accepts without complaint as a
+# single malformed key — so a VM would come up authorising nobody, and the
+# provisioning run that did it would report success.
 	$(PYTHON) tests/validate_admin_keys.py
 
 validate-systemd:
