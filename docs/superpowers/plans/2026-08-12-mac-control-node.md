@@ -383,7 +383,6 @@ reference reads as working code and silently uses an undefined variable.
 
 from __future__ import annotations
 
-import re
 import subprocess
 import sys
 from pathlib import Path
@@ -430,9 +429,12 @@ def main() -> int:
             failures.append(
                 f"{label}: {absent!r} appeared though it was not in the list — "
                 "the template is not driven by its input")
-        if "admin_ssh_pubkeys" in rendered or "[" in re.sub(r"[^\[\]]", "", rendered):
-            if "ssh-ed25519" in rendered and "[u'" in rendered:
-                failures.append(f"{label}: rendered a Python list repr, not one key per line")
+        # A bare `{{ admin_ssh_pubkeys }}` renders Python's list repr on one
+        # line, which cloud-init accepts as a single malformed key.
+        if "['" in rendered or '["' in rendered:
+            failures.append(
+                f"{label}: rendered a Python list repr rather than one key per "
+                "line — the template needs a for loop")
 
     stale = subprocess.run(
         ["git", "grep", "-n", "admin_ssh_pubkey\\b"],
@@ -2712,10 +2714,13 @@ Replace `roles/mac_control/tasks/verify.yml` with:
   register: mac_control_tailnet_ip
   changed_when: false
 
+# Runs the copy already installed on the host by scheduled-agent.yml, which
+# imports earlier in main.yml — so verification exercises the same script the
+# nightly self-check runs, rather than a second rendering that could drift.
 - name: Run the tri-state Ollama binding check
-  ansible.builtin.script:
+  ansible.builtin.command:
     cmd: >-
-      {{ role_path }}/files/rendered-ollama-binding-check.sh
+      {{ mac_control_home }}/bin/ollama-binding-check.sh
       {{ mac_control_lan_ip }} {{ mac_control_tailnet_ip.stdout | trim }}
   register: mac_control_binding
   changed_when: false
@@ -2781,20 +2786,7 @@ Replace `roles/mac_control/tasks/verify.yml` with:
     mac_control_verified: true
 ```
 
-Add a task to `roles/mac_control/tasks/ollama.yml` that renders the check script to the role's files directory so `script:` can run it:
-
-```yaml
-- name: Render the Ollama binding check for verification
-  ansible.builtin.template:
-    src: ollama-binding-check.sh.j2
-    dest: "{{ role_path }}/files/rendered-ollama-binding-check.sh"
-    mode: "0755"
-  delegate_to: localhost
-  become: false
-  changed_when: false
-```
-
-Add `roles/mac_control/files/rendered-ollama-binding-check.sh` to `.gitignore` — it is generated, and committing it would be a second copy of the template that can drift.
+No extra rendering task is needed: `scheduled-agent.yml` already installs `ollama-binding-check.sh` to `{{ mac_control_home }}/bin/` on the host, and it imports before `verify.yml` in `main.yml`. Verification therefore exercises the exact script the nightly self-check runs — a second, locally-rendered copy could drift from it silently.
 
 - [ ] **Step 2: Write the nightly self-check**
 
@@ -3069,7 +3061,7 @@ git add roles/mac_control/tasks/verify.yml roles/mac_control/tasks/ollama.yml \
         roles/mac_control/tasks/scheduled-agent.yml \
         roles/mac_control/templates/selfcheck.sh.j2 \
         roles/mac_control/templates/homelab-selfcheck.plist.j2 \
-        site.yml verify.yml .gitignore inventory/group_vars/all_vault.yml.example
+        site.yml verify.yml inventory/group_vars/all_vault.yml.example
 git commit -m "feat: verify mac-control, and give it a nightly self-check
 
 Verification splits: the control_nodes play runs on workstation-invoked make
