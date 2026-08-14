@@ -145,6 +145,30 @@ def ollama_names(base_url: str, timeout: int) -> set[str]:
 
 
 def webui_names(db_path: str) -> set[str]:
+    """The models Open WebUI has a ROW for. Not the models it OFFERS.
+
+    That distinction is load-bearing and was measured on 2026-08-14 against
+    Open WebUI 0.11.0, because assuming the two were the same got both of this
+    script's findings backwards:
+
+    * The `model` table is an override store, not the dropdown. A model
+      installed in Ollama is offered to users with NO row here at all. So a
+      held model - one this catalog says must not be served - is invisible to
+      this query, and SERVED_HELD cannot fire for it. The Blackfrost Muse
+      Glimmer was offered and returning empty replies while this check printed
+      OK. Hiding it required CREATING a row with is_active = 0, which is the
+      opposite of what a "stale row" model of the world predicts.
+    * Conversely a stale row is NOT necessarily user-visible. 0.11.0 merges
+      this table against Ollama's tags and drops what Ollama no longer has, so
+      the aratan row read is_active = 1 for four days while never appearing in
+      the dropdown.
+
+    The authoritative source for what a user can pick is GET /api/models, which
+    needs an admin token this script deliberately does not hold. Until it does,
+    a clean run means "no disagreement among the three lists it can read" - it
+    does NOT mean nothing improper is being served. main() says so out loud
+    rather than printing a bare OK.
+    """
     if not Path(db_path).is_file():
         raise SystemExit(
             f"{db_path}: no such file. That path is svc-infra's Open WebUI "
@@ -195,7 +219,15 @@ def main() -> int:
     findings = reconcile(catalog, ollama_names(args.ollama_url, args.timeout),
                          webui_names(args.webui_db), held)
     if not findings:
-        print("Roster reconciliation: OK - catalog, Ollama and Open WebUI agree")
+        # Deliberately not a bare "OK". This check reads Open WebUI's model
+        # TABLE, and a model can be offered to users without appearing in it -
+        # see webui_names(). Saying what was compared, and naming what was not,
+        # is the difference between "none found" and "could not look".
+        print("Roster reconciliation: OK - catalog, Ollama and Open WebUI's "
+              "model table agree")
+        print("  Not checked: what Open WebUI actually OFFERS. That needs an "
+              "admin token and GET /api/models; a model installed in Ollama is "
+              "selectable with no row in the table this read.")
         return 0
     for severity, name, explanation in findings:
         print(f"{severity:<12} {name}", file=sys.stderr)

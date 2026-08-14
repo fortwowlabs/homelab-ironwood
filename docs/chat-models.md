@@ -117,15 +117,42 @@ model passed the first and failed the second.
 
 Re-check when llama.cpp support lands upstream and Ollama vendors it. The
 weights are on disk if that happens; nothing about them is known to be wrong.
+They are declared `held: true` in `models.yml` so that keeping them stops
+reading as undeclared drift — see the `held:` note at the top of that file.
 
-**Deleting it from Ollama did not delete it from Open WebUI.** As of
-2026-08-10 the `model` table on svc-infra still holds a row with id
-`aratan/qwen3.6-claude-coder-35b-A3b-mlx-Q4KM-abliterated:latest`,
-`is_active = 1`, while `/api/tags` on the GPU host lists eight models and
-not that one. Open WebUI's model list is its own table, not a view over
-Ollama, so removing a model upstream leaves the entry behind and a user who
-picks it gets a failure at generation time rather than an absence in the
-dropdown. Removing a model means removing it in both places.
+**It was still being offered to users until 2026-08-14**, which is the part
+that mattered and the part nobody had checked. It appeared in the model
+selector, and asking it anything through Open WebUI returned an empty reply —
+the same ` to=self` failure, now confirmed end to end rather than only against
+Ollama directly. It was hidden by creating a `model` row with
+`is_active = 0`; the weights were left in place.
+
+### What the Open WebUI model table is, and is not — measured 2026-08-14
+
+An earlier version of this section said the stale `aratan` row meant "a user
+who picks it gets a failure at generation time rather than an absence in the
+dropdown". Measured against Open WebUI 0.11.0, that is **wrong in both
+directions**, and the correction is worth more than the original claim.
+
+- **A stale row is not necessarily user-visible.** 0.11.0 merges the `model`
+  table against Ollama's tags and drops what Ollama no longer has. The
+  `aratan` row sat at `is_active = 1` for four days and never appeared in the
+  selector. It was bookkeeping drift, not a live trap. The row was deleted on
+  2026-08-14.
+- **A model with no row at all IS offered.** This is the direction that bites.
+  The table is an override store, not the dropdown, so anything installed in
+  Ollama is selectable without any row existing. That is precisely how the
+  broken Muse Glimmer stayed on offer.
+
+So "removing a model means removing it in both places" is right, but the
+reasoning was inverted: the risk is not the row left behind, it is the model
+present in Ollama that no row constrains. Hiding one requires *adding* a
+deactivated row, not deleting anything.
+
+This also bounds what `scripts/roster_reconcile.py` can tell you. It reads the
+table, so it cannot see what is offered; a clean run says the three lists it
+can read agree, and says so in those words. The authoritative source is
+`GET /api/models` with an admin token, which that script does not hold.
 
 The coding default, `qwen3-coder:30b`, is **not** abliterated on purpose. Coding
 models rarely refuse, so abliteration buys almost nothing while costing
