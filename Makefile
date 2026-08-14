@@ -58,7 +58,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 	validate-ansible validate-yaml validate-shell validate-links \
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
 	check check-diff verify verify-disruptive scan image-digest image-check image-bump \
-	release-check release-report image-release owui-image-config drift reconcile access ping lint \
+	release-check release-report image-release owui-image-config image-gen-check drift reconcile access ping lint \
 	vault-edit clean
 
 help: ## Show this help
@@ -224,6 +224,9 @@ image-release: ## What version is REF, and what has upstream released since?
 
 owui-image-config: ## Push inventory/group_vars/all/images.yml into Open WebUI (needs OWUI_ADMIN_TOKEN)
 	$(PYTHON) scripts/owui_image_config.py $(ARGS)
+
+image-gen-check: ## Generate one image end to end and assert it is a 1024x1024 PNG
+	$(PYTHON) scripts/image_generation_check.py $(ARGS)
 
 verify-disruptive: ## Explicitly run the fail-closed recovery drill
 	$(ANSIBLE) $(DISRUPTIVE_PLAYBOOK) $(VAULT) $(ARGS)
