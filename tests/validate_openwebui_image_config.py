@@ -172,6 +172,12 @@ def _empty_model(catalog, workflows, main_vars):
     catalog["image_generation_model"] = ""
 
 
+def _empty_node_ids(catalog, workflows, main_vars):
+    # The width mapping is present -- REQUIRED_TYPES is happy -- but its
+    # node_ids is empty, so the value never reaches ComfyUI.
+    catalog["image_workflow_nodes"][3]["node_ids"] = []
+
+
 # Each case is (name, mutation, substring that must appear in a failure).
 # A mutation takes (catalog, workflows, main_vars) and breaks exactly one rule.
 VALIDATION_CASES = (
@@ -194,6 +200,7 @@ VALIDATION_CASES = (
     ("image_size not WxH", _bad_image_size, "image_size"),
     ("negative image_steps", _negative_steps, "image_steps"),
     ("empty image_generation_model", _empty_model, "image_generation_model"),
+    ("empty node_ids on a mapping entry", _empty_node_ids, "node_ids"),
 )
 
 
@@ -312,7 +319,19 @@ def check_config(catalog: dict, workflows: dict[str, dict],
                 "target class does not have, which ComfyUI ignores without error"
             )
 
-        for node_id in node.get("node_ids") or []:
+        node_ids = node.get("node_ids")
+        if (not isinstance(node_ids, list) or not node_ids
+                or not all(isinstance(nid, str) for nid in node_ids)):
+            failures.append(
+                f"{where} has node_ids {node_ids!r}; it must be a non-empty "
+                "list of strings. A missing key, a non-list, an empty list, "
+                "or a non-string element each map the value to nothing while "
+                "REQUIRED_TYPES still sees the type as present — the exact "
+                "silent failure this gate exists to catch"
+            )
+            continue
+
+        for node_id in node_ids:
             for name, workflow in sorted(workflows.items()):
                 if isinstance(workflow.get("nodes"), list):
                     continue  # already reported as editor format

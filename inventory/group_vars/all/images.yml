@@ -1,10 +1,17 @@
 ---
 # ComfyUI image-generation catalog for Open WebUI on svc-infra.
 #
-# NO PLAY OR ROLE READS THIS FILE. It is consumed only by
+# NO PLAY OR ROLE CONSUMES THESE VARIABLES (verified by grep across roles/
+# and the top-level *.yml plays). It is consumed only by
 # scripts/owui_image_config.py, scripts/image_generation_check.py and
 # tests/validate_openwebui_image_config.py, so adding to it never changes what
 # `make infra` deploys and never disturbs the changed=0 proof.
+#
+# That is narrower than "nothing reads this file": inventory/group_vars/all/
+# is auto-loaded by Ansible for every host, so these names DO occupy the
+# global variable namespace in every play whether or not anything references
+# them -- image_size in particular is generic enough to collide with
+# something else one day.
 #
 # This file is the authority for Open WebUI's image settings, NOT the env block
 # in infra-apps.yml. ENABLE_PERSISTENT_CONFIG became true on 2026-08-10, so the
@@ -39,8 +46,10 @@ image_generation_model: "sd_xl_base_1.0.safetensors"
 image_size: "1024x1024"
 image_steps: 28
 
-# Serialised to JSON as COMFYUI_WORKFLOW_NODES by the push tool. Declared as
-# YAML so diffs are readable.
+# Passed through as-is (a list of dicts) to COMFYUI_WORKFLOW_NODES by the
+# push tool -- upstream's field is list[dict], not a JSON string, so this one
+# is NOT serialised. (COMFYUI_WORKFLOW, the workflow itself, is the field
+# that is JSON-encoded.) Declared as YAML here so diffs are readable.
 #
 # `key` is explicit on every entry. ComfyUINodeInput.key defaults to 'text',
 # so an omitted key on a model/seed/image node writes inputs['text'] — a key

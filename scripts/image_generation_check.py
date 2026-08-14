@@ -64,7 +64,7 @@ def probe(base_url: str, token: str, catalog: dict,
     except urllib.error.HTTPError as error:
         if error.code == 400:
             # Broken mapping normally surfaces as a 400 here.
-            return "broken", {}
+            return "broken", {"homelab_image_generation_ok": 0.0}
         return "inconclusive", {}
     except (urllib.error.URLError, OSError, ValueError):
         return "inconclusive", {}
@@ -73,13 +73,13 @@ def probe(base_url: str, token: str, catalog: dict,
     if expected_model not in available:
         print(f"FAIL: {expected_model!r} is not among the checkpoints ComfyUI "
               f"offers ({sorted(available)})", file=sys.stderr)
-        return "broken", {}
+        return "broken", {"homelab_image_generation_ok": 0.0}
 
     try:
         result = api_post(base_url, "/api/v1/images/generations", token,
                           {"prompt": PROMPT, "n": 1}, timeout)
     except urllib.error.HTTPError:
-        return "broken", {}
+        return "broken", {"homelab_image_generation_ok": 0.0}
     except (urllib.error.URLError, OSError, ValueError):
         return "inconclusive", {}
 
@@ -88,7 +88,7 @@ def probe(base_url: str, token: str, catalog: dict,
               "swallows every exception into None, which can arise from a broken "
               "mapping (500+ error from ComfyUI wraps as a 400), an empty list, "
               "or other failures upstream", file=sys.stderr)
-        return "broken", {}
+        return "broken", {"homelab_image_generation_ok": 0.0}
 
     url = result[0].get("url", "")
     if url.startswith("/"):
@@ -106,7 +106,7 @@ def probe(base_url: str, token: str, catalog: dict,
     except ValueError:
         print(f"FAIL: returned {len(data)} bytes that are not a PNG",
               file=sys.stderr)
-        return "broken", {}
+        return "broken", {"homelab_image_generation_ok": 0.0}
 
     duration = time.monotonic() - started
     metrics = {
@@ -151,8 +151,9 @@ def main() -> int:
 
     catalog = yaml.safe_load(CATALOG_PATH.read_text())
     if not catalog.get("image_generation_enabled"):
-        print("image_generation_enabled is false in images.yml — not probing")
-        return 0
+        print("image_generation_enabled is false in images.yml — the feature "
+              "is disabled, so this run could not look and is not an all-clear")
+        return 2
 
     verdict, metrics = probe(args.base_url, token, catalog, args.timeout)
 
@@ -162,12 +163,18 @@ def main() -> int:
     # number is detectable where a fabricated zero reads as good news.
     if args.metrics_dir and metrics:
         lines = "".join(f"{name} {value}\n" for name, value in sorted(metrics.items()))
-        subprocess.run(
-            ["homelab-metric-write", "--dir", args.metrics_dir,
-             "--file", "image-generation", "--prefix", "homelab_image_generation",
-             *(["--success"] if verdict == "ok" else [])],
-            input=lines, text=True, check=True,
-        )
+        try:
+            subprocess.run(
+                ["homelab-metric-write", "--dir", args.metrics_dir,
+                 "--file", "image-generation", "--prefix", "homelab_image_generation",
+                 *(["--success"] if verdict == "ok" else [])],
+                input=lines, text=True, check=True,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError) as error:
+            # A publishing failure must not masquerade as a verdict: let the
+            # verdict's own exit code stand rather than raising, which would
+            # exit 1 and collide with the "broken" verdict's own meaning.
+            print(f"failed to publish metrics: {error}", file=sys.stderr)
 
     print(f"verdict={verdict}")
     return {"ok": 0, "broken": 1, "inconclusive": 2}[verdict]

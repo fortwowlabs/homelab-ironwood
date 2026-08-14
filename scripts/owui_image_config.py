@@ -16,8 +16,12 @@ Design: docs/superpowers/specs/2026-08-14-comfyui-image-generation-design.md
 
 Exit codes:
     0  pushed and read back identical, or already identical (nothing to do)
-    1  bad arguments, Open WebUI unreachable, or auth rejected -- COULD NOT LOOK
-    2  pushed, but the readback disagrees -- rejected or silently rewritten
+    1  bad arguments, Open WebUI unreachable, the GET was rejected, or the
+       POST was refused outright (401/403 or any other 4xx) -- COULD NOT
+       LOOK, nothing was pushed
+    2  the POST returned a 5xx (ambiguous -- it may have partially applied
+       before erroring), or it returned 200 but the readback disagrees --
+       rejected or silently rewritten
     3  catalog or workflow file invalid (validate_openwebui_image_config.py
        should have caught this first)
 """
@@ -161,6 +165,14 @@ def main() -> int:
         api_post(args.base_url, "/api/v1/images/config/update", token, payload,
                  args.timeout)
     except urllib.error.HTTPError as error:
+        if 400 <= error.code < 500:
+            # A 4xx means the request was refused outright -- nothing was
+            # pushed. That is COULD NOT LOOK, the same bucket as an
+            # unreachable server, not "pushed but disagreed".
+            print(f"POST /api/v1/images/config/update returned {error.code} "
+                  "-- the request was refused, nothing was pushed",
+                  file=sys.stderr)
+            return 1
         print(f"POST /api/v1/images/config/update returned {error.code}",
               file=sys.stderr)
         return 2
