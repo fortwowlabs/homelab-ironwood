@@ -106,6 +106,32 @@ def _drift_enabled(catalog, workflows, main_vars):
     main_vars["gpu_host_online"] = False
 
 
+def _node_id_absent_from_one_workflow(catalog, workflows, main_vars):
+    # A second workflow that omits node 5. The mapping is shared across all
+    # committed workflows, so this must fail even though `sdxl` is selected.
+    other = good_workflow()
+    del other["5"]
+    workflows["other"] = other
+
+
+def _unknown_node_type(catalog, workflows, main_vars):
+    catalog["image_workflow_nodes"][0]["type"] = "checkpoint"
+
+
+def _model_node_without_key(catalog, workflows, main_vars):
+    del catalog["image_workflow_nodes"][0]["key"]
+
+
+def _image_type_in_generation_mapping(catalog, workflows, main_vars):
+    catalog["image_workflow_nodes"].append(
+        {"type": "image", "key": "image", "node_ids": ["6"]})
+
+
+def _missing_required_type(catalog, workflows, main_vars):
+    catalog["image_workflow_nodes"] = [
+        n for n in catalog["image_workflow_nodes"] if n["type"] != "seed"]
+
+
 # Each case is (name, mutation, substring that must appear in a failure).
 # A mutation takes (catalog, workflows, main_vars) and breaks exactly one rule.
 VALIDATION_CASES = (
@@ -115,6 +141,13 @@ VALIDATION_CASES = (
     ("comfyui_base_url disagrees with gpu_host_ip", _drift_base_url, "gpu_host_ip"),
     ("image_generation_enabled disagrees with gpu_host_online", _drift_enabled,
      "gpu_host_online"),
+    ("mapped node absent from a non-selected workflow",
+     _node_id_absent_from_one_workflow, "other"),
+    ("unrecognised node type", _unknown_node_type, "checkpoint"),
+    ("model node without an explicit key", _model_node_without_key, "explicit key"),
+    ("image-type node in a generation mapping",
+     _image_type_in_generation_mapping, "AttributeError"),
+    ("required mapping type missing", _missing_required_type, "seed"),
 )
 
 
@@ -201,6 +234,55 @@ def check_config(catalog: dict, workflows: dict[str, dict],
                 "_ws_get_images collects outputs only from those, so generation "
                 "would succeed and return an empty image list with no error"
             )
+
+    nodes = catalog.get("image_workflow_nodes") or []
+    if not isinstance(nodes, list):
+        failures.append("image_workflow_nodes must be a list")
+        return failures
+
+    seen_types: set[str] = set()
+    for index, node in enumerate(nodes):
+        node_type = node.get("type")
+        where = f"image_workflow_nodes[{index}] (type={node_type!r})"
+        seen_types.add(node_type)
+
+        if node_type is not None and node_type not in HANDLED_TYPES:
+            failures.append(
+                f"{where} is not a type Open WebUI handles. "
+                "_apply_workflow_nodes falls through every branch and skips it "
+                "in silence, which is indistinguishable from a bad node ID"
+            )
+        if node_type == "image":
+            failures.append(
+                f"{where} belongs only to an EDIT mapping. "
+                "ComfyUICreateImageForm has no `image` field, so "
+                "_apply_workflow_nodes raises AttributeError on payload.image, "
+                "which comfyui_create_image swallows into None — no image, no error"
+            )
+        if node_type in NEEDS_EXPLICIT_KEY and "key" not in node:
+            failures.append(
+                f"{where} needs an explicit key. ComfyUINodeInput.key defaults "
+                "to 'text', so omitting it writes inputs['text'] — a key the "
+                "target class does not have, which ComfyUI ignores without error"
+            )
+
+        for node_id in node.get("node_ids") or []:
+            for name, workflow in sorted(workflows.items()):
+                if isinstance(workflow.get("nodes"), list):
+                    continue  # already reported as editor format
+                if node_id not in workflow:
+                    failures.append(
+                        f"{where} maps node id {node_id!r}, absent from workflow "
+                        f"{name!r}. The mapping is shared across every committed "
+                        "workflow so that switching image_workflow can never be "
+                        "the step that discovers a broken mapping"
+                    )
+
+    for required in sorted(REQUIRED_TYPES - seen_types):
+        failures.append(
+            f"image_workflow_nodes has no {required!r} entry — that value would "
+            "never reach ComfyUI and the workflow's hardcoded one would be used"
+        )
 
     return failures
 
