@@ -1,0 +1,70 @@
+---
+# ComfyUI image-generation catalog for Open WebUI on svc-infra.
+#
+# NO PLAY OR ROLE READS THIS FILE. It is consumed only by
+# scripts/owui_image_config.py, scripts/image_generation_check.py and
+# tests/validate_openwebui_image_config.py, so adding to it never changes what
+# `make infra` deploys and never disturbs the changed=0 proof.
+#
+# This file is the authority for Open WebUI's image settings, NOT the env block
+# in infra-apps.yml. ENABLE_PERSISTENT_CONFIG became true on 2026-08-10, so the
+# environment is a first-boot seed that a database row overrides permanently.
+# Apply changes here with `make owui-image-config`; `make infra` will not.
+#
+# See docs/superpowers/specs/2026-08-14-comfyui-image-generation-design.md.
+
+# Which file in inventory/comfyui-workflows/ to submit. Every mapped node ID
+# below must exist in EVERY workflow there, not just this one, so that changing
+# this line can never be the step that discovers a broken mapping.
+image_workflow: sdxl
+
+# comfyui_base_url and image_generation_enabled DUPLICATE gpu_host_ip and
+# gpu_host_online in main.yml. That is deliberate: this file is read by plain
+# yaml.safe_load with no Jinja rendering, so it cannot reference them. The
+# duplication is safe only because validate_openwebui_image_config.py fails the
+# build when the two disagree — do not "fix" one without the other.
+comfyui_base_url: "http://192.168.1.40:8188"
+image_generation_enabled: true
+
+# The checkpoint filename as ComfyUI lists it in
+# /object_info/CheckpointLoaderSimple. This is where the checkpoint name comes
+# from: _apply_workflow_nodes writes it into the mapped `model` node. With it
+# empty, a flawless mapping still submits an empty checkpoint name.
+image_generation_model: "sd_xl_base_1.0.safetensors"
+
+# 1024x1024 because SDXL is trained at 1024 and degrades badly below it.
+# The runtime check asserts the returned PNG is exactly this size — a 512x512
+# result means the mapping never reached ComfyUI and the compiled-in default
+# workflow ran, which is the original defect.
+image_size: "1024x1024"
+image_steps: 28
+
+# Serialised to JSON as COMFYUI_WORKFLOW_NODES by the push tool. Declared as
+# YAML so diffs are readable.
+#
+# `key` is explicit on every entry. ComfyUINodeInput.key defaults to 'text',
+# so an omitted key on a model/seed/image node writes inputs['text'] — a key
+# CheckpointLoaderSimple does not have and ComfyUI quietly ignores, running the
+# workflow's hardcoded checkpoint instead of erroring.
+image_workflow_nodes:
+  - type: model
+    key: ckpt_name
+    node_ids: ["4"]
+  - type: prompt
+    key: text
+    node_ids: ["6"]
+  - type: negative_prompt
+    key: text
+    node_ids: ["7"]
+  - type: width
+    key: width
+    node_ids: ["5"]
+  - type: height
+    key: height
+    node_ids: ["5"]
+  - type: steps
+    key: steps
+    node_ids: ["3"]
+  - type: seed
+    key: seed
+    node_ids: ["3"]

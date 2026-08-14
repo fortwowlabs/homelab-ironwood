@@ -131,6 +131,7 @@ validate-catalog:
 	$(PYTHON) tests/validate_scan_image_coverage.py
 	$(PYTHON) tests/validate_image_provenance.py
 	$(PYTHON) tests/validate_release_overrides.py
+	$(PYTHON) tests/validate_openwebui_image_config.py
 
 validate-provisioning:
 	$(PYTHON) tests/validate_pve_states.py

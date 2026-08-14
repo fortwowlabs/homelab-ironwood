@@ -1,0 +1,237 @@
+#!/usr/bin/env python3
+"""Assert the ComfyUI image config is well-formed before it reaches Open WebUI.
+
+Every failure mode in this feature is silent. Open WebUI's
+_apply_workflow_nodes writes workflow[node_id]["inputs"][key] = value, and
+comfyui_create_image swallows the resulting KeyError in a broad `except
+Exception` and returns None: no image, no error message, green container. An
+unrecognised node `type` is skipped without comment, which is indistinguishable
+from a bad node ID. So a typo here does not fail loudly anywhere downstream,
+and this gate is the only thing between a typo and a silently dead feature.
+
+Design and the upstream source reading behind each rule:
+docs/superpowers/specs/2026-08-14-comfyui-image-generation-design.md
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+CATALOG_PATH = ROOT / "inventory" / "group_vars" / "all" / "images.yml"
+MAIN_VARS_PATH = ROOT / "inventory" / "group_vars" / "all" / "main.yml"
+WORKFLOW_DIR = ROOT / "inventory" / "comfyui-workflows"
+
+# Node types Open WebUI's _apply_workflow_nodes actually branches on. A type
+# outside this set falls through every branch and is skipped in silence.
+HANDLED_TYPES = {
+    "model", "prompt", "negative_prompt", "image",
+    "width", "height", "n", "steps", "seed",
+}
+
+# Types whose branch reads node.key with no per-type default. key defaults to
+# 'text' on the model, so omitting it writes inputs['text'] rather than raising.
+NEEDS_EXPLICIT_KEY = {"model", "seed", "image"}
+
+# Mapping entries a generation config cannot work without.
+REQUIRED_TYPES = {"model", "prompt", "width", "height", "steps", "seed"}
+
+# ComfyUI collects output images only from these two class_types
+# (_ws_get_images). A workflow ending in neither returns an empty image list:
+# generation succeeds, no image, no error.
+OUTPUT_CLASSES = {"SaveImage", "PreviewImage"}
+
+
+def good_catalog() -> dict:
+    """A minimal catalog that must pass every rule."""
+    return {
+        "image_workflow": "sdxl",
+        "comfyui_base_url": "http://192.168.1.40:8188",
+        "image_generation_enabled": True,
+        "image_generation_model": "sd_xl_base_1.0.safetensors",
+        "image_size": "1024x1024",
+        "image_steps": 28,
+        "image_workflow_nodes": [
+            {"type": "model", "key": "ckpt_name", "node_ids": ["4"]},
+            {"type": "prompt", "key": "text", "node_ids": ["6"]},
+            {"type": "negative_prompt", "key": "text", "node_ids": ["7"]},
+            {"type": "width", "key": "width", "node_ids": ["5"]},
+            {"type": "height", "key": "height", "node_ids": ["5"]},
+            {"type": "steps", "key": "steps", "node_ids": ["3"]},
+            {"type": "seed", "key": "seed", "node_ids": ["3"]},
+        ],
+    }
+
+
+def good_workflow() -> dict:
+    return {
+        "3": {"class_type": "KSampler",
+              "inputs": {"seed": 0, "steps": 28, "cfg": 7.0}},
+        "4": {"class_type": "CheckpointLoaderSimple",
+              "inputs": {"ckpt_name": "sd_xl_base_1.0.safetensors"}},
+        "5": {"class_type": "EmptyLatentImage",
+              "inputs": {"width": 1024, "height": 1024, "batch_size": 1}},
+        "6": {"class_type": "CLIPTextEncode", "inputs": {"text": ""}},
+        "7": {"class_type": "CLIPTextEncode", "inputs": {"text": ""}},
+        "9": {"class_type": "SaveImage",
+              "inputs": {"filename_prefix": "homelab-owui"}},
+    }
+
+
+def good_main_vars() -> dict:
+    return {"gpu_host_ip": "192.168.1.40", "gpu_host_online": True}
+
+
+def _drop_output_node(catalog, workflows, main_vars):
+    del workflows["sdxl"]["9"]
+
+
+def _editor_format(catalog, workflows, main_vars):
+    workflows["sdxl"] = {"nodes": [{"id": 3}], "links": []}
+
+
+def _missing_workflow_file(catalog, workflows, main_vars):
+    catalog["image_workflow"] = "nonexistent"
+
+
+def _drift_base_url(catalog, workflows, main_vars):
+    catalog["comfyui_base_url"] = "http://192.168.1.99:8188"
+
+
+def _drift_enabled(catalog, workflows, main_vars):
+    main_vars["gpu_host_online"] = False
+
+
+# Each case is (name, mutation, substring that must appear in a failure).
+# A mutation takes (catalog, workflows, main_vars) and breaks exactly one rule.
+VALIDATION_CASES = (
+    ("workflow with no SaveImage/PreviewImage", _drop_output_node, "SaveImage"),
+    ("editor-format workflow", _editor_format, "editor format"),
+    ("image_workflow names a missing file", _missing_workflow_file, "nonexistent"),
+    ("comfyui_base_url disagrees with gpu_host_ip", _drift_base_url, "gpu_host_ip"),
+    ("image_generation_enabled disagrees with gpu_host_online", _drift_enabled,
+     "gpu_host_online"),
+)
+
+
+def validation_self_check() -> list[str]:
+    """Prove each rule still fires. A gate against silent failure is not
+    allowed to fail silently itself."""
+    problems: list[str] = []
+
+    baseline = check_config(good_catalog(), {"sdxl": good_workflow()}, good_main_vars())
+    if baseline:
+        problems.append(
+            f"the known-good configuration failed: {baseline} — every case below "
+            "is measured against it, so the whole gate is untrustworthy"
+        )
+
+    for name, mutate, expected in VALIDATION_CASES:
+        catalog = good_catalog()
+        workflows = {"sdxl": good_workflow()}
+        main_vars = good_main_vars()
+        mutate(catalog, workflows, main_vars)
+        failures = check_config(catalog, workflows, main_vars)
+        if not any(expected in f for f in failures):
+            problems.append(
+                f"case {name!r} did not produce a failure mentioning {expected!r} "
+                f"(got {failures}) — this rule is not enforced, so a config "
+                "breaking it would deploy and produce no image and no error"
+            )
+    return problems
+
+
+def check_config(catalog: dict, workflows: dict[str, dict],
+                 main_vars: dict) -> list[str]:
+    """Return human-readable failures. Empty means the config is sound."""
+    failures: list[str] = []
+
+    selected = catalog.get("image_workflow")
+    if selected not in workflows:
+        failures.append(
+            f"image_workflow is {selected!r} but no such file exists in "
+            f"inventory/comfyui-workflows/ (have: {sorted(workflows)})"
+        )
+
+    # These duplicate main.yml because this file is read without Jinja
+    # rendering. The duplication is only safe while this check exists.
+    expected_url = f"http://{main_vars.get('gpu_host_ip')}:8188"
+    if catalog.get("comfyui_base_url") != expected_url:
+        failures.append(
+            f"comfyui_base_url is {catalog.get('comfyui_base_url')!r} but "
+            f"gpu_host_ip in main.yml implies {expected_url!r} — the two have "
+            "drifted and the push would point at the wrong host"
+        )
+    if bool(catalog.get("image_generation_enabled")) != bool(
+            main_vars.get("gpu_host_online")):
+        failures.append(
+            "image_generation_enabled disagrees with gpu_host_online in "
+            "main.yml — since the push retired the environment gate, this "
+            "catalog is the only thing that still turns the feature off"
+        )
+
+    for name, workflow in sorted(workflows.items()):
+        if not isinstance(workflow, dict):
+            failures.append(f"workflow {name!r} is not a JSON object")
+            continue
+        if isinstance(workflow.get("nodes"), list):
+            failures.append(
+                f"workflow {name!r} looks like ComfyUI's editor format (it has "
+                "a top-level `nodes` array). Open WebUI can only read the API "
+                "format — re-export with Workflow -> Export (API)"
+            )
+            continue
+        bad = [nid for nid, node in workflow.items()
+               if not isinstance(node, dict) or "class_type" not in node
+               or "inputs" not in node]
+        if bad:
+            failures.append(
+                f"workflow {name!r} nodes {sorted(bad)} lack class_type/inputs "
+                "— not valid API format"
+            )
+            continue
+        classes = {node["class_type"] for node in workflow.values()}
+        if not (classes & OUTPUT_CLASSES):
+            failures.append(
+                f"workflow {name!r} contains no SaveImage or PreviewImage node. "
+                "_ws_get_images collects outputs only from those, so generation "
+                "would succeed and return an empty image list with no error"
+            )
+
+    return failures
+
+
+def load_all(root: Path) -> tuple[dict, dict[str, dict], dict]:
+    catalog = yaml.safe_load((root / "inventory" / "group_vars" / "all"
+                              / "images.yml").read_text())
+    main_vars = yaml.safe_load((root / "inventory" / "group_vars" / "all"
+                                / "main.yml").read_text())
+    workflows = {}
+    for path in sorted((root / "inventory" / "comfyui-workflows").glob("*.json")):
+        workflows[path.stem] = json.loads(path.read_text())
+    return catalog, workflows, main_vars
+
+
+def main() -> int:
+    failures: list[str] = validation_self_check()
+
+    catalog, workflows, main_vars = load_all(ROOT)
+    if not workflows:
+        print(f"no workflows found in {WORKFLOW_DIR}", file=sys.stderr)
+        return 1
+    failures.extend(check_config(catalog, workflows, main_vars))
+
+    if failures:
+        for failure in failures:
+            print(f"FAIL: {failure}", file=sys.stderr)
+        return 1
+    print(f"Open WebUI image config: OK ({len(workflows)} workflow(s))")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
