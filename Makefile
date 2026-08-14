@@ -58,7 +58,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 	validate-ansible validate-yaml validate-shell validate-links \
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
 	check check-diff verify verify-disruptive scan image-digest image-check image-bump \
-	release-check release-report image-release drift reconcile access ping lint \
+	release-check release-report image-release owui-image-config drift reconcile access ping lint \
 	vault-edit clean
 
 help: ## Show this help
@@ -221,6 +221,9 @@ release-report: ## Run the weekly release report on svc-infra (publishes + recor
 image-release: ## What version is REF, and what has upstream released since?
 	@test -n "$(REF)" || { echo 'usage: make image-release REF=lscr.io/linuxserver/sonarr' >&2; exit 64; }
 	@scripts/image-release.sh "$(REF)"
+
+owui-image-config: ## Push inventory/group_vars/all/images.yml into Open WebUI (needs OWUI_ADMIN_TOKEN)
+	$(PYTHON) scripts/owui_image_config.py $(ARGS)
 
 verify-disruptive: ## Explicitly run the fail-closed recovery drill
 	$(ANSIBLE) $(DISRUPTIVE_PLAYBOOK) $(VAULT) $(ARGS)
