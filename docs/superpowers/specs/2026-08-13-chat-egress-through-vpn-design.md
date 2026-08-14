@@ -106,36 +106,44 @@ svc-download's LAN IP, and a `no_proxy` covering the GPU host, svc-download,
 `lan_cidr` and localhost — so inference, image generation and search stay
 direct at LAN speed.
 
-#### Request logging is off by default
+#### Request logging is on by default, and can be turned off
 
-A proxy that records every URL chat reaches for is a browsing history in a new
-place, held longer and read more casually than the thing it was built to
-protect. **The default is that no requested URL is written anywhere.**
+The proxy records the destinations chat reaches for. This is the one place in
+the estate where that record exists as a deliberate artifact rather than a side
+effect, and it is what makes the appendix's traffic table answerable, a
+misbehaving integration diagnosable, and "did that actually go through the
+tunnel" checkable after the fact rather than only live.
 
-One inventory variable, `chat_proxy_log_requests`, defaulting to `false`,
-controls it. It renders tinyproxy's `LogLevel`: low enough that per-request
-lines are never emitted when false, raised to include connection lines when
-true. Errors and startup failures are logged either way — the toggle governs
-*what was requested*, never *whether it worked*, so turning logging off cannot
-make a broken proxy harder to diagnose.
+One inventory variable, `chat_proxy_log_requests`, defaulting to `true`,
+controls it. It renders tinyproxy's `LogLevel`: connection lines included when
+true, suppressed below the per-request threshold when false. Errors and startup
+failures are logged in both states — the toggle governs *what was requested*,
+never *whether it worked*, so turning it off cannot make a broken proxy harder
+to diagnose.
 
 It is a deploy-time toggle rather than a runtime switch, deliberately: flip the
 variable and run `make dl`. A runtime flip would mean the logging state of a
 privacy-relevant component is no longer described by the commit, which is the
-same drift `ENABLE_PERSISTENT_CONFIG` already inflicts on Open WebUI. Enabling
-logging should be a visible, temporary, revertible act.
+same drift `ENABLE_PERSISTENT_CONFIG` already inflicts on Open WebUI.
 
-**Three things this does not do**, stated so nobody mistakes the toggle for
-anonymity:
+**Retention is a design decision, not a default to inherit.** A log that is
+always on grows without bound unless something bounds it, and an unbounded log
+inside the jail is both a disk-fill risk on svc-download and an ever-lengthening
+browsing history. The proxy logs to stdout, so journald holds it and journald's
+limits apply; the plan pins an explicit retention for this unit rather than
+leaving it to whatever the host default happens to be, and states the retained
+window in `docs/services.md` so it is a known quantity rather than a discovered
+one.
+
+**Two things the log is not**, so it is not mistaken for the whole picture:
 
 - Open WebUI keeps the chat itself — fetched page content, citations and URLs —
-  in its own database, which the nightly backup captures. That is a **richer
-  and longer-lived record than the proxy log ever was**, and it is unaffected
-  by this setting.
-- SearXNG's own logging is a separate question with a separate config, not
-  covered here.
-- The tunnel operator sees connection metadata regardless. Mullvad's policy is
-  Mullvad's policy.
+  in its own database, which the nightly backup captures. That is a **richer and
+  longer-lived record than the proxy log**, and neither state of this toggle
+  affects it.
+- SearXNG's own logging, which would hold search *terms* rather than
+  destinations, is a separate question with a separate config and is not covered
+  here.
 
 ### 2. Enforcement
 
@@ -177,19 +185,23 @@ Angle-bracketed values above are rendered from inventory (`svc_uid`,
 copying addresses into role data or documentation. The `level 5` depends on
 the user-manager slice path and is confirmed in plan step 1, not assumed.
 
-**The drop rule's log statement is bound to the same toggle as the proxy's,
-and this is not obvious.** An earlier draft logged every dropped packet
-unconditionally, which would have written the destination address of anything
-chat tried to reach directly into the kernel log — precisely the record the
-proxy is configured not to keep, leaking through the enforcement layer instead
-of the proxy layer. Two toggles that could disagree would be worse than one, so
-there is one variable and it governs both.
+**The drop rule's log statement is bound to the same toggle as the proxy's.**
+Both record destinations, so two variables that could disagree would be worse
+than one — a `chat_proxy_log_requests: false` that still wrote every blocked
+destination into the kernel log would be a setting that does not mean what it
+says. One variable governs both.
 
-Dropping the log statement costs nothing that matters, because **`counter` is
-what the verification depends on, not `log`.** The counter is a number, not a
-destination; it proves the rule fired without recording where the packet was
-headed. So the default configuration is simultaneously the private one and the
-verifiable one, which is the outcome worth having.
+At the default it is on, and here that is worth more than it is at the proxy: a
+dropped packet means something in chat bypassed its proxy configuration, which
+should never happen. The count alone tells you it happened; the log tells you
+where it was going, which is the difference between knowing there is a bug and
+being able to find it.
+
+Turning it off never weakens the verification, because **the probe reads
+`counter`, not `log`.** The counter is a number rather than a destination, and
+it is unconditional in both states. So the private configuration and the
+verifiable one remain the same configuration — the toggle trades away
+diagnosability, never proof.
 
 **Fail-closed needs no mechanism.** If the tunnel or jail is down the proxy is
 unreachable, the fetch fails, and the firewall means there is no direct path to
@@ -269,12 +281,17 @@ rendered rule matches the rendered unit name.
   separate assertion must confirm open-webui's own environment is correct —
   otherwise a wrong env var reads as a tunnel outage.
 - **Confirm the nft version on svc-infra supports `socket cgroupv2 level`.**
-- **Confirm which `LogLevel` value actually suppresses per-request lines** in
-  the chosen proxy, by setting it and generating traffic, rather than by
-  reading the manual. The default must be verified to emit no URLs — a privacy
-  default that was never tested is not a default anybody should rely on. If the
-  proxy cannot separate request logging from error logging, say so rather than
-  accepting a level that silently keeps both.
+- **Verify both states of `chat_proxy_log_requests` by generating traffic**,
+  not by reading the manual: URLs present when true, absent when false, and
+  errors present in both. The `false` state is the one that will never be
+  exercised in normal operation, so it is the one that will be quietly broken
+  when someone reaches for it. If the chosen proxy cannot separate request
+  logging from error logging, say so rather than accepting a level that keeps
+  both.
+- **Pin an explicit journald retention for the proxy unit** and record the
+  window in `docs/services.md`. With logging on by default this is what stops
+  the log growing without bound on svc-download, and an inherited host default
+  is not an answer anybody can quote.
 
 ## Residual limits, stated plainly
 
@@ -305,13 +322,11 @@ confirmed against neither the pinned digests nor the running containers. Treat
 it as a list of things to go and check, not as a measurement — several entries
 would evaporate if the feature turns out to be disabled here.
 
-The cheap way to settle it is a consequence of this very change, with one
-caveat now attached: the jail proxy *can* record every destination chat reaches
-for, but request logging is off by default and deliberately so. Settling this
-table means enabling `chat_proxy_log_requests` for a bounded window, exercising
-the service, reading the log and turning it back off. That is a legitimate use
-of the toggle and the reason it exists rather than the behavior being hardcoded
-either way. The same trick answers any row below.
+The cheap way to settle it is a consequence of this very change: the jail proxy
+logs the destinations chat reaches for by default, so the open-webui row becomes
+answerable as soon as this ships — exercise the service, read the log. The same
+trick answers any row below: point a service at a logging proxy and read what it
+asks for. Doing that is how this table should stop being inference.
 
 **Tier 1 — VPN by construction.** The nine containers in svc-download's `vpn`
 netns. Only route is `wg0`, `ip_forward=0`, and `vpn-netns-up.sh` fails the unit
