@@ -16,6 +16,7 @@ docs/superpowers/specs/2026-08-14-comfyui-image-generation-design.md
 from __future__ import annotations
 
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -44,6 +45,22 @@ REQUIRED_TYPES = {"model", "prompt", "width", "height", "steps", "seed"}
 # (_ws_get_images). A workflow ending in neither returns an empty image list:
 # generation succeeds, no image, no error.
 OUTPUT_CLASSES = {"SaveImage", "PreviewImage"}
+
+# Inputs each node class accepts, so a mapped key can be checked offline.
+# ComfyUI's /object_info is the live source of truth, but this gate runs with
+# no network. An unknown class_type is a FAILURE rather than a skip: a silent
+# skip here is exactly the class of hole this file exists to close. Adding a
+# node type to a workflow means adding it here in the same commit.
+CLASS_INPUTS = {
+    "KSampler": {"seed", "steps", "cfg", "sampler_name", "scheduler",
+                 "denoise", "model", "positive", "negative", "latent_image"},
+    "CheckpointLoaderSimple": {"ckpt_name"},
+    "EmptyLatentImage": {"width", "height", "batch_size"},
+    "CLIPTextEncode": {"text", "clip"},
+    "VAEDecode": {"samples", "vae"},
+    "SaveImage": {"filename_prefix", "images"},
+    "PreviewImage": {"images"},
+}
 
 
 def good_catalog() -> dict:
@@ -132,6 +149,29 @@ def _missing_required_type(catalog, workflows, main_vars):
         n for n in catalog["image_workflow_nodes"] if n["type"] != "seed"]
 
 
+def _key_not_accepted_by_class(catalog, workflows, main_vars):
+    # unet_name is right for UNETLoader and wrong for CheckpointLoaderSimple.
+    # Both node IDs exist, so every ID-based rule passes and the value is
+    # simply ignored at generation time.
+    catalog["image_workflow_nodes"][0]["key"] = "unet_name"
+
+
+def _unknown_class_type(catalog, workflows, main_vars):
+    workflows["sdxl"]["4"]["class_type"] = "SomeCustomLoader"
+
+
+def _bad_image_size(catalog, workflows, main_vars):
+    catalog["image_size"] = "1024"
+
+
+def _negative_steps(catalog, workflows, main_vars):
+    catalog["image_steps"] = -1
+
+
+def _empty_model(catalog, workflows, main_vars):
+    catalog["image_generation_model"] = ""
+
+
 # Each case is (name, mutation, substring that must appear in a failure).
 # A mutation takes (catalog, workflows, main_vars) and breaks exactly one rule.
 VALIDATION_CASES = (
@@ -148,6 +188,12 @@ VALIDATION_CASES = (
     ("image-type node in a generation mapping",
      _image_type_in_generation_mapping, "AttributeError"),
     ("required mapping type missing", _missing_required_type, "seed"),
+    ("mapped key the node class does not accept", _key_not_accepted_by_class,
+     "unet_name"),
+    ("workflow node of an unknown class", _unknown_class_type, "SomeCustomLoader"),
+    ("image_size not WxH", _bad_image_size, "image_size"),
+    ("negative image_steps", _negative_steps, "image_steps"),
+    ("empty image_generation_model", _empty_model, "image_generation_model"),
 )
 
 
@@ -277,11 +323,50 @@ def check_config(catalog: dict, workflows: dict[str, dict],
                         "workflow so that switching image_workflow can never be "
                         "the step that discovers a broken mapping"
                     )
+                else:
+                    class_type = workflow[node_id]["class_type"]
+                    accepted = CLASS_INPUTS.get(class_type)
+                    key = node.get("key", "text")
+                    if accepted is None:
+                        failures.append(
+                            f"workflow {name!r} node {node_id!r} has class_type "
+                            f"{class_type!r}, which is not in CLASS_INPUTS. Add it "
+                            "there in this commit — an unchecked class means a "
+                            "mapped key can silently target an input that does "
+                            "not exist"
+                        )
+                    elif key not in accepted:
+                        failures.append(
+                            f"{where} writes key {key!r} into workflow {name!r} "
+                            f"node {node_id!r} ({class_type}), which accepts "
+                            f"{sorted(accepted)}. Nothing raises — the value is "
+                            "simply ignored and the workflow's hardcoded one is used"
+                        )
 
     for required in sorted(REQUIRED_TYPES - seen_types):
         failures.append(
             f"image_workflow_nodes has no {required!r} entry — that value would "
             "never reach ComfyUI and the workflow's hardcoded one would be used"
+        )
+
+    # Mirrors update_config's own validation so a bad value fails at
+    # `make validate` rather than at push time.
+    size = catalog.get("image_size")
+    if not isinstance(size, str) or not re.fullmatch(r"\d+x\d+", size):
+        failures.append(
+            f"image_size is {size!r}; Open WebUI's update_config requires "
+            r"^\d+x\d+$ and would reject the push"
+        )
+    steps = catalog.get("image_steps")
+    if not isinstance(steps, int) or steps < 0:
+        failures.append(
+            f"image_steps is {steps!r}; update_config rejects anything negative"
+        )
+    if not (catalog.get("image_generation_model") or "").strip():
+        failures.append(
+            "image_generation_model is empty. _apply_workflow_nodes writes this "
+            "value into the mapped model node, so an empty one submits an empty "
+            "checkpoint name and ComfyUI rejects the prompt at validation"
         )
 
     return failures
