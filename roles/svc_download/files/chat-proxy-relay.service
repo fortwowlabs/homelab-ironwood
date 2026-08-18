@@ -1,0 +1,18 @@
+# homelab-iac managed — roles/svc_download/files/chat-proxy-relay.service
+#
+# 8118 below is chat_proxy_port. It is the one number in this pair that is not
+# rendered, because ExecStart has no drop-in form that does not first have to
+# blank the inherited one — so if chat_proxy_port ever moves, this line moves
+# with it by hand. The socket half is rendered, so the two ends would disagree
+# loudly (nothing would connect) rather than quietly.
+[Unit]
+Description=Chat egress proxy relay
+Requires=vpn-netns.service chat-proxy.service
+After=vpn-netns.service chat-proxy.service
+
+[Service]
+ExecStart=/usr/lib/systemd/systemd-socket-proxyd --exit-idle-time=5min 10.77.0.2:8118
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+NoNewPrivileges=yes

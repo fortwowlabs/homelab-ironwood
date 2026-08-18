@@ -208,6 +208,63 @@ infra_metric_write_bin: /usr/local/sbin/homelab-metric-write
 # exists" shape as beszel_agent_enabled above.
 recyclarr_image: "ghcr.io/recyclarr/recyclarr@sha256:2d6107f758d882a59fe9d646aa54fa8a5a4fb7a40995125fade575652a3f7871"
 
+# --- Chat egress proxy (v6, download jail) ---------------------------------
+# Open WebUI on svc-infra fetches the pages SearXNG returns, and did so
+# straight out of the house until 2026-08-13 — SearXNG's jail covered the
+# query and never covered the fetch. This proxy is the fetch's way into the
+# tunnel. Bespoke, not a download_apps entry: `proxy: true` publishes a Caddy
+# vhost and an HTTP health check, and a forward proxy can serve neither.
+#
+# kalaksi/tinyproxy, not the upstream project's own image: tinyproxy publishes
+# no container at all (ghcr.io/tinyproxy/tinyproxy does not exist), and of the
+# third-party builds this is the only one still being rebuilt — vimagick's was
+# last pushed in 2021 on Alpine 3.14 and would have walked a five-year-old base
+# into scan_images. Its entrypoint copies a default config ONLY when
+# /etc/tinyproxy/tinyproxy.conf is absent, so the bind mount below wins
+# outright and no environment-variable templating happens behind our backs.
+# The image bakes USER 57981; the Quadlet sets User=0:0 over it so tinyproxy
+# is container-root as the config's `User root` expects. Rootful podman on this
+# host, so that is host root — deliberate, and the reason the container carries
+# nothing but a read-only config.
+chat_proxy_image: "docker.io/kalaksi/tinyproxy@sha256:fafafc7079ca29c6704564de1353f61d038f2166f09b01d4e460e8e499bf6b57"
+chat_proxy_port: 8118
+# Logs the destinations chat reaches for. On by default: this is the only
+# deliberate record of what chat touches, and it is what makes the egress
+# audit in the design doc answerable. Setting it false drops per-request
+# lines from the proxy AND the `log` statement from svc-infra's drop rule —
+# one variable, because two that could disagree would make `false` a setting
+# that does not mean what it says. Errors log in both states, and the drop
+# rule's `counter` is unconditional, so turning this off never weakens the
+# probe in roles/svc_infra/templates/chat-egress-probe.sh.j2.
+chat_proxy_log_requests: true
+# How long the proxy's request log is retained. Stated rather than inherited:
+# an always-on log grows until something bounds it, and "whatever journald
+# defaults to" is not a window anyone can quote.
+#
+# systemd has NO per-unit retention directive — `LogRetention=` is not real,
+# and systemd 257 answers a drop-in containing it with "Unknown key
+# 'LogRetention' ... ignoring", i.e. a bound that reads as enforced and is not.
+# The only mechanism systemd actually provides is a journal NAMESPACE with its
+# own journald instance, so chat-proxy.service gets one and this value becomes
+# that instance's MaxRetentionSec. Consequence worth knowing before you go
+# looking: the proxy's log is NOT in the default journal.
+#
+#   journalctl --namespace chat-proxy -u chat-proxy
+#
+# The isolation is a second benefit rather than a cost. A CONNECT line per
+# fetched page is the chattiest thing on this host, and in the shared journal
+# it would evict everything else's history against the same 4G cap.
+chat_proxy_log_retention: 14d
+# The namespace name, used by both the unit drop-in and the journald config
+# file that bounds it. One variable because the two must agree: a drop-in
+# naming a namespace with no matching journald@<name>.conf silently falls back
+# to journald's defaults, which is the same unenforced-bound failure again.
+chat_proxy_log_namespace: chat-proxy
+# Measured on the host, not assumed — see
+# docs/superpowers/plans/notes/2026-08-14-cgroup-match-finding.md
+chat_egress_unit: open-webui.service
+chat_egress_cgroup_level: 5
+
 # --- ntfy: where deploy results are pushed. ------------------------------
 # Default is the LAN-internal ntfy you'll stand up on svc-media (Phase 9).
 # FIRST RUN: that ntfy does not exist yet. Either point this at
@@ -526,7 +583,8 @@ scan_images: >-
       + ((netbox_images | default({})).values() | list)
       + ((immich_images | default({})).values() | list)
       + ((nextcloud_images | default({})).values() | list)
-      + [minecraft_image, beszel_agent_image, node_exporter_image, recyclarr_image]
+      + [minecraft_image, beszel_agent_image, node_exporter_image, recyclarr_image,
+         chat_proxy_image]
      ) | unique | sort }}
 # How stale a host's last COMPLETED backup may be before homelab-backups-fresh
 # treats it as failed. The three backup timers run 03:09–03:40 and the

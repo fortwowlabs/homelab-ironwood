@@ -1,0 +1,32 @@
+{{ ansible_managed | comment }}
+# /etc/containers/systemd/chat-proxy.container   (inside vpn netns)
+# NOT catalog-managed (no download_apps entry): `proxy: true` generates a Caddy
+# vhost, an SSO gate, a dashboard tile and an HTTP health check that expects a
+# 200 from a page. A forward proxy serves none of those and would fail the
+# generated verify probe. Same reasoning as recyclarr.container.j2 next door.
+[Unit]
+Description=Chat egress forward proxy (inside vpn netns)
+Requires=vpn-netns.service
+After=vpn-netns.service
+BindsTo=vpn-netns.service
+PartOf=vpn-netns.service
+
+[Container]
+Image={{ chat_proxy_image }}
+ContainerName=chat-proxy
+# The image bakes USER 57981. tinyproxy tolerates that, but the config's
+# `User root`/`Group root` would then be silently skipped, so the file would
+# describe something that is not happening. Explicitly container-root instead,
+# which is also what the rest of this jail's bespoke units do.
+User=0:0
+Environment=TZ={{ timezone }}
+PodmanArgs=--network=ns:/run/netns/vpn
+DNS={{ mullvad_dns }}
+Volume=/srv/appdata/chat-proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:Z,ro
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

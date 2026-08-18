@@ -40,6 +40,37 @@
     state: "{{ 'restarted' if (download_recyclarr_template.changed | default(false)) else 'started' }}"
   when: download_recyclarr_enabled | default(false) | bool
 
+# Restarted before chat-proxy, not after: journald reads its namespace config
+# at start, so a changed retention window that is only picked up at the next
+# reboot is the unenforced bound this whole arrangement exists to avoid.
+- name: Apply a changed chat egress proxy log retention window
+  ansible.builtin.systemd:
+    name: "systemd-journald@{{ chat_proxy_log_namespace }}.service"
+    state: restarted
+  when: download_chat_proxy_journald is changed
+
+- name: Ensure the chat egress proxy is started
+  ansible.builtin.systemd:
+    name: chat-proxy.service
+    state: >-
+      {{ 'restarted'
+         if (download_chat_proxy_config.changed
+             or download_chat_proxy_quadlet.changed
+             or download_chat_proxy_retention.changed)
+         else 'started' }}
+    daemon_reload: >-
+      {{ download_chat_proxy_quadlet is changed
+         or download_chat_proxy_retention is changed }}
+
+- name: Enable the chat egress proxy relay socket
+  ansible.builtin.systemd:
+    name: chat-proxy-relay.socket
+    enabled: true
+    state: started
+    daemon_reload: >-
+      {{ download_chat_proxy_relay_units is changed
+         or download_chat_proxy_listen is changed }}
+
 - name: Ensure the node_exporter is started
   ansible.builtin.systemd:
     name: node-exporter.service

@@ -114,6 +114,10 @@ def main() -> int:
         "timezone": "Etc/UTC",
         "truenas_ip": "192.0.2.20",
         "backup_retention_days": 14,
+        # The chat egress proxy is not a catalog entry, so its port reaches the
+        # backstop template as a bare inventory variable and has to be supplied
+        # here for the render to complete at all.
+        "chat_proxy_port": 8118,
     }
 
     failures: list[str] = []
@@ -172,6 +176,20 @@ def main() -> int:
         failures.append("firewall: INFRA_HOST was not defined from the svc-infra inventory address")
     if not re.search(r"^\s*ip saddr \$INFRA_HOST tcp dport 9100 accept$", backstop, re.MULTILINE):
         failures.append("firewall: node_exporter scrape rule was not rendered for INFRA_HOST")
+
+    # The chat egress proxy has exactly one consumer, open-webui on svc-infra,
+    # and this rule is the ONLY place that restriction can live: the socket
+    # proxy re-originates every request from 10.77.0.1, so tinyproxy's own
+    # Allow line cannot tell one caller from another. A rule that widened to
+    # $LAN_ADMIN would put an open Mullvad relay on the LAN and break nothing
+    # visible, so assert the source scope, not just the port.
+    chat_port = common["chat_proxy_port"]
+    if not re.search(
+        rf"^\s*ip saddr \$INFRA_HOST tcp dport {chat_port} accept$", backstop, re.MULTILINE
+    ):
+        failures.append("firewall: chat egress proxy rule was not rendered for INFRA_HOST")
+    if re.search(rf"^\s*ip saddr \$LAN_ADMIN[^\n]*\b{chat_port}\b", backstop, re.MULTILINE):
+        failures.append("firewall: chat egress proxy port is reachable from the whole LAN")
 
     for role in ("svc_download", "svc_media", "svc_infra"):
         node_exporter = (
