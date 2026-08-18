@@ -131,6 +131,11 @@ validate-catalog:
 	$(PYTHON) tests/validate_scan_image_coverage.py
 	$(PYTHON) tests/validate_image_provenance.py
 	$(PYTHON) tests/validate_release_overrides.py
+# Sits with the catalog gates because its first assertion is a catalog one:
+# the nft rule names open-webui.service, and that name is the
+# infra_secret_apps key. Delete the app and the firewall silently guards a
+# unit that no longer exists.
+	$(PYTHON) tests/validate_chat_egress.py
 
 validate-provisioning:
 	$(PYTHON) tests/validate_pve_states.py

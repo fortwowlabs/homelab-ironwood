@@ -13,6 +13,11 @@
   ansible.builtin.import_tasks: apps.yml
   tags: [apps]
 
+# After apps.yml: the container must exist before its cgroup can be matched.
+- name: Enforce chat egress through the VPN
+  ansible.builtin.import_tasks: chat-egress.yml
+  tags: [chategress]
+
 - name: Configure infra backups
   ansible.builtin.import_tasks: backup.yml
   tags: [backup]
