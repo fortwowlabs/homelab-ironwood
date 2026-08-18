@@ -183,13 +183,29 @@ def main() -> int:
     # Allow line cannot tell one caller from another. A rule that widened to
     # $LAN_ADMIN would put an open Mullvad relay on the LAN and break nothing
     # visible, so assert the source scope, not just the port.
+    #
+    # Counting is the point. "A correctly scoped rule exists" is satisfied by a
+    # ruleset that ALSO carries an unscoped one three lines down, and in nftables
+    # the loosest accept wins — so the check has to be that 8118 is accepted in
+    # exactly one place, not that one of the places is right.
     chat_port = common["chat_proxy_port"]
-    if not re.search(
-        rf"^\s*ip saddr \$INFRA_HOST tcp dport {chat_port} accept$", backstop, re.MULTILINE
+    chat_accepts = [
+        line.strip()
+        for line in backstop.splitlines()
+        if re.search(rf"\bdport\b[^\n]*\b{chat_port}\b[^\n]*\baccept\b", line)
+    ]
+    if len(chat_accepts) != 1:
+        failures.append(
+            f"firewall: expected exactly one accept rule for the chat egress proxy "
+            f"port, found {len(chat_accepts)}: {chat_accepts}"
+        )
+    elif not re.fullmatch(
+        rf"ip saddr \$INFRA_HOST tcp dport {chat_port} accept", chat_accepts[0]
     ):
-        failures.append("firewall: chat egress proxy rule was not rendered for INFRA_HOST")
-    if re.search(rf"^\s*ip saddr \$LAN_ADMIN[^\n]*\b{chat_port}\b", backstop, re.MULTILINE):
-        failures.append("firewall: chat egress proxy port is reachable from the whole LAN")
+        failures.append(
+            f"firewall: the chat egress proxy rule is not scoped to $INFRA_HOST: "
+            f"{chat_accepts[0]!r}"
+        )
 
     for role in ("svc_download", "svc_media", "svc_infra"):
         node_exporter = (

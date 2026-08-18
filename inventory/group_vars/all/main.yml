@@ -532,9 +532,18 @@ scan_expected_ports:
   # svc-download: the nine jailed app UIs, reached through systemd socket
   # proxies, plus the common pair. Its stack is otherwise sealed by the
   # nftables backstop.
+  #
+  # chat_proxy_port is listed for the same reason scan_prometheus_scrape_port
+  # is, and the reason is not "so the scan goes green". svc-infra is this
+  # host's scanner (see scan_exposure_pairs), and svc-infra is the one source
+  # the backstop admits on 8118 — so the sweep sees the port precisely because
+  # the restriction is working. Left out, every nightly scan from here on
+  # reports "1 unexplained open port(s)" as its headline finding, and the next
+  # genuinely unexplained port arrives as "2" inside an alert nobody trusts.
   download: >-
     {{ ((download_apps | default({})).values() | map(attribute='ui_port') | list)
-       + scan_common_ports + [scan_prometheus_scrape_port] | unique | sort }}
+       + scan_common_ports + [scan_prometheus_scrape_port, chat_proxy_port]
+       | unique | sort }}
   # svc-media: the access layer rather than a catalog. 53 dnsmasq, 443 Caddy,
   # 8096 Jellyfin (published on the LAN IP, not loopback, so Caddy on this same
   # host is not the only reader), 8080 ntfy (every alert in the estate is

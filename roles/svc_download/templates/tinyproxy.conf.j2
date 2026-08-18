@@ -4,8 +4,10 @@
 # Forward proxy for Open WebUI on svc-infra. Everything it accepts leaves via
 # wg0, because the only route out of this namespace is wg0.
 
-User root
-Group root
+# No User/Group. tinyproxy only changes uid when it is started as root, and
+# this container is not — the image runs it as its own uid 57981. Naming a user
+# here would be a line the process silently skips, which is worse than absent:
+# it would read as a privilege decision that is not being made anywhere.
 
 # 0.0.0.0, not loopback: the socket proxy in the init namespace dials
 # 10.77.0.2:{{ chat_proxy_port }} across the veth, so a loopback bind is

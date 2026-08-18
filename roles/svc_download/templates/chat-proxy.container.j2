@@ -14,11 +14,13 @@ PartOf=vpn-netns.service
 [Container]
 Image={{ chat_proxy_image }}
 ContainerName=chat-proxy
-# The image bakes USER 57981. tinyproxy tolerates that, but the config's
-# `User root`/`Group root` would then be silently skipped, so the file would
-# describe something that is not happening. Explicitly container-root instead,
-# which is also what the rest of this jail's bespoke units do.
-User=0:0
+# No User=. The image bakes USER 57981 and that is what runs: a forward proxy
+# binds one high port, reads one world-readable config and writes nothing, so
+# it needs no privilege at all. Deliberately unlike node-exporter.container.j2,
+# which sets User=0 because it genuinely has to read host pseudo-filesystems.
+# Containers in this jail are ROOTFUL, so container-root would be host root —
+# the rootless subuid reasoning that makes uid 0 the easy answer on svc-infra
+# and svc-media does not apply here, and neither does its conclusion.
 Environment=TZ={{ timezone }}
 PodmanArgs=--network=ns:/run/netns/vpn
 DNS={{ mullvad_dns }}
