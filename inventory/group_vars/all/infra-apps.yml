@@ -641,5 +641,24 @@ infra_secret_apps:
       ENABLE_WEB_SEARCH: "true"
       WEB_SEARCH_ENGINE: searxng
       SEARXNG_QUERY_URL: "http://{{ hostvars[download_host].ansible_host }}:{{ download_apps.searxng.ui_port }}/search?q=<query>"
+      # Chat's own page fetches — the second half of a web search, and the
+      # half that used to leave the house directly. SearXNG returns URLs;
+      # Open WebUI reads them itself, from here. See
+      # docs/superpowers/specs/2026-08-13-chat-egress-through-vpn-design.md.
+      #
+      # This is a request, not a guarantee. A library that ignores these vars
+      # would still leak, which is why svc-infra also drops non-LAN traffic
+      # from this container's cgroup (roles/svc_infra/templates/
+      # chat-egress.nft.j2). Env says should; the firewall says must.
+      http_proxy: "http://{{ hostvars[download_host].ansible_host }}:{{ chat_proxy_port }}"
+      https_proxy: "http://{{ hostvars[download_host].ansible_host }}:{{ chat_proxy_port }}"
+      HTTP_PROXY: "http://{{ hostvars[download_host].ansible_host }}:{{ chat_proxy_port }}"
+      HTTPS_PROXY: "http://{{ hostvars[download_host].ansible_host }}:{{ chat_proxy_port }}"
+      # Everything on the LAN stays direct: Ollama and ComfyUI on the GPU host,
+      # SearXNG's own IP:port, and loopback. Routing inference through Sweden
+      # would be slow and pointless. Note this includes svc-download, so the
+      # SEARXNG_QUERY_URL above is unaffected by the lines above it.
+      no_proxy: "localhost,127.0.0.1,{{ lan_cidr }},{{ gpu_host_ip }},{{ hostvars[download_host].ansible_host }}"
+      NO_PROXY: "localhost,127.0.0.1,{{ lan_cidr }},{{ gpu_host_ip }},{{ hostvars[download_host].ansible_host }}"
     require_vault: [vault_openwebui_secret_key]
     backup_paths: [open-webui]
