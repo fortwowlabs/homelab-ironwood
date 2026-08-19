@@ -77,6 +77,12 @@ ALERT_TEMPLATES = (
     # script instead: it refuses to fall back to NTFY_TOPIC, which every other
     # template here is allowed to do.
     "roles/svc_infra/templates/alert-canary.sh.j2",
+    # Tri-state: publishes at high for `broken` and default for
+    # `inconclusive`, both through the same interpolated ${priority}. The
+    # severity scan cannot decide an interpolated priority statically and
+    # treats it as severe, which is the right way round here — the broken
+    # branch really is severe and really must not land on the muted feed.
+    "roles/svc_infra/templates/chat-egress-probe.sh.j2",
 )
 
 # Where the discovery sweep looks for an alerter nobody registered above.

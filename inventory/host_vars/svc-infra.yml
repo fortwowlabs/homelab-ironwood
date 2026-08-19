@@ -83,3 +83,12 @@ onfailure_units_extra:
   # wrapper dying before Ansible starts. Without it a report that stopped
   # arriving would look exactly like a quiet week upstream.
   - homelab-release@.service
+  # The hourly chat egress probe. Its own script publishes the verdict to
+  # ntfy and exits 1 on anything other than `ok`, so this drop-in DOES double
+  # up on a genuine fault — the same trade the repo already accepted for
+  # leak-canary.service, and for the same reason: the native alert covers the
+  # probe FINDING something, and this covers the probe FAILING TO RUN. A bash
+  # error before the alert block, an unreadable notify.env, or a wedged
+  # `podman exec` outliving TimeoutStartSec all leave the probe silent, which
+  # is indistinguishable from an estate where chat's egress is fine.
+  - homelab-chat-egress.service

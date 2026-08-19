@@ -114,3 +114,37 @@
     'chat_policy' not in infra_chat_egress_loaded.stdout
     or '"' ~ chat_egress_cgroup_path ~ '"' not in infra_chat_egress_loaded.stdout
   when: not ansible_check_mode
+
+# --- verification ---------------------------------------------------------
+# Everything above makes the rule exist. Nothing above proves it still MATCHES,
+# and the failure mode is silent-green: an active loader, a listed table and a
+# drop counter reading 0 look identical whether chat is fully constrained or
+# entirely unconstrained. The probe is what tells those two apart, hourly, by
+# attempting the leak itself and reading the counter across its own attempt.
+- name: Render the chat egress probe
+  ansible.builtin.template:
+    src: chat-egress-probe.sh.j2
+    dest: /usr/local/sbin/homelab-chat-egress-probe.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the chat egress probe units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - homelab-chat-egress.service
+    - homelab-chat-egress.timer
+  register: infra_chat_egress_probe_units
+
+- name: Arm the chat egress probe
+  ansible.builtin.systemd:
+    name: homelab-chat-egress.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ infra_chat_egress_probe_units is changed }}"
+  when: not ansible_check_mode
