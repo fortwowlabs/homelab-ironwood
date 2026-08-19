@@ -80,6 +80,13 @@ MUTATIONS: tuple[tuple[str, str, str], ...] = (
         # the firewall still works; Task 5's probe can no longer prove it did
     ),
     (
+        "a second counter added to the policy chain",
+        'oifname "lo" accept',
+        'oifname "lo" counter accept',
+        # the firewall is unchanged, but the probe can no longer tell which
+        # counter moved and reports `inconclusive` forever with everything green
+    ),
+    (
         "base chain set to policy drop",
         "policy accept;",
         "policy drop;",
@@ -186,6 +193,22 @@ def check(rendered: str, ctx: dict, catalog: dict) -> list[str]:
         )
     if "counter drop" not in body:
         failures.append(f"{tag}: drop rule lost its unconditional counter")
+    # Exactly one, not merely at least one, and this is about the PROBE rather
+    # than about the firewall. chat-egress-probe.sh.j2 reads the drop counter by
+    # scanning `nft list table` for `counter packets N`, and it requires a single
+    # match -- it refuses to guess between two, because attributing a delta to
+    # the wrong counter is worse than declining to attribute it at all. So a
+    # second counter anywhere in this table leaves the policy working perfectly
+    # and pins the verification at `inconclusive` for good: enforcement intact,
+    # nothing able to prove it. That is the exact shape of half-failure this
+    # feature exists to make impossible, so it is asserted rather than assumed.
+    counters = len(re.findall(r"\bcounter\b", body))
+    if counters != 1:
+        failures.append(
+            f"{tag}: expected exactly one `counter` statement in the table, found "
+            f"{counters}. chat-egress-probe.sh.j2 refuses to choose between two, so a "
+            "second one disarms the verification while leaving the policy intact"
+        )
     if body.count("hook output") != 1:
         failures.append(f"{tag}: expected exactly one output base chain")
     if "policy accept" not in body:
