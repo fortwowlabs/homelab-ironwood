@@ -9,9 +9,16 @@ Description=Watch for open-webui restarts silently disarming the chat egress pol
 # window, only bound it. The tick is cheap because the script re-applies only
 # when the rule has actually gone stale — otherwise it is one list call, and
 # the drop counter Task 5 reads is left alone rather than reset every minute.
+#
+# AccuracySec=1s, not systemd's 1min default and not the 15s this carried
+# until 2026-08-19. The window a timer can actually produce is the interval
+# PLUS the accuracy slack, so 60s/15s meant a real bound of ~75s while every
+# document quoted ~60s. Pinning the slack to 1s makes the stated number the
+# true one; the cost is that this timer is not batched with any other, which
+# for one list call a minute is nothing.
 OnBootSec=2min
 OnUnitActiveSec=60s
-AccuracySec=15s
+AccuracySec=1s
 Unit=chat-egress-reload.service
 
 [Install]

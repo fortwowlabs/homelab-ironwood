@@ -210,8 +210,11 @@ Four things about it are load-bearing:
   60 seconds whether the loaded rule has gone stale and reloads it, which
   bounds the window rather than closing it: **there is a residual window of up
   to ~60s after an unattended `open-webui` restart during which chat's egress
-  is not enforced.** A `meta skuid` match would have no such window; it was
-  considered and declined. The same load-time resolution is why
+  is not enforced.** The 60 is only true because that timer pins
+  `AccuracySec=1s`; systemd may fire a timer as late as its accuracy slack, so
+  the 15s slack it carried until 2026-08-19 made the real window ~75s while
+  this paragraph said ~60s. A `meta skuid` match would have no such window; it
+  was considered and declined. The same load-time resolution is why
   `chat-egress.service` waits for the cgroup to exist at boot rather than
   relying on unit ordering — `nft` refuses to load a ruleset naming a cgroup
   path that does not yet exist, and measured on this host

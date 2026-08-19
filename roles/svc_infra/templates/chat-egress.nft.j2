@@ -44,7 +44,11 @@
 #
 # RESIDUAL, stated plainly: re-applying cannot close the window, only shorten
 # it. Between an unattended open-webui restart and the next refresh tick,
-# chat's egress is unrestricted. The tick is 60s. Closing it entirely means
+# chat's egress is unrestricted. The tick is 60s, and that is the real bound
+# only because chat-egress-reload.timer pins AccuracySec=1s — systemd may fire
+# a timer up to its accuracy slack late, so the 15s slack this carried until
+# 2026-08-19 made the true window ~75s. Change one and the other is wrong.
+# Closing it entirely means
 # matching on something stable across restarts — a dedicated podman user plus
 # `meta skuid` — which was considered and deferred as most of a new plan.
 
