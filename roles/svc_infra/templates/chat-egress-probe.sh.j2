@@ -510,7 +510,11 @@ fi
 if alert "$priority" warning "$title" "${detail}
 
 ${unpublished}Checked from $(hostname -s) at $(date -u +%Y-%m-%dT%H:%M:%SZ).
-Re-alerts at most every {{ alert_realert_hours | default(6) }}h while unchanged.
+This probe re-sends its OWN message at most every {{ alert_realert_hours | default(6) }}h while the fault is
+unchanged. That is not one alert every {{ alert_realert_hours | default(6) }}h: a non-ok run also exits 1, and
+homelab-chat-egress.service carries an OnFailure= path, so notify-failure
+publishes an urgent alert EVERY hour regardless. Suppression here buys a
+quieter body, not a quieter phone.
 
 ok           chat exits via Mullvad and direct egress is refused
 broken       one of those two is false — read the detail above
