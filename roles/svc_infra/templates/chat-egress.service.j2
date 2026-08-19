@@ -5,14 +5,21 @@ Description=Load the chat egress nftables policy
 # and then rebuild its own ruleset on top. The tables are independent, but the
 # ordering makes the boot sequence deterministic.
 #
-# After user@{{ svc_uid }}.service because nft REFUSES to load a ruleset naming a
-# cgroup that does not exist ("cgroupv2 path fails: No such file or directory",
-# exit 1), and open-webui's cgroup is created by that user manager. Ordering
-# alone is not sufficient — the manager being active does not mean it has
-# started its containers yet — so the loader also waits. Measured on this host:
-# multi-user.target is reached ~1.5-2s before the first rootless container
-# cgroup exists, so without both of these the loader failed at every boot and
-# open-webui came up with unrestricted egress.
+# WHAT ACTUALLY CARRIES THE BOOT GUARANTEE IS THE --wait LOOP, NOT THIS
+# ORDERING. Do not delete the wait on the strength of the After= below.
+#
+# nft REFUSES to load a ruleset naming a cgroup that does not exist
+# ("cgroupv2 path fails: No such file or directory", exit 1), and measured on
+# this host multi-user.target is reached ~1.5-2s before the rootless user
+# manager has created open-webui's cgroup. So something has to wait.
+#
+# After=user@{{ svc_uid }}.service is belt-and-braces and may well be a no-op:
+# that unit has empty WantedBy= and RequiredBy= and is started out-of-band by
+# logind under linger, so it is not reliably part of the boot transaction, and
+# an After= on a unit that is not in the transaction orders nothing. Even when
+# it does participate, the manager being active would not mean it has started
+# its containers yet. The ordering costs nothing and helps when it applies;
+# the wait is what makes the boot deterministic.
 After=firewalld.service network-pre.target user@{{ svc_uid }}.service
 Wants=network-pre.target
 
@@ -37,7 +44,15 @@ ExecStart=/usr/local/sbin/chat-egress-apply --wait
 # Deliberately NOT nftables.service: that unit loads
 # /etc/sysconfig/nftables.conf, which on this distribution may carry a ruleset
 # flush that would take firewalld's tables with it.
-ExecStop=/usr/sbin/nft delete table inet chat_egress
+#
+# Leading `-` because the table may legitimately be gone already: the refresh
+# withdraws a stale table while open-webui is down, and RemainAfterExit keeps
+# this unit `active` across that. Without the `-`, any open-webui outage
+# lasting one refresh tick made the next stop or restart — including Ansible's
+# own `state: restarted` on a policy change — exit 1 and leave a `failed` unit,
+# alerting about a load failure that never happened. An alert that fires for a
+# non-event is worse than no alert: it teaches the topic to be ignored.
+ExecStop=-/usr/sbin/nft delete table inet chat_egress
 
 [Install]
 WantedBy=multi-user.target

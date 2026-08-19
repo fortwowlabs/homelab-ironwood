@@ -43,6 +43,11 @@ CGROUP_DIR="/sys/fs/cgroup/${CHAT_EGRESS_CGROUP}"
 # nft prints the quoted path back while the inode still resolves to it, and a
 # bare integer once it does not. That is the whole staleness test, and it costs
 # one list call.
+# Known hazard, not reachable today: under `set -o pipefail`, grep -q exiting
+# early on a match can SIGPIPE nft, and a non-zero pipeline would read as
+# stale -- re-applying and resetting the counter every 60s. One small table
+# fits a pipe buffer with room to spare, so nft finishes writing before grep
+# exits. Revisit if this table ever grows.
 rule_is_fresh() {
     "$NFT" list table inet chat_egress 2>/dev/null \
         | grep -qF "\"${CHAT_EGRESS_CGROUP}\""
