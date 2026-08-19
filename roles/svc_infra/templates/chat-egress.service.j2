@@ -1,0 +1,43 @@
+{{ ansible_managed | comment }}
+[Unit]
+Description=Load the chat egress nftables policy
+# After firewalld so a firewalld start does not race the table into existence
+# and then rebuild its own ruleset on top. The tables are independent, but the
+# ordering makes the boot sequence deterministic.
+#
+# After user@{{ svc_uid }}.service because nft REFUSES to load a ruleset naming a
+# cgroup that does not exist ("cgroupv2 path fails: No such file or directory",
+# exit 1), and open-webui's cgroup is created by that user manager. Ordering
+# alone is not sufficient — the manager being active does not mean it has
+# started its containers yet — so the loader also waits. Measured on this host:
+# multi-user.target is reached ~1.5-2s before the first rootless container
+# cgroup exists, so without both of these the loader failed at every boot and
+# open-webui came up with unrestricted egress.
+After=firewalld.service network-pre.target user@{{ svc_uid }}.service
+Wants=network-pre.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Must exceed CHAT_EGRESS_WAIT_SECONDS ({{ chat_egress_wait_seconds }}s). systemd disables the
+# start timeout for oneshot units, so a wait that outlived its own timeout
+# would sit in `activating` forever, which is not `failed` and so shows up in
+# neither OnFailure= nor the 15-minute failed-unit sweep.
+TimeoutStartSec={{ chat_egress_wait_seconds + 60 }}
+# Retry a slow boot rather than staying dead: open-webui taking longer than the
+# wait is recoverable, and nothing else would re-arm the policy — the refresh
+# timer deliberately does nothing while this unit is inactive. The start limit
+# is what stops that becoming an infinite silent retry: after five attempts it
+# lands in `failed`, where homelab-failedunits.timer sees it within 15 minutes.
+Restart=on-failure
+RestartSec=60
+StartLimitIntervalSec=1h
+StartLimitBurst=5
+ExecStart=/usr/local/sbin/chat-egress-apply --wait
+# Deliberately NOT nftables.service: that unit loads
+# /etc/sysconfig/nftables.conf, which on this distribution may carry a ruleset
+# flush that would take firewalld's tables with it.
+ExecStop=/usr/sbin/nft delete table inet chat_egress
+
+[Install]
+WantedBy=multi-user.target

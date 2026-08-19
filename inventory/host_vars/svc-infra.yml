@@ -56,6 +56,11 @@ mon_open_firewalld: true            # svc-infra uses firewalld, like svc-media
 
 # Units that get an OnFailure alert, on top of onfailure_units_base.
 onfailure_units_extra:
+  # The chat egress refresh. It is the only thing that re-arms the nft rule
+  # after an open-webui restart recreates its cgroup, and a rule bound to a
+  # freed inode fails green: unit active, table listed, drop counter 0. If
+  # this stops running, enforcement quietly stops with it.
+  - chat-egress-reload.service
   - backup-infra-appdata.service
   - homelab-backups-fresh.service
   # Template unit: the drop-in covers every instance. verify.yml's own

@@ -1,6 +1,12 @@
 ---
 # The enforcement half of the chat egress design. The proxy in the jail gives
 # chat a way into the tunnel; this is what stops it going any other way.
+#
+# Imported after apps.yml on purpose, and the ordering is load-bearing twice
+# over: nft cannot load a ruleset naming a cgroup that does not exist yet, and
+# apps.yml flushes its handlers — so any container restart this deploy causes
+# has already happened by the time the refresh task below runs. A rule loaded
+# before that restart would be bound to the old, now-freed cgroup inode.
 - name: Ensure the nftables policy directory exists
   ansible.builtin.file:
     path: /etc/nftables
@@ -12,6 +18,30 @@
     # widening it on the running host would be a change nobody asked for.
     mode: "0700"
 
+- name: Install the chat egress apply script
+  ansible.builtin.copy:
+    src: chat-egress-apply.sh
+    dest: /usr/local/sbin/chat-egress-apply
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render the chat egress apply configuration
+  ansible.builtin.template:
+    src: chat-egress.env.j2
+    dest: /etc/nftables/chat-egress.env
+    owner: root
+    group: root
+    mode: "0644"
+
+# `validate` is the line that keeps a syntactically bad ruleset off the disk.
+# Note what it also does, deliberately: `nft -c` REJECTS a cgroup path that
+# does not exist, so this task fails the whole svc-infra play whenever
+# open-webui is not running. That couples every infra deploy to one container
+# being up. It is kept because the alternative is rendering a policy that
+# cannot load and finding out later — fail-closed, and stated here so it is a
+# choice rather than a surprise. To deploy with open-webui deliberately down,
+# skip this file with `--skip-tags chategress`.
 - name: Render the chat egress nftables policy
   ansible.builtin.template:
     src: chat-egress.nft.j2
@@ -23,25 +53,64 @@
   register: infra_chat_egress_policy
 
 - name: Install the chat egress policy loader
-  ansible.builtin.copy:
-    src: chat-egress.service
+  ansible.builtin.template:
+    src: chat-egress.service.j2
     dest: /etc/systemd/system/chat-egress.service
     owner: root
     group: root
     mode: "0644"
   register: infra_chat_egress_unit
 
+# The timer is what keeps the policy armed across open-webui restarts. Without
+# it the rule stays bound to a cgroup inode that no longer exists, matching
+# nothing, while every liveness signal stays green.
+- name: Install the chat egress refresh timer
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - chat-egress-reload.service
+    - chat-egress-reload.timer
+  register: infra_chat_egress_reload_units
+
 - name: Load and arm the chat egress policy
   ansible.builtin.systemd:
     name: chat-egress.service
     enabled: true
     state: "{{ 'restarted' if infra_chat_egress_policy is changed else 'started' }}"
-    daemon_reload: "{{ infra_chat_egress_unit is changed }}"
+    daemon_reload: "{{ infra_chat_egress_unit is changed or infra_chat_egress_reload_units is changed }}"
   when: not ansible_check_mode
 
-- name: Confirm the chat egress table is actually loaded
+- name: Arm the chat egress refresh timer
+  ansible.builtin.systemd:
+    name: chat-egress-reload.timer
+    enabled: true
+    state: started
+  when: not ansible_check_mode
+
+# Unconditional, and that is the point. apps.yml may have restarted open-webui
+# moments ago, which gives it a new cgroup inode and leaves the rule above
+# matching nothing. The script re-applies only when the rule has actually gone
+# stale, so this reports `changed` exactly when it repaired something.
+- name: Re-apply the policy if open-webui's cgroup was recreated
+  ansible.builtin.command: /usr/local/sbin/chat-egress-apply --refresh
+  register: infra_chat_egress_refresh
+  changed_when: "'reapplied' in infra_chat_egress_refresh.stdout"
+  when: not ansible_check_mode
+
+# Two assertions, not one. `chat_policy` proves the table loaded; the quoted
+# cgroup path proves the rule is not STALE. nft prints the path back only while
+# the inode still resolves to it and a bare integer once it does not, so
+# without the second test a rule matching nothing passes this check — which is
+# precisely how this defect survived the first round of verification.
+- name: Confirm the chat egress table is loaded and not stale
   ansible.builtin.command: nft list table inet chat_egress
   register: infra_chat_egress_loaded
   changed_when: false
-  failed_when: "'chat_policy' not in infra_chat_egress_loaded.stdout"
+  failed_when: >-
+    'chat_policy' not in infra_chat_egress_loaded.stdout
+    or '"' ~ chat_egress_cgroup_path ~ '"' not in infra_chat_egress_loaded.stdout
   when: not ansible_check_mode

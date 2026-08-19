@@ -1,0 +1,12 @@
+# homelab-iac managed — roles/svc_infra/files/chat-egress-reload.service
+[Unit]
+Description=Re-apply the chat egress policy if open-webui's cgroup was recreated
+After=chat-egress.service
+
+[Service]
+Type=oneshot
+# One `nft list` and a grep on the common path. The timeout is here because
+# systemd disables it for oneshot units, and a wedged nfnetlink lock is the
+# realistic way this hangs.
+TimeoutStartSec=60
+ExecStart=/usr/local/sbin/chat-egress-apply --refresh

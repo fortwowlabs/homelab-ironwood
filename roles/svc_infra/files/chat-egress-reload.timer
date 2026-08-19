@@ -1,0 +1,18 @@
+# homelab-iac managed — roles/svc_infra/files/chat-egress-reload.timer
+[Unit]
+Description=Watch for open-webui restarts silently disarming the chat egress policy
+
+[Timer]
+# 60s is the residual fail-open window, and the reason it is this short: the
+# nft rule matches a cgroup INODE resolved once at load, so an open-webui
+# restart leaves it matching nothing until this fires. This cannot close the
+# window, only bound it. The tick is cheap because the script re-applies only
+# when the rule has actually gone stale — otherwise it is one list call, and
+# the drop counter Task 5 reads is left alone rather than reset every minute.
+OnBootSec=2min
+OnUnitActiveSec=60s
+AccuracySec=15s
+Unit=chat-egress-reload.service
+
+[Install]
+WantedBy=timers.target
