@@ -113,6 +113,26 @@ not a setting that can be ignored. `chat_proxy_log_requests` (default `true`)
 controls whether the proxy records destinations; it governs the drop rule's
 log statement too, and never the drop counter the hourly probe depends on.
 
+**The proxy's request log is not in the default journal, and it is kept for 14
+days.** systemd has no per-unit retention directive, so `chat-proxy` is given a
+journal namespace with its own journald instance and its own bound. Two things
+follow, and the first is the one that wastes an afternoon:
+
+- `journalctl -u chat-proxy` on svc-download prints nothing. The log is reached
+  with:
+
+  ```bash
+  ssh svc-download sudo journalctl --namespace chat-proxy -u chat-proxy
+  ```
+
+- The retained window is `MaxRetentionSec=14d`, with `MaxFileSec=1d` so it
+  expires a day at a time rather than in one cliff. It comes from
+  `chat_proxy_log_retention` in `inventory/group_vars/all/main.yml`, and it is
+  the answer to "how far back can an egress audit look". The isolation is a
+  second benefit rather than a cost: a CONNECT line per fetched page is the
+  chattiest thing on that host, and in the shared journal it would evict every
+  other service's history against the same 4G cap.
+
 Two consequences worth knowing:
 
 - **Chat's web features fail closed.** If the tunnel or the jail is down,

@@ -27,7 +27,20 @@ Allow 10.77.0.1
 # Connect: logs each request's destination. See chat_proxy_log_requests.
 LogLevel Connect
 {% else %}
-# Error: startup and failure messages only, no per-request destinations.
+# Error: failures only, no per-request destinations. Note what it does NOT
+# keep, because the obvious reading is wrong. tinyproxy emits its startup
+# banner and its listening address at Notice/Info, and an ACL or ConnectPort
+# refusal at Info, so at Error all of those go too — what survives is the
+# LOG_ERR set: DNS failures, socket failures, config errors. Verified on the
+# host on 2026-08-19 by driving one successful and one failing fetch through
+# the proxy with this setting live. The successful one left NO line at all;
+# the failing one left `ERROR ... opensock: Could not retrieve address info`.
+#
+# Two things follow. A silent namespace journal is ambiguous between "proxied
+# nothing" and "never started" — `systemctl status chat-proxy` on svc-download
+# is what resolves it. And a request refused by the `Allow` line or by
+# ConnectPort is invisible here, so this setting costs more than the
+# destination list alone.
 LogLevel Error
 {% endif %}
 
