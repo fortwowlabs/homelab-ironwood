@@ -7,6 +7,10 @@
 # apps.yml flushes its handlers — so any container restart this deploy causes
 # has already happened by the time the refresh task below runs. A rule loaded
 # before that restart would be bound to the old, now-freed cgroup inode.
+#
+# It is imported LAST — immediately before verify.yml — for a second reason,
+# spelled out at the render task below: this file fails when open-webui is
+# down, so nothing that has to converge may sit beneath it.
 - name: Ensure the nftables policy directory exists
   ansible.builtin.file:
     path: /etc/nftables
@@ -36,12 +40,26 @@
 
 # `validate` is the line that keeps a syntactically bad ruleset off the disk.
 # Note what it also does, deliberately: `nft -c` REJECTS a cgroup path that
-# does not exist, so this task fails the whole svc-infra play whenever
-# open-webui is not running. That couples every infra deploy to one container
-# being up. It is kept because the alternative is rendering a policy that
-# cannot load and finding out later — fail-closed, and stated here so it is a
-# choice rather than a surprise. To deploy with open-webui deliberately down,
-# skip this file with `--skip-tags chategress`.
+# does not exist — measured, not assumed:
+#
+#     Error: cgroupv2 path fails: No such file or directory   (rc=1)
+#
+# so this task FAILS whenever open-webui is not running. That is fail-closed
+# and it is kept, because the alternative is rendering a policy that cannot
+# load and finding out later. But be precise about the blast radius, because
+# an import failure in Ansible is not local to the import: every task after it
+# in the play is skipped. That is why this file is imported last, immediately
+# before verify.yml (see roles/svc_infra/tasks/main.yml). Placed earlier — as
+# it was until 2026-08-19, between apps.yml and backup.yml — an open-webui
+# outage did not merely fail this feature, it aborted the whole svc-infra run:
+# backups, the nightly verify runner, the alert canary and the `git archive`
+# sync that writes .deployed-rev never converged, so the `changed=0` proof
+# itself went with it. Worst case that was circular — if open-webui was
+# failing to start, the deploy that would repair it could no longer reach
+# anything downstream.
+#
+# To deploy with open-webui deliberately down, skip this file with
+# `--skip-tags chategress`.
 - name: Render the chat egress nftables policy
   ansible.builtin.template:
     src: chat-egress.nft.j2

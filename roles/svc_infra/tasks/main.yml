@@ -13,11 +13,6 @@
   ansible.builtin.import_tasks: apps.yml
   tags: [apps]
 
-# After apps.yml: the container must exist before its cgroup can be matched.
-- name: Enforce chat egress through the VPN
-  ansible.builtin.import_tasks: chat-egress.yml
-  tags: [chategress]
-
 - name: Configure infra backups
   ansible.builtin.import_tasks: backup.yml
   tags: [backup]
@@ -29,6 +24,18 @@
 - name: Install the weekly alert-topic delivery canary
   ansible.builtin.import_tasks: alert-canary.yml
   tags: [alertcanary]
+
+# Last before verify.yml, and both halves of that placement matter. It is after
+# apps.yml because the container must exist before its cgroup can be matched.
+# It is after everything ELSE because its policy render validates with
+# `nft -c`, which hard-rejects a cgroup path that does not exist — so an
+# open-webui outage fails this import, and anything imported below it would
+# never converge. Backups, the verify runner, the alert canary and the
+# `git archive` sync that writes .deployed-rev all sit above it for that
+# reason.
+- name: Enforce chat egress through the VPN
+  ansible.builtin.import_tasks: chat-egress.yml
+  tags: [chategress]
 
 - name: Verify infra services
   ansible.builtin.import_tasks: verify.yml
