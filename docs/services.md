@@ -77,8 +77,9 @@ Three pieces on three different machines:
 
 ```text
 chat.fortwow.dev (Open WebUI, svc-infra)
-  |-- inference + images --> Ollama / ComfyUI on the Win11 4090 box (192.168.1.40)
-  `-- web search ---------> SearXNG in svc-download's VPN jail --> Mullvad
+  |-- inference + images --> Ollama / ComfyUI on the Win11 4090 box (LAN, direct)
+  |-- search QUERIES -----> SearXNG in svc-download's VPN jail --> Mullvad
+  `-- page FETCHES -------> forward proxy in the same jail ------> Mullvad
 ```
 
 **Open WebUI keeps its own login and is deliberately not behind Authelia.** It
@@ -99,14 +100,37 @@ same mechanism every other jailed UI uses. Two consequences worth knowing:
 - Port 8888 rather than the upstream default 8080, because the jail is one
   shared network namespace and SABnzbd already holds 8080 in it.
 
-**Settings come from the catalog, not the admin UI.** Open WebUI normally
-freezes environment-supplied settings into its database on first boot and
-ignores the environment forever after, which would make later catalog edits
-silently do nothing. `ENABLE_PERSISTENT_CONFIG` is therefore `false`. The
-trade-off is real and worth remembering when something seems not to save:
-toggling web search, image generation, or a backend URL *in the admin UI* will
-not survive a restart. Change those in
-`inventory/group_vars/all/infra-apps.yml` and run `make infra`.
+**A web search is two round trips, and only the first was ever jailed.**
+SearXNG queries the upstream engines and returns a list of URLs; Open WebUI
+then fetches those pages itself. Until 2026-08-13 that second request left
+svc-infra directly, so the engines saw Mullvad and every site in the results
+saw the house. It was found by asking a model to fetch an echo service and
+reading back a home address.
+
+Chat's outbound HTTP now goes to a forward proxy inside the same jail, and
+svc-infra drops any non-LAN packet from Open WebUI's cgroup — so the proxy is
+not a setting that can be ignored. `chat_proxy_log_requests` (default `true`)
+controls whether the proxy records destinations; it governs the drop rule's
+log statement too, and never the drop counter the hourly probe depends on.
+
+Two consequences worth knowing:
+
+- **Chat's web features fail closed.** If the tunnel or the jail is down,
+  fetching breaks rather than falling back. Local inference, image generation
+  and history are unaffected. `homelab-chat-egress.timer` alerts on it.
+- **This covers chat and nothing else.** Every other service on svc-infra and
+  svc-media still egresses directly; `service_guarded_egress` is `true` on
+  svc-download alone. The full audit is in the design doc's appendix.
+
+**Settings are seeded from the catalog, then owned by the database.**
+`ENABLE_PERSISTENT_CONFIG` is `true`, so a value in
+`inventory/group_vars/all/infra-apps.yml` applies only until that key is
+touched in the admin UI — after which a row exists, the row wins, and editing
+the catalog silently does nothing while `make infra` still reports success.
+Admin-UI changes DO survive restarts. The sharp edge is `ENABLE_SIGNUP`, where
+the drift is a security change rather than a preference: confirm
+`ui.enable_signup` is false in `GET /api/v1/configs/export` after any
+admin-settings session.
 
 The GPU host itself is a hand-managed Windows workstation, not infrastructure.
 Its setup, the firewall scoping, the Continue for VSCode config, and the

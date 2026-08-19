@@ -191,6 +191,57 @@ available, apply the narrow change, restore policy, then run safe and
 disruptive verification. Emergency backstop recovery is documented in
 [Incidents](incidents.md#download-vm-ssh-lockout).
 
+## Chat egress boundary
+
+Open WebUI's outbound HTTP is proxied through the download jail and enforced by
+`table inet chat_egress` on svc-infra, which drops non-LAN traffic originating
+from that container's cgroup. The environment variables are a request; the
+table is what makes it a guarantee, and the two must be changed together.
+
+Four things about it are load-bearing:
+
+- **The cgroup match is an inode, resolved once when the ruleset loads — not a
+  live path.** `socket cgroupv2` resolves the quoted path to a kernel inode at
+  load time and the rule then matches that integer. systemd destroys and
+  recreates `open-webui`'s cgroup on every restart, so an unattended restart
+  hands it a new inode and the rule matches nothing: unrestricted egress, with
+  `chat-egress.service` still `active` and the drop counter reading 0 —
+  indistinguishable from a clean run. `chat-egress-reload.timer` checks every
+  60 seconds whether the loaded rule has gone stale and reloads it, which
+  bounds the window rather than closing it: **there is a residual window of up
+  to ~60s after an unattended `open-webui` restart during which chat's egress
+  is not enforced.** A `meta skuid` match would have no such window; it was
+  considered and declined. The same load-time resolution is why
+  `chat-egress.service` waits for the cgroup to exist at boot rather than
+  relying on unit ordering — `nft` refuses to load a ruleset naming a cgroup
+  path that does not yet exist, and measured on this host
+  `multi-user.target` is reached roughly 1.5-2s before the rootless user
+  manager has created `open-webui`'s cgroup.
+- **The base chain is `policy accept`.** Unlike svc-download's backstop it
+  guards one unit, not a VM. Changing it to drop would take svc-infra off the
+  network.
+- **The proxy is reachable from svc-infra only.** tinyproxy sees every caller
+  as `10.77.0.1`, so the `$INFRA_HOST` rule in `host-backstop.nft.j2` is the
+  only place that restriction can be expressed.
+- **`homelab-chat-egress.timer` checks this hourly, tri-state.** It proves a
+  direct fetch from chat is refused *and* that the drop counter moved, with a
+  control fetch from the host proving the network was up when the refusal
+  happened. A run that cannot complete every check reports `inconclusive`
+  rather than fabricating a clean result, and re-alerts are suppressed by
+  `alert_realert_hours` while the same fault persists. One gap is worth
+  stating plainly: on an `inconclusive` run nothing is published, so a
+  preceding `ok` leaves `homelab_chat_egress_enforced 1` frozen in the
+  `.prom` file. The `Chat egress age` stat in the estate dashboard's
+  Freshness row is what surfaces that staleness; the alert itself only says
+  `broken` when something was actually measured. Separately,
+  `notify-failure.sh.j2` publishes `urgent` unconditionally with no
+  suppression of its own, so a fault that persists through an `OnFailure=`
+  path still produces one urgent message per hour regardless of this probe's
+  own dedupe — an estate-wide gap this feature does not fix.
+
+Only svc-download filters egress at all. svc-media and svc-infra do not, and
+this change does not alter that for anything but chat.
+
 ## Certificate material
 
 CA certificates are public, but they change who the machine trusts. Obtain the
