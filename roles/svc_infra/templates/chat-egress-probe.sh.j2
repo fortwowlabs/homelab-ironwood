@@ -125,16 +125,27 @@ fault() {
         blind_seen=1
         ;;
     *)
-        # An unrecognised severity is a bug in this script, and it must fail
-        # LOUD. Routing the unknown case to the blind buffer -- which an
-        # `if broken / else` does implicitly -- means a typo silently demotes a
-        # measured fault to priority default and to the branch that publishes
-        # no metrics. That is the quiet direction, and quiet is the failure
-        # mode this whole file is built against.
+        # An unrecognised severity is a bug in this script. It sets BOTH
+        # flags, and that is the whole point of having two.
+        #
+        # Loud on the severity axis: routing the unknown case to the blind
+        # buffer -- which an `if broken / else` does implicitly, and which this
+        # did until it was caught -- means a typo silently demotes a measured
+        # fault to priority default. Quiet is the failure mode this whole file
+        # is built against.
+        #
+        # Conservative on the publish axis: routing it to broken ALONE would be
+        # the opposite mistake. `broken` is a publishing verdict, so a typo
+        # would have started writing enforced/vpn_verified values that the
+        # skipped checks never measured -- fabricated zeros reading as "not
+        # enforced", which is the one thing this task must never do. Setting
+        # both says the honest thing: something happened that this script does
+        # not understand, so shout about it and do not write numbers down.
         logger -p daemon.err -t chat-egress-probe             "BUG: fault() called with severity ${severity} for ${code}; treating it as broken"
         broken_detail="${broken_detail:+${broken_detail}
-}- [probe bug: unrecognised severity ${severity}, treated as broken] ${message}"
+}- [probe bug: unrecognised severity ${severity}; alerting as broken and publishing nothing] ${message}"
         broken_seen=1
+        blind_seen=1
         ;;
     esac
     fault_codes="${fault_codes:+${fault_codes} }${code}"
