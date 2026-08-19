@@ -528,13 +528,17 @@ infra_secret_apps:
   # host homelab user under rootless podman with no PUID/user override — the
   # comfortable case for once.
   #
-  # ENABLE_PERSISTENT_CONFIG=false is the important line. By default Open
-  # WebUI copies each of the settings below into its SQLite database on FIRST
-  # boot and thereafter ignores the environment entirely, so a later change
-  # here would render, restart, and silently do nothing. With persistence off
-  # this catalog stays the source of truth, matching how every other service
-  # in this repo is configured. The trade: the corresponding toggles in the
-  # admin UI stop sticking across a restart. Change them here instead.
+  # ENABLE_PERSISTENT_CONFIG is the important line, and since 2026-08-10 it is
+  # `true` — see the note on the value itself below, and docs/services.md.
+  # Read that before editing anything in `env:`, because the consequence is
+  # not the one this comment used to claim: Open WebUI copies each setting
+  # into its SQLite database, and from then on the DB row wins and the
+  # environment is IGNORED. So the values below are FIRST-BOOT SEEDS, not
+  # enforced state, and a later edit here can render, restart and silently do
+  # nothing for any key that has been touched in the admin UI. The trade runs
+  # the other way round from every other service in this repo: admin-UI
+  # changes stick across restarts, and this catalog is not the source of
+  # truth. `ENABLE_SIGNUP` is where that bites hardest (see its WARNING).
   #
   # Web search points at SearXNG inside svc-download's VPN jail, reached
   # through its generated socket proxy on the LAN. That indirection is the
