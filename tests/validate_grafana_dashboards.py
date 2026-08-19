@@ -35,6 +35,11 @@ EMITTER_PATHS = (
     "roles/svc_infra/tasks/scan.yml",
     "release.yml",
     "roles/service_vm/tasks/container-drift.yml",
+    # A shell template rather than a play, and the only emitter that is one.
+    # Its metric lines sit at the left margin of a heredoc for exactly this
+    # reason, and its --prefix is spelled the same way the plays spell theirs,
+    # so both collectors below read it without a special case.
+    "roles/svc_infra/templates/chat-egress-probe.sh.j2",
 )
 
 # node_exporter's own series, which this repo does not emit but legitimately
