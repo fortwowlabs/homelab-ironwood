@@ -47,20 +47,20 @@
   ansible.builtin.systemd:
     name: "systemd-journald@{{ chat_proxy_log_namespace }}.service"
     state: restarted
-  when: download_chat_proxy_journald is changed
+  when: download_chat_proxy_journald.changed | default(false) | bool
 
 - name: Ensure the chat egress proxy is started
   ansible.builtin.systemd:
     name: chat-proxy.service
     state: >-
       {{ 'restarted'
-         if (download_chat_proxy_config.changed
-             or download_chat_proxy_quadlet.changed
-             or download_chat_proxy_retention.changed)
+         if (download_chat_proxy_config.changed | default(false)
+             or download_chat_proxy_quadlet.changed | default(false)
+             or download_chat_proxy_retention.changed | default(false))
          else 'started' }}
     daemon_reload: >-
-      {{ download_chat_proxy_quadlet is changed
-         or download_chat_proxy_retention is changed }}
+      {{ download_chat_proxy_quadlet.changed | default(false)
+         or download_chat_proxy_retention.changed | default(false) }}
 
 - name: Enable the chat egress proxy relay socket
   ansible.builtin.systemd:
@@ -68,8 +68,8 @@
     enabled: true
     state: started
     daemon_reload: >-
-      {{ download_chat_proxy_relay_units is changed
-         or download_chat_proxy_listen is changed }}
+      {{ download_chat_proxy_relay_units.changed | default(false)
+         or download_chat_proxy_listen.changed | default(false) }}
 
 - name: Ensure the node_exporter is started
   ansible.builtin.systemd:
