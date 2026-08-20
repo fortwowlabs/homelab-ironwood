@@ -1,0 +1,38 @@
+# Nightly end-to-end proof that in-chat image generation still works.
+# The instance is the unprivileged account owning the checkout:
+#   systemctl start homelab-image-gen@svcops.service
+#
+# Separate from homelab-verify@ because it answers a different question and
+# has a different failure meaning: a red verify means the estate drifted, a red
+# image-gen means one application stopped functioning while every container
+# stayed green. That is the exact failure this check exists to catch, so
+# collapsing it into verify would bury it.
+[Unit]
+Description=homelab-iac in-chat image generation check for %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=%i
+WorkingDirectory=/opt/homelab-iac
+# ExecStartPre, NOT ConditionPathIsDirectory: systemd treats an unmet condition
+# as SUCCESS, so a missing venv would end nightly checking with every indicator
+# green. Same correction as homelab-verify@.service and homelab-scan@.service.
+ExecStartPre=/usr/bin/test -d /opt/homelab-iac/.venv
+ExecStart=/opt/homelab-iac/.venv/bin/python \
+    /opt/homelab-iac/scripts/image_generation_check.py \
+    --token-file /etc/homelab-owui-admin.token \
+    --metrics-dir /opt/homelab/appdata/node-exporter-textfile
+# Generation against a card that may hold a 17 GB resident chat model, on a
+# desktop that may be asleep. Long enough to be a real answer, short enough
+# that a hang is reported the same night.
+TimeoutStartSec=900
+UMask=0077
+# Exit 2 is `inconclusive`: the GPU host was unreachable or asleep, which is
+# routine on a desktop that is off most nights, not a fault of this estate.
+# SuccessExitStatus=2 keeps systemd from marking the unit failed for that
+# case, so it does not page. Exit 1 (`broken` — reachable but no image, or
+# the wrong size) is a real defect and is deliberately left out of this list,
+# so it still fails the unit and still pages.
+SuccessExitStatus=2

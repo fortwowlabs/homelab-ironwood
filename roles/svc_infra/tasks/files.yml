@@ -1075,3 +1075,18 @@
       }}
   changed_when: infra_services_to_restart | length > 0
   notify: infra configuration changed
+
+# ------------------------------------------- image generation check ---
+# Consumed by homelab-image-gen@.service (roles/svc_infra/tasks/verify-runner.yml),
+# which runs as the verify runner account, not svcops-via-become_user.
+- name: Install the Open WebUI admin token for the image generation check
+  ansible.builtin.copy:
+    # Written as root with an explicit owner rather than under become_user:
+    # Ansible's copy under become_user needs setfacl, absent on these hosts.
+    content: "{{ vault_openwebui_admin_token }}"
+    dest: /etc/homelab-owui-admin.token
+    owner: "{{ verify_runner_user }}"
+    group: root
+    mode: "0400"
+  no_log: true
+  diff: false

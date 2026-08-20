@@ -340,3 +340,28 @@
     enabled: true
     state: started
     daemon_reload: "{{ release_runner_units is changed }}"
+
+# --------------------------------------------- nightly image generation ---
+# Reuses the checkout, venv and account above, same as the scan and release
+# report. Proves the chat stack actually produces an image end to end, not
+# just that its containers are up — see scripts/image_generation_check.py
+# and the comment at the top of homelab-image-gen@.service for why this is a
+# separate unit from homelab-verify@ rather than folded into it.
+- name: Install the nightly image generation check units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - homelab-image-gen@.service
+    - homelab-image-gen@.timer
+  register: image_gen_runner_units
+
+- name: Arm the nightly image generation check timer
+  ansible.builtin.systemd:
+    name: "homelab-image-gen@{{ verify_runner_user }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: "{{ image_gen_runner_units is changed }}"

@@ -1,0 +1,15 @@
+# Enabled for the runner account by roles/svc_infra/tasks/verify-runner.yml:
+#   systemctl enable --now homelab-image-gen@svcops.timer
+[Unit]
+Description=Run the in-chat image generation check nightly for %i
+
+[Timer]
+Unit=homelab-image-gen@%i.service
+# 06:15, after the 05:30 scan. Staggered rather than chained, like the others:
+# an image check that hangs against a sleeping GPU must not delay a scan.
+OnCalendar=*-*-* 06:15:00
+RandomizedDelaySec=900
+Persistent=true
+
+[Install]
+WantedBy=timers.target

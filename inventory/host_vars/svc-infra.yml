@@ -92,3 +92,14 @@ onfailure_units_extra:
   # `podman exec` outliving TimeoutStartSec all leave the probe silent, which
   # is indistinguishable from an estate where chat's egress is fine.
   - homelab-chat-egress.service
+  # Unlike the probes above, the image generation check publishes no verdict
+  # of its own anywhere — no ntfy message, nothing — so this drop-in is the
+  # only alert path it has, not a second one covering a gap. It pages on
+  # exit 1 (`broken`: reachable but produced no image, or the wrong size)
+  # and on the check failing to run at all (missing venv, a crash, a hang
+  # past TimeoutStartSec). It does NOT page on exit 2 (`inconclusive`: GPU
+  # host unreachable or asleep), which homelab-image-gen@.service's own
+  # SuccessExitStatus=2 deliberately keeps out of `failed` — that state is
+  # routine on a desktop that is off most nights, and paging on it nightly is
+  # exactly the noise CLAUDE.md's Calibre-Web note warns about.
+  - homelab-image-gen@.service
