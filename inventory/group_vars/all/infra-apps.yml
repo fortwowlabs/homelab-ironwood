@@ -612,36 +612,19 @@ infra_secret_apps:
       ENABLE_OPENAI_API: "false"
       ENABLE_OLLAMA_API: "{{ 'true' if gpu_host_online | bool else 'false' }}"
       OLLAMA_BASE_URL: "http://{{ gpu_host_ip }}:11434"
-      ENABLE_IMAGE_GENERATION: "{{ 'true' if gpu_host_online | bool else 'false' }}"
-      IMAGE_GENERATION_ENGINE: comfyui
-      COMFYUI_BASE_URL: "http://{{ gpu_host_ip }}:8188"
-      # Both of these are upstream defaults that were wrong here, and neither
-      # announced itself: the container is green, the request succeeds, the
-      # image is just bad.
+      # Image generation is configured in inventory/group_vars/all/images.yml
+      # and applied with `make owui-image-config`, NOT from here.
       #
-      # IMAGE_SIZE defaults to 512x512 (config.py). The deployed checkpoint is
-      # SDXL, which is trained at 1024 and degrades badly below it — so every
-      # in-chat image since this feature was enabled has been quietly poor.
-      # IMAGE_STEPS defaults to 50, roughly double what SDXL needs, so each
-      # one also cost about twice the time it should.
+      # Open WebUI's config update endpoint upserts every image key at once, so
+      # the first push wrote database rows for all of them. With
+      # ENABLE_PERSISTENT_CONFIG true, a row overrides the environment
+      # permanently — anything set here would render, deploy, report `changed`
+      # and do nothing.
       #
-      # Set here rather than in the admin UI so that a rebuild from a clean
-      # clone gets them. Note that with ENABLE_PERSISTENT_CONFIG now "true"
-      # above, these seed the config table on first start and the stored row
-      # wins afterwards — editing them here does NOT change a running
-      # instance that has already seeded. Same trap as the ENABLE_SIGNUP
-      # comment, in the opposite direction.
-      #
-      # ⚠️ Neither of these reaches ComfyUI today. Open WebUI injects size,
-      # steps, prompt and checkpoint into a ComfyUI workflow only through
-      # COMFYUI_WORKFLOW_NODES, which is unset, so it parses to [] and
-      # _apply_workflow_nodes iterates nothing. The default workflow is
-      # submitted verbatim: 512x512, 20 steps, the literal prompt "Prompt",
-      # and ckpt_name "model.safetensors" — which is not the checkpoint on
-      # the GPU host (sd_xl_base_1.0.safetensors). See docs/plans/
-      # uncensored-image-generation.md.
-      IMAGE_SIZE: "1024x1024"
-      IMAGE_STEPS: "28"
+      # The consequence worth knowing: flipping gpu_host_online no longer
+      # disables image generation on its own. images.yml carries
+      # image_generation_enabled, validate_openwebui_image_config.py fails the
+      # build when the two disagree, and `make owui-image-config` applies it.
       ENABLE_WEB_SEARCH: "true"
       WEB_SEARCH_ENGINE: searxng
       SEARXNG_QUERY_URL: "http://{{ hostvars[download_host].ansible_host }}:{{ download_apps.searxng.ui_port }}/search?q=<query>"

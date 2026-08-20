@@ -17,9 +17,15 @@ repo's only knowledge of it is two variables in
 
 `gpu_host_online: false` is the default and is the state to leave it in until
 the PC actually exists and answers. While it is false, Open WebUI deploys with
-`ENABLE_OLLAMA_API` and `ENABLE_IMAGE_GENERATION` switched off, so the chat UI
-offers no models rather than throwing connection errors at a machine that
-isn't there.
+`ENABLE_OLLAMA_API` switched off, so the chat UI offers no models rather than
+throwing connection errors at a machine that isn't there.
+
+**Image generation is no longer covered by that flag.** It moved to
+`inventory/group_vars/all/images.yml` as `image_generation_enabled`, applied by
+`make owui-image-config` rather than by `make infra` — Open WebUI's config rows
+override the environment, so the env key that used to gate it was deleted.
+Taking the GPU host offline therefore means setting `image_generation_enabled:
+false` there and running that target as well. `make infra` alone will not do it.
 
 ## Setup, in order
 
