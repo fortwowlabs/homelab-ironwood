@@ -1,7 +1,10 @@
 # In-chat image generation, actually working
 
 **Date:** 2026-08-14
-**Status:** design approved, not yet implemented
+**Status:** implemented for SDXL and **verified working 2026-08-20** — a real
+1024x1024 PNG in 10.5s, with ComfyUI's `/history` confirming the executed graph.
+Still outstanding: retiring the superseded env keys (Task 7), the nightly check
+(Task 8), and the Pony checkpoint (Task 9).
 
 In-chat image generation at `chat.fortwow.dev` has never produced an image.
 Not a poor one — none. The container is green, the request is accepted, and
@@ -332,13 +335,39 @@ took.
 
 ## Rollout
 
-### Step 0 — measure before designing around it
+### Step 0 — measured 2026-08-20
 
-Confirm whether database rows already exist for the `image_generation.*` keys,
-via an admin-authenticated `GET /api/v1/configs/export`. The answer does not
-change the design — the push wins either way — but it determines whether the
-environment path was ever viable, and that belongs in the record rather than in
-an assumption.
+Done. Read with an admin-authenticated `GET /api/v1/images/config` rather than
+`/api/v1/configs/export`, which would have put four API keys on the terminal to
+answer a question about three.
+
+**Five of the eight managed keys already held their catalog values** —
+`ENABLE_IMAGE_GENERATION`, `IMAGE_GENERATION_ENGINE`, `COMFYUI_BASE_URL`,
+`IMAGE_SIZE` and `IMAGE_STEPS`. So the environment had seeded, and no
+admin-UI save had ever overridden them. Three differed:
+
+| Key | Found | Meaning |
+|---|---|---|
+| `COMFYUI_WORKFLOW_NODES` | `[]` | The mapping was genuinely unset, as diagnosed. |
+| `IMAGE_GENERATION_MODEL` | `""` | **Empty.** No checkpoint name to submit. |
+| `COMFYUI_WORKFLOW` | the compiled-in default | Never replaced. |
+
+`IMAGE_GENERATION_MODEL` being empty is the finding that matters most, because
+the plan page never mentions it. It confirms by measurement what this spec
+argued by reading source: **the node mapping alone would not have fixed this.**
+A flawless `COMFYUI_WORKFLOW_NODES` with this key empty submits an empty
+checkpoint name.
+
+The measurement also settled the payload shape. Had `ImagesConfig` been the
+nested form, every flat key lookup would have missed and all eight keys would
+have read as differing; five matched by flat name. The shape is flat, as
+`routers/images.py` at the pinned revision `01f4282f` says.
+
+**Nothing was overridden in the database beforehand, so the environment path
+was viable for the five scalars** — but not for the three that mattered, and
+never for the workflow, which cannot go on a systemd `Environment=` line. The
+push then wrote rows for the whole subtree, which is what retires the
+`gpu_host_online` gate described above.
 
 ### Step 1 — make it work with the checkpoint already present
 
@@ -405,10 +434,12 @@ workflow-format specifics stay confined to the workflow files.
 
 ## Risks
 
-- **The measurement in Step 0 may find no rows**, in which case plain
-  environment variables would have worked and this tooling is heavier than
-  strictly necessary. It remains correct and idempotent, so it stays — but this
-  is a real possibility, not a hypothetical.
+- ~~**The measurement in Step 0 may find no rows**~~ — **resolved 2026-08-20.**
+  Nothing had been overridden in the admin UI, so environment variables were in
+  effect for the five scalar keys. They were still not sufficient: the two keys
+  that were wrong are the two the environment had never been given, and the
+  workflow itself cannot travel on a systemd `Environment=` line. The tooling
+  earns its place.
 - **A future admin-UI save silently overwrites the pushed configuration.**
   Nothing prevents it. The nightly check catches the effect rather than the
   cause, which is the honest guard. A config-drift comparison belongs with the
@@ -425,10 +456,11 @@ workflow-format specifics stay confined to the workflow files.
   `.safetensors` is data-only and cannot execute on load, and the checksum pins
   exactly which bytes were reviewed. The plan page's reasoning, carried forward
   unchanged.
-- **The WebSocket path is newly documented and previously unverified.** If Open
-  WebUI cannot upgrade to `ws://` against the GPU host, the symptom is identical
-  to the defect being fixed. Step 1 should confirm it explicitly rather than
-  inferring it from success.
+- ~~**The WebSocket path is newly documented and previously unverified.**~~ —
+  **verified 2026-08-20.** Generation completed in 10.5s and returned a real
+  1024x1024 PNG, which is only reachable through `_ws_get_images`; ComfyUI's
+  `/history` holds the matching entry. The `ws://` upgrade to the GPU host
+  works.
 
 ## Out of scope
 
