@@ -680,13 +680,23 @@
 # container-drift.yml. A metric file changes on every run by definition, so a
 # template task in this role would make every `make infra` report changed and
 # the "clean tree deploys to changed=0" proof would stop meaning anything.
+#
+# group/mode below: this directory now has a writer that is not root —
+# homelab-image-gen@.service runs as the runner account (verify_runner_user),
+# unlike scan.yml/release.yml/container-drift.yml, which all write here as
+# root from the play. Without group-write, the runner's publish fails with
+# EACCES on the .tmp file while the check unit still reports success, because
+# the publish failure is only a stderr message and a non-metric exit path —
+# it does not turn the check's own verdict into a failure. Plain group-write
+# is enough; no setgid bit and no ACL, since the writers are exactly root
+# (the play) and {{ verify_runner_user }} (the unit), both known up front.
 - name: Create the node_exporter textfile directory
   ansible.builtin.file:
     path: "{{ infra_textfile_dir }}"
     state: directory
     owner: root
-    group: root
-    mode: "0755"
+    group: "{{ verify_runner_user }}"
+    mode: "0775"
 
 - name: Install the metric publisher
   ansible.builtin.copy:
