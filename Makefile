@@ -135,6 +135,11 @@ validate-catalog:
 # sits with the catalog gates because it validates the same kind of artifact:
 # a data file this repo owns and other things read verbatim.
 	$(PYTHON) tests/validate_model_roster.py
+# Sits with the catalog gates because its first assertion is a catalog one:
+# the nft rule names open-webui.service, and that name is the
+# infra_secret_apps key. Delete the app and the firewall silently guards a
+# unit that no longer exists.
+	$(PYTHON) tests/validate_chat_egress.py
 
 validate-provisioning:
 	$(PYTHON) tests/validate_pve_states.py

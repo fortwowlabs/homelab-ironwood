@@ -13,7 +13,7 @@
       {{ (download_apps | dict2items | map(attribute='value.image') | list)
          + ([beszel_agent_image] if beszel_agent_enabled | bool else [])
          + ([recyclarr_image] if download_recyclarr_enabled | default(false) | bool else [])
-         + [node_exporter_image] }}
+         + [node_exporter_image, chat_proxy_image] }}
   changed_when: false
 
 - name: Check catalog image availability

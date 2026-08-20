@@ -1,0 +1,11 @@
+# homelab-iac managed — roles/svc_download/files/chat-proxy-relay.socket
+[Unit]
+Description=Chat egress proxy socket (LAN to VPN namespace)
+
+[Socket]
+# ListenStream comes from a drop-in rendered by files.yml; this host's LAN
+# address is inventory data and does not belong in a static file.
+FreeBind=yes
+
+[Install]
+WantedBy=sockets.target

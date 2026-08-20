@@ -1,0 +1,53 @@
+{{ ansible_managed | comment }}
+# /srv/appdata/chat-proxy/tinyproxy.conf  (inside the vpn netns)
+#
+# Forward proxy for Open WebUI on svc-infra. Everything it accepts leaves via
+# wg0, because the only route out of this namespace is wg0.
+
+# No User/Group. tinyproxy only changes uid when it is started as root, and
+# this container is not — the image runs it as its own uid 57981. Naming a user
+# here would be a line the process silently skips, which is worse than absent:
+# it would read as a privilege decision that is not being made anywhere.
+
+# 0.0.0.0, not loopback: the socket proxy in the init namespace dials
+# 10.77.0.2:{{ chat_proxy_port }} across the veth, so a loopback bind is
+# unreachable. Same reasoning as SearXNG's GRANIAN_HOST.
+Listen 0.0.0.0
+Port {{ chat_proxy_port }}
+
+Timeout 600
+
+# Access control here is COSMETIC and must not be relied on. Every request
+# arrives from 10.77.0.1 regardless of who sent it, because the socket proxy
+# re-originates it — the same fact that forces SearXNG to run limiter:false.
+# The real restriction is the $INFRA_HOST rule in host-backstop.nft.j2.
+Allow 10.77.0.1
+
+{% if chat_proxy_log_requests %}
+# Connect: logs each request's destination. See chat_proxy_log_requests.
+LogLevel Connect
+{% else %}
+# Error: failures only, no per-request destinations. Note what it does NOT
+# keep, because the obvious reading is wrong. tinyproxy emits its startup
+# banner and its listening address at Notice/Info, and an ACL or ConnectPort
+# refusal at Info, so at Error all of those go too — what survives is the
+# LOG_ERR set: DNS failures, socket failures, config errors. Verified on the
+# host on 2026-08-19 by driving one successful and one failing fetch through
+# the proxy with this setting live. The successful one left NO line at all;
+# the failing one left `ERROR ... opensock: Could not retrieve address info`.
+#
+# Two things follow. A silent namespace journal is ambiguous between "proxied
+# nothing" and "never started" — `systemctl status chat-proxy` on svc-download
+# is what resolves it. And a request refused by the `Allow` line or by
+# ConnectPort is invisible here, so this setting costs more than the
+# destination list alone.
+LogLevel Error
+{% endif %}
+
+# CONNECT is how HTTPS is proxied; without these ports nothing but plaintext
+# works. 443 for HTTPS, 563 kept off deliberately — this list is destinations
+# chat may reach, not a general-purpose relay.
+ConnectPort 443
+
+# No ViaProxyName header leak of the internal hostname.
+DisableViaHeader Yes

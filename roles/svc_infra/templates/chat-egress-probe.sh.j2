@@ -1,0 +1,529 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# chat-egress-probe.sh — prove chat's egress goes through the tunnel, and that
+# the rule stopping it going anywhere else is still doing so.
+#
+# WHY FOUR CHECKS AND NOT ONE
+#
+# The obvious check — "a direct fetch from chat must fail" — is worthless
+# alone, because a DEAD probe passes it. A missing container, a broken podman,
+# an unset XDG_RUNTIME_DIR, a cwd the service account cannot chdir into: all
+# produce "the fetch failed", which reads as "enforcement working". That is the
+# credential-canary failure CLAUDE.md catalogues, and it is why L and B2 exist.
+#
+#   L   the probe's own reach into the container -> must echo a known string
+#   A   through the proxy                        -> must be 200 AND Mullvad
+#   B1  bypassing the proxy, from chat           -> must fail, AND the nft
+#                                                   drop counter must MOVE
+#   B2  the same fetch, from the host            -> must SUCCEED
+#
+# L is the positive control for the probe's own machinery. B2 is the control
+# for the network: it proves the internet is reachable and curl works right
+# now, so B1's failure is attributable to the rule rather than to a dead link.
+# The counter delta is what ties the refusal to the firewall at all. Be precise
+# about its strength: chat generates incidental dropped traffic of its own, so
+# a delta is consistent with the rule having refused this fetch rather than
+# proof that this particular packet was the one counted. What it does rule out
+# is the case that matters — a rule that has stopped matching altogether cannot
+# move a counter, and a refusal from a dead network does not move this one. If
+# either control fails the verdict is inconclusive, never ok.
+#
+# WHY THE COUNTER IS READ AS A DELTA AND NEVER AS "NON-ZERO"
+#
+# chat-egress-reload.timer re-applies the policy whenever open-webui's cgroup
+# inode changes, and re-applying necessarily resets the counter to 0. A repair
+# tick therefore makes a healthy estate read as never having dropped anything,
+# while a long-dead rule carrying an old count reads as working. Only the
+# movement across THIS probe's own bypass attempt means anything.
+#
+# WHY THE BYPASS CLEARS THE PROXY VARIABLES EXPLICITLY
+#
+# Because `--noproxy '*'` does not survive being written down. Twice during
+# development a hand-run bypass delivered a literal `*` to curl through a layer
+# of shell quoting, the request went through the proxy, succeeded, and was read
+# as a PASS against a counter that had not moved. So the proxy variables are
+# emptied on the exec itself, and the emptiness is READ BACK out of the
+# container before the fetch is trusted — a bypass that was not actually a
+# bypass is inconclusive, not ok.
+#
+# WHY THE LOADER'S OWN STATE IS CHECKED SEPARATELY
+#
+# An inactive chat-egress.service raises nothing anywhere in this estate: it is
+# not `failed`, so neither OnFailure= nor the 15-minute failed-unit sweep sees
+# it, and chat-egress-reload deliberately stands down while it is inactive —
+# reporting success every 60 seconds with enforcement entirely absent. Nothing
+# else can catch that state, so it is named here explicitly rather than being
+# inferred from a missing table.
+set -uo pipefail
+
+# systemd passes these via EnvironmentFile=, but source them anyway: this is
+# the pattern the zed and smartd hooks got wrong, where the variables were
+# assumed to be inherited and were not, and every alert died on `set -u`.
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-notify.env ]] && . /etc/homelab-notify.env
+
+# `homelab` is spelled out, matching container-drift.sh.j2 and verify.yml; only
+# the uid is a variable, because the rootless runtime directory needs it
+# numerically. The container name comes off chat_egress_unit — the same
+# inventory fact the nft rule's cgroup path is built from, so the probe cannot
+# end up watching a different container than the rule constrains.
+RUN_USER=homelab
+RUN_UID={{ svc_uid }}
+CONTAINER={{ chat_egress_unit | replace('.service', '') | quote }}
+LOADER=chat-egress.service
+NFT=/usr/sbin/nft
+LIVENESS_TOKEN=chat-egress-probe-alive
+ECHO_URL="https://ifconfig.me"
+MULLVAD_URL="https://am.i.mullvad.net/json"
+TEXTFILE_DIR={{ infra_textfile_dir | quote }}
+METRIC_WRITE={{ infra_metric_write_bin | quote }}
+# Alert dedupe, in the house idiom (disk-alert.sh, failed-units-watch.sh,
+# diskguard.sh, nfsguard.sh all keep their state here and read the same
+# variable). This timer fires hourly, so without suppression one overnight
+# blip at ifconfig.me — nothing to do with this estate — is 24 messages by
+# morning, and an alert topic that produces 24 messages about one thing is an
+# alert topic nobody reads.
+STATE_DIR=/var/lib/homelab
+STATE="$STATE_DIR/chat-egress-probe.state"
+REALERT_SECS=$(( {{ alert_realert_hours | default(6) }} * 3600 ))
+
+verdict=ok
+alert_state=ok
+detail=""
+broken_detail=""
+blind_detail=""
+broken_seen=0
+blind_seen=0
+# The stable identity of each fault, for the alert dedupe. Prose is the wrong
+# thing to hash: two of these messages interpolate the drop counter, which chat
+# advances with incidental traffic between runs, so hashing the text made one
+# fault path re-alert every single hour — the exact noise the dedupe exists to
+# prevent. disk-alert.sh learned the same lesson and states it: hash the
+# mountpoint set, not the percentages. The order is deterministic because the
+# checks below run in a fixed sequence and each raises at most once.
+fault_codes=""
+enforced=0
+vpn_verified=0
+before=""
+after=""
+
+# Faults are recorded into two buffers, not one, because the answer to "may
+# this run publish numbers?" and the answer to "how loud is this?" are decided
+# by different halves. settle() below turns these into a verdict and a
+# severity; see the comment there for why they are not the same word.
+fault() {
+    local severity=$1 code=$2 message=$3
+    case $severity in
+    broken)
+        broken_detail="${broken_detail:+${broken_detail}
+}- ${message}"
+        broken_seen=1
+        ;;
+    inconclusive)
+        blind_detail="${blind_detail:+${blind_detail}
+}- ${message}"
+        blind_seen=1
+        ;;
+    *)
+        # An unrecognised severity is a bug in this script. It sets BOTH
+        # flags, and that is the whole point of having two.
+        #
+        # Loud on the severity axis: routing the unknown case to the blind
+        # buffer -- which an `if broken / else` does implicitly, and which this
+        # did until it was caught -- means a typo silently demotes a measured
+        # fault to priority default. Quiet is the failure mode this whole file
+        # is built against.
+        #
+        # Conservative on the publish axis: routing it to broken ALONE would be
+        # the opposite mistake. `broken` is a publishing verdict, so a typo
+        # would have started writing enforced/vpn_verified values that the
+        # skipped checks never measured -- fabricated zeros reading as "not
+        # enforced", which is the one thing this task must never do. Setting
+        # both says the honest thing: something happened that this script does
+        # not understand, so shout about it and do not write numbers down.
+        logger -p daemon.err -t chat-egress-probe             "BUG: fault() called with severity ${severity} for ${code}; treating it as broken"
+        broken_detail="${broken_detail:+${broken_detail}
+}- [probe bug: unrecognised severity ${severity}; alerting as broken and publishing nothing] ${message}"
+        broken_seen=1
+        blind_seen=1
+        ;;
+    esac
+    fault_codes="${fault_codes:+${fault_codes} }${code}"
+}
+
+# Every container call goes through here, and all three prefixes are load
+# bearing. Without XDG_RUNTIME_DIR rootless podman finds no container at all;
+# without the chdir, runuser inherits root's cwd and podman dies on a chdir the
+# service account is not allowed to make. Either one produces an error that
+# looks exactly like a refused connection, which is the whole hazard here.
+in_chat() {
+    ( cd /tmp && runuser -u "$RUN_USER" -- \
+        env "XDG_RUNTIME_DIR=/run/user/${RUN_UID}" \
+        podman exec "$@" )
+}
+
+# The drop counter, or nothing. Exactly one `counter` statement exists in this
+# table, and tests/validate_chat_egress.py asserts exactly that — both that the
+# counter is present and that there is only one, because a second counter
+# anywhere in the table would make this reader ambiguous and flip the probe to
+# a permanent `inconclusive`. If the table is gone, or the counter has been
+# edited away, this returns failure rather than a number: a probe that cannot
+# find its instrument must not report a reading.
+#
+# Counted rather than collected into an array on purpose: bash's array-length
+# syntax opens with the same two characters as a Jinja comment, and this file
+# is a template.
+read_drop_counter() {
+    local out line value="" found=0
+    out=$("$NFT" list table inet chat_egress 2>/dev/null) || return 1
+    while IFS= read -r line; do
+        if [[ $line =~ counter[[:space:]]+packets[[:space:]]+([0-9]+) ]]; then
+            value=${BASH_REMATCH[1]}
+            found=$((found + 1))
+        fi
+    done <<<"$out"
+    (( found == 1 )) || return 1
+    printf '%s' "$value"
+}
+
+# --- L: is the probe's own reach into the container real? -----------------
+# One exec that must return a known string AND prove curl exists in there. If
+# this fails, nothing below can be attributed to anything, so the probe says so
+# instead of reporting the resulting silence as enforcement.
+chat_alive=0
+liveness=$(in_chat "$CONTAINER" sh -c "command -v curl >/dev/null && printf %s ${LIVENESS_TOKEN}")
+if [[ $liveness == "$LIVENESS_TOKEN" ]]; then
+    chat_alive=1
+else
+    fault inconclusive chat-unreachable "the probe could not execute inside the ${CONTAINER} container (expected '${LIVENESS_TOKEN}', got '${liveness}'). open-webui may be down, or podman or curl unavailable to the probe — either way nothing below proves anything about chat's egress"
+fi
+
+# --- the loader's own state ------------------------------------------------
+if ! systemctl is-active --quiet "$LOADER"; then
+    fault broken loader-inactive "${LOADER} is INACTIVE: the nftables policy is not loaded and nothing will re-arm it — chat-egress-reload deliberately stands down while the loader is stopped, so it reports success every minute with enforcement entirely absent. Start it with: systemctl start ${LOADER}"
+fi
+
+# --- A: through the proxy, must be Mullvad --------------------------------
+if (( chat_alive )); then
+    a_body=$(in_chat "$CONTAINER" curl -s --max-time 25 "$MULLVAD_URL")
+    if [[ -z $a_body ]]; then
+        fault broken proxy-unreachable "chat could not reach ${MULLVAD_URL} through its proxy — the tunnel or the jail is down, and chat's web features are failing closed"
+    elif grep -q '"mullvad_exit_ip"[[:space:]]*:[[:space:]]*true' <<<"$a_body"; then
+        vpn_verified=1
+    else
+        fault broken not-mullvad "chat reached the internet and it was NOT Mullvad — this is the original leak, recurring"
+    fi
+fi
+
+# --- B2 first: is the probe environment even alive? -----------------------
+host_reaches_internet=0
+if curl -fsS --max-time 10 -o /dev/null "$ECHO_URL"; then
+    host_reaches_internet=1
+else
+    fault inconclusive host-offline "the host itself could not reach ${ECHO_URL}, so a refused fetch from chat proves nothing about the rule"
+fi
+
+# --- B1: bypassing the proxy must fail, and our rule must be why ----------
+if (( chat_alive && host_reaches_internet )); then
+    # Read the bypass environment back before trusting the bypass. An exec that
+    # did not actually clear the proxy would send this through tinyproxy, where
+    # it would succeed — indistinguishable, without this, from a rule that has
+    # stopped matching.
+    #
+    # A quoted heredoc rather than a single-quoted `sh -c` string: these four
+    # expansions have to happen INSIDE the container, and ShellCheck flags the
+    # single-quoted form as a probable mistake (SC2016) - correctly, in
+    # general. The heredoc says the same thing unambiguously rather than
+    # silencing the warning that exists to catch this exact confusion.
+    read -r -d '' bypass_env_probe <<'PROBE'
+printf "[%s][%s][%s][%s]" "${http_proxy-}" "${https_proxy-}" "${HTTP_PROXY-}" "${HTTPS_PROXY-}"
+PROBE
+    bypass_env=$(in_chat -e http_proxy= -e https_proxy= -e HTTP_PROXY= -e HTTPS_PROXY= \
+        "$CONTAINER" sh -c "$bypass_env_probe")
+    if [[ $bypass_env != "[][][][]" ]]; then
+        fault inconclusive bypass-not-cleared "the bypass exec did not clear chat's proxy variables (read back as ${bypass_env}), so the fetch below would have gone through tinyproxy and proved nothing"
+    else
+        before=$(read_drop_counter) || before=""
+        in_chat -e http_proxy= -e https_proxy= -e HTTP_PROXY= -e HTTPS_PROXY= \
+            "$CONTAINER" curl -s --max-time 8 -o /dev/null "$ECHO_URL"
+        b1_rc=$?
+        after=$(read_drop_counter) || after=""
+
+        if (( b1_rc == 0 )); then
+            fault broken egress-not-enforced "chat reached ${ECHO_URL} directly, bypassing its proxy — enforcement is NOT in effect"
+        elif [[ -z $before || -z $after ]]; then
+            fault inconclusive counter-unreadable "the direct fetch failed, but the chat_egress drop counter could not be read either side of it (table missing, or its counter removed) — so nothing attributes the refusal to this rule"
+        elif (( after > before )); then
+            enforced=1
+        else
+            fault inconclusive counter-static "the direct fetch failed but the drop counter did not move (${before} -> ${after}) — something other than the chat_egress rule refused it, and the rule's own state is unproven"
+        fi
+    fi
+fi
+
+# --- settle: the publish gate and the severity are two different questions ---
+#
+# `verdict` answers "may this run's numbers be written down?" and blindness
+# dominates it: a run that could not complete every check must not publish a
+# half-measured file, because a zero there reads as "not enforced" and cries
+# wolf. That gate is deliberately conservative and must stay that way.
+#
+# `alert_state` answers "how loud should this be?" and BROKENNESS dominates
+# that one instead. Getting these the same way round was a real defect: with
+# chat-egress.service stopped AND the container unreachable, enforcement was
+# measurably absent and the alert went out titled `inconclusive` at priority
+# default, with the enforcement line as its second bullet. A measured fault
+# does not become less true because something unrelated also went blind.
+#
+# The two faults are also kept in separate buffers so the broken ones are
+# listed first. What the reader must act on should not be below what they
+# cannot act on.
+settle() {
+    detail="$broken_detail"
+    if [[ -n $blind_detail ]]; then
+        detail="${detail:+${detail}
+}${blind_detail}"
+    fi
+    if (( blind_seen )); then
+        verdict=inconclusive
+    elif (( broken_seen )); then
+        verdict=broken
+    else
+        verdict=ok
+    fi
+    if (( broken_seen )); then
+        alert_state=broken
+    elif (( blind_seen )); then
+        alert_state=inconclusive
+    else
+        alert_state=ok
+    fi
+}
+settle
+
+# --- metrics BEFORE the alert, per CLAUDE.md ------------------------------
+# Never publish zeros we did not measure: an inconclusive run exits without
+# writing, leaving the previous file in place. A stale number is detectable —
+# node_textfile_mtime_seconds shows it — while a fabricated zero reads as "not
+# enforced" and cries wolf.
+#
+# THE KNOWN COST, STATED RATHER THAN HIDDEN. If a run is `ok` and the next is
+# `inconclusive`, the file keeps `homelab_chat_egress_enforced 1` for as long
+# as the blindness lasts — and if enforcement genuinely IS absent underneath
+# it, the chart reads green while chat is unconstrained. That is accepted, for
+# three reasons:
+#
+#   - The alert path carries this news whenever anything MEASURED it. Be exact
+#     about the limit, because an earlier draft of this comment was not: a run
+#     that both loses enforcement and goes blind is titled `broken` at high,
+#     but a run that is ONLY blind is `inconclusive` at priority default. If
+#     enforcement lapses entirely inside a blind window, nothing measured it,
+#     so nothing says `broken` and the stale 1 sits behind a quiet message.
+#   - So the stale 1 is made DETECTABLE instead, and by something that actually
+#     exists: the "Chat egress age" stat in homelab-estate.json plots
+#     `time() - homelab_chat_egress_last_success_timestamp_seconds` and turns
+#     red past 7200s, beside the identical tiles for the scan, the release
+#     report and the drift check. Nothing at all is written on an inconclusive
+#     run, so that timestamp freezes at the same instant `enforced` does and
+#     the tile goes red within two ticks of an hourly timer. Anything that ever
+#     charts `enforced` must be read next to it. Until that panel was added
+#     this bullet was a rule with no implementer — grep found these series in
+#     nothing but this template.
+#   - The alternative is worse. node_exporter's textfile format has no
+#     per-sample provenance and this publisher rewrites the whole file, so
+#     "publish only the fields I measured" would DELETE the others rather than
+#     freeze them. Trading a detectable stale 1 for a silently vanished series
+#     is a step backwards.
+publish_failed=0
+if [[ $verdict != inconclusive ]]; then
+    probe_success=0
+    [[ $verdict == ok ]] && probe_success=1
+    # Each name starts a line of its own, unindented. That is not cosmetic:
+    # tests/validate_grafana_dashboards.py collects the emitted metric names by
+    # reading them off the left margin of the emitters, and a name buried mid-
+    # line is invisible to it — so a panel querying it would fail the gate as
+    # an unknown series while the emitter was publishing it perfectly.
+    read -r -d '' metrics <<EOF
+homelab_chat_egress_enforced ${enforced}
+homelab_chat_egress_vpn_verified ${vpn_verified}
+homelab_chat_egress_probe_success ${probe_success}
+EOF
+    if [[ $verdict == ok ]]; then
+        printf '%s\n' "$metrics" | "$METRIC_WRITE" --dir "$TEXTFILE_DIR" \
+            --file chat-egress --prefix homelab_chat_egress --success || publish_failed=$?
+    else
+        printf '%s\n' "$metrics" | "$METRIC_WRITE" --dir "$TEXTFILE_DIR" \
+            --file chat-egress --prefix homelab_chat_egress || publish_failed=$?
+    fi
+fi
+
+if (( publish_failed )); then
+    # The egress finding itself is unchanged by this — but the run was not
+    # recorded, so the chart cannot corroborate it. Recording it as a blind
+    # spot is what makes that visible instead of silent.
+    logger -p daemon.err -t chat-egress-probe \
+        "metric publish FAILED (exit ${publish_failed}) — ${TEXTFILE_DIR}/chat-egress.prom not updated"
+    fault inconclusive metrics-unpublished "the verdict could not be published to ${TEXTFILE_DIR}/chat-egress.prom (${METRIC_WRITE} exited ${publish_failed}); this run is not on the chart"
+    settle
+fi
+
+# --- journal --------------------------------------------------------------
+#
+# The verdict is written TWICE, and the duplication is deliberate.
+#
+# `logger` arrives over the syslog transport, where journald has to resolve the
+# sender's cgroup to a unit AFTER the fact. On the ok path that is a race this
+# script loses: logger is the last thing before `exit 0`, systemd tears the
+# cgroup down, and the message lands with no _SYSTEMD_UNIT at all. Measured on
+# the host - the `ok` line carried none, while the `broken` and `inconclusive`
+# lines, whose runs continue into an ntfy publish, carried it fine. So
+# `journalctl -u homelab-chat-egress` can silently miss the verdict, and so can
+# the unit-journal excerpt that notify-failure pastes into its OnFailure alert:
+# before this, that excerpt was four runuser PAM lines and nothing about why
+# the probe had failed.
+#
+# A service's stdout and stderr are attributed to the unit as they are written,
+# with no such race, so the same sentence goes there too. `logger` stays
+# because `journalctl -t chat-egress-probe` is the estate's idiom and survives
+# the unit being renamed.
+#
+# The journal line is written on EVERY run, including the ones the dedupe
+# below declines to push. Suppression is about not making a phone buzz twice
+# for one fault; it must never make the fault unobservable.
+if [[ $alert_state == ok ]]; then
+    summary="ok (chat egress verified Mullvad, enforcement confirmed by drop counter ${before} -> ${after})"
+    echo "$summary"
+    logger -t chat-egress-probe "$summary"
+else
+    summary="${alert_state}: $(tr '\n' ' ' <<<"$detail")"
+    echo "$summary" >&2
+    logger -p daemon.err -t chat-egress-probe "$summary"
+fi
+
+topic="${NTFY_ALERT_TOPIC:-}"
+if [[ -z $topic || -z ${NTFY_URL:-} ]]; then
+    echo "NTFY_ALERT_TOPIC or NTFY_URL unset in /etc/homelab-notify.env; cannot alert" >&2
+    logger -p daemon.err -t chat-egress-probe "cannot alert: NTFY_ALERT_TOPIC or NTFY_URL unset"
+    [[ $alert_state == ok ]] && exit 0
+    exit 1
+fi
+
+AUTH=()
+if [[ -n ${NTFY_TOKEN:-} ]]; then
+    AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+fi
+
+# Returns nonzero when delivery failed, so the caller can decline to record a
+# dedupe entry for an alert nobody received — the same contract as
+# disk-alert.sh and failed-units-watch.sh.
+alert() {  # $1=priority $2=tags $3=title $4=body
+    if curl -fsS --max-time 15 --retry 2 --retry-delay 5 "${AUTH[@]}" \
+        -H "Title: $3" -H "Priority: $1" -H "Tags: $2" \
+        -d "$4" "${NTFY_URL}/${topic}" >/dev/null 2>&1; then
+        return 0
+    fi
+    logger -p daemon.err -t chat-egress-probe "ntfy push failed: $3"
+    return 1
+}
+
+# Same temp-file-plus-rename idiom as the neighbours, and the same reason: `>`
+# truncates before it fails, so a direct write on a full root filesystem leaves
+# an empty state file, the next run reads no previous hash, and the alarm
+# re-fires every hour — which is the noise this dedupe exists to prevent.
+write_state() {  # $1=hash $2=timestamp
+    if printf '%s %s\n' "$1" "$2" > "${STATE}.tmp" 2>/dev/null \
+       && mv -f "${STATE}.tmp" "$STATE" 2>/dev/null; then
+        return 0
+    fi
+    rm -f "${STATE}.tmp" 2>/dev/null || true
+    logger -p daemon.err -t chat-egress-probe \
+        "could not write ${STATE}; alert dedupe is running blind"
+    return 1
+}
+
+# Declared here rather than relied upon: /var/lib/homelab already exists on
+# this host because disk-alert and failed-units-watch write there, but a
+# rebuild from a bare clone must not have its dedupe silently fail open.
+mkdir -p "$STATE_DIR" 2>/dev/null || true
+
+now=$(date +%s)
+prev_hash=""
+prev_alert=0
+if [[ -f $STATE ]]; then
+    read -r prev_hash prev_alert < "$STATE" || true
+    [[ $prev_alert =~ ^[0-9]+$ ]] || prev_alert=0
+fi
+
+if [[ $alert_state == ok ]]; then
+    # Recovery is worth exactly one message: it closes the loop on an alert
+    # already received, so a cleared fault cannot be mistaken for one still
+    # pending. If the all-clear does not land, leave the state alone and let
+    # the next run try again rather than dropping it silently.
+    if [[ -n $prev_hash && $prev_hash != none ]]; then
+        alert default white_check_mark "homelab — chat egress ok again" \
+            "chat exits via Mullvad again, and a direct fetch from it is refused by the chat_egress rule (drop counter ${before} -> ${after}).
+
+Checked from $(hostname -s) at $(date -u +%Y-%m-%dT%H:%M:%SZ)." || exit 0
+    fi
+    write_state none "$now" || true
+    exit 0
+fi
+
+# Hashed over the fault CODES and the severity word, never over the message
+# text. Two of these messages interpolate the drop counter, and chat's own
+# incidental dropped traffic moves it between runs -- so hashing the prose made
+# `counter-static` churn its hash every hour and re-alert every hour, which is
+# precisely what this dedupe exists to stop. The severity word is in the hash
+# so a run escalating from `inconclusive` to `broken` alerts at once rather
+# than serving out the window at the quieter priority it was first seen at.
+hash=$(printf '%s\n%s' "$alert_state" "$fault_codes" | sha256sum | cut -d' ' -f1)
+if [[ $hash != "$prev_hash" ]]; then
+    title="homelab — chat egress ${alert_state}"
+elif (( now - prev_alert >= REALERT_SECS )); then
+    title="homelab — chat egress STILL ${alert_state}"
+else
+    # Same faults, alerted recently. The journal line above and the unit's
+    # exit status below both still happen; only the push is suppressed.
+    exit 1
+fi
+
+# `broken` is a fault happening now and is allowed to wake somebody;
+# `inconclusive` is a blind spot, which is worth knowing and is not worth a
+# phone ringing at 03:00. Both go to the alert topic — routing the quieter one
+# to the muted deploy feed would make the distinction academic.
+priority=high
+[[ $alert_state == inconclusive ]] && priority=default
+
+# Said plainly in the body when it applies, because "broken, and also not
+# recorded" is a different situation from "broken" and the chart will not
+# show the difference on its own.
+unpublished=""
+if [[ $verdict == inconclusive ]]; then
+    unpublished="This run was NOT written to ${TEXTFILE_DIR}/chat-egress.prom: at
+least one check could not be completed, and a half-measured number would read
+as a fact. The series there are the PREVIOUS run's and are not current — read
+homelab_chat_egress_run_timestamp_seconds before believing them.
+
+"
+fi
+
+if alert "$priority" warning "$title" "${detail}
+
+${unpublished}Checked from $(hostname -s) at $(date -u +%Y-%m-%dT%H:%M:%SZ).
+This probe re-sends its OWN message at most every {{ alert_realert_hours | default(6) }}h while the fault is
+unchanged. That is not one alert every {{ alert_realert_hours | default(6) }}h: a non-ok run also exits 1, and
+homelab-chat-egress.service carries an OnFailure= path, so notify-failure
+publishes an urgent alert EVERY hour regardless. Suppression here buys a
+quieter body, not a quieter phone.
+
+ok           chat exits via Mullvad and direct egress is refused
+broken       one of those two is false — read the detail above
+inconclusive the probe could not establish a verdict; nothing is proven
+
+journalctl -u homelab-chat-egress -n 50
+journalctl -t chat-egress-probe -n 20
+journalctl --namespace {{ chat_proxy_log_namespace }} -u chat-proxy -n 50"; then
+    write_state "$hash" "$now" || true
+fi
+
+exit 1

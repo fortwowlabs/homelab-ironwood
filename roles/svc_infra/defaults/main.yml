@@ -123,3 +123,19 @@ verify_runner_secret_file: "{{ verify_runner_root }}/.vault_pass"
 # playbook are its own. Its paths live in inventory/group_vars/all/main.yml
 # rather than here, because scan.yml's reporting play does not apply this role
 # and so would never see role defaults.
+
+# --- chat egress -----------------------------------------------------------
+# ONE definition of open-webui cgroup path. The nft policy, the apply script
+# and the confirm assertion in chat-egress.yml all read it from here, because
+# three hand-written copies of this string is exactly the drift that
+# tests/validate_chat_egress.py exists to catch. The components are asserted
+# against chat_egress_cgroup_level by that gate: the level IS the component
+# count, and a level one too small matches app.slice, i.e. every rootless
+# container on the host rather than just chat.
+chat_egress_cgroup_path: >-
+  user.slice/user-{{ svc_uid }}.slice/user@{{ svc_uid }}.service/app.slice/{{ chat_egress_unit }}
+# How long the boot loader waits for that cgroup to exist before giving up.
+# nft refuses to load a ruleset naming a cgroup that is not there, and
+# multi-user.target is reached ~1.5-2s before the rootless user manager has
+# created it. 120s is slack for a slow boot, not a measured requirement.
+chat_egress_wait_seconds: 120

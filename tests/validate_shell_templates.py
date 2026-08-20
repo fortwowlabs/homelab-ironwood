@@ -39,6 +39,7 @@ TEMPLATES = (
     "roles/svc_media/templates/certwatch.sh.j2",
     "roles/svc_media/templates/heartbeat.sh.j2",
     "roles/svc_infra/templates/alert-canary.sh.j2",
+    "roles/svc_infra/templates/chat-egress-probe.sh.j2",
 )
 
 # Templates that render a DIFFERENT script depending on the host, rendered a
@@ -106,6 +107,17 @@ def main() -> int:
         # while proving nothing about the script that actually ships.
         "trivy_image": main_vars["trivy_image"],
         "trivy_cache_dir": main_vars["trivy_cache_dir"],
+        # chat-egress-probe.sh.j2 publishes through the textfile collector, and
+        # both of these are paths it writes to or executes. Read from main.yml
+        # for the same reason as the two above: a fixture path that had drifted
+        # from the real one would still render and still ShellCheck clean.
+        "infra_textfile_dir": main_vars["infra_textfile_dir"],
+        "infra_metric_write_bin": main_vars["infra_metric_write_bin"],
+        # chat-egress-probe.sh.j2 derives the container name from the same
+        # inventory fact the nft cgroup path is built from, and quotes the
+        # proxy's journal namespace in its alert body.
+        "chat_egress_unit": main_vars["chat_egress_unit"],
+        "chat_proxy_log_namespace": main_vars["chat_proxy_log_namespace"],
         "disk_alert_threshold": 85,
         "disk_alert_nfs_threshold": 90,
         # failed-units-watch.sh.j2 branches on group membership to decide
