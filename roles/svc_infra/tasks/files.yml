@@ -681,6 +681,38 @@
 # template task in this role would make every `make infra` report changed and
 # the "clean tree deploys to changed=0" proof would stop meaning anything.
 #
+# /opt/homelab is mode 0700, owned by the homelab service account, and no
+# role here manages it -- it predates the Quadlet layout in this repo and
+# every existing writer under it is a container running as that same
+# account, so 0700 was never exercised and never mattered. homelab-image-gen@
+# is the first EMITTER that writes a metric as a non-root user: scan.yml,
+# release.yml and container-drift.yml all publish as root from the play, so
+# none of them ever needed to traverse this directory at all. Without this
+# task the runner cannot even reach the textfile directory below, no matter
+# what mode that directory itself allows.
+#
+# 0710, not 0711 or 0750: owner keeps rwx; only the runner group gets
+# traverse (execute only, no read -- it cannot list siblings, only cd into
+# a path it already knows); everyone else gets nothing. 0711 would let any
+# local account traverse into an appdata tree whose own subdirectories are
+# 0755, and 0750 would hand the runner read access to every application
+# data directory here, not just execute-through on this one. This grants no
+# practical privilege beyond what verify_runner_user already has, since that
+# account runs the deploy playbooks with become root and can already read
+# anything here as root. It only fixes the unprivileged case: systemd
+# running the check unit as User={{ verify_runner_user }}.
+#
+# group also corrects stale drift found on the host: the directory group id
+# was 1000, which resolves to no group at all (shown as UNKNOWN by a
+# directory listing).
+- name: Ensure the runner can traverse to the textfile directory
+  ansible.builtin.file:
+    path: /opt/homelab
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ verify_runner_user }}"
+    mode: "0710"
+
 # group/mode below: this directory now has a writer that is not root —
 # homelab-image-gen@.service runs as the runner account (verify_runner_user),
 # unlike scan.yml/release.yml/container-drift.yml, which all write here as
