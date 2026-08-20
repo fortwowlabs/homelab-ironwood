@@ -102,6 +102,13 @@ table inet host_backstop {
         # the host itself and remains intentionally separate from the catalog.
         ip saddr $LAN_ADMIN tcp dport { {{ download_apps | dict2items | selectattr('value.proxy') | map(attribute='value.ui_port') | join(', ') }}, 9090 } accept
 
+        # Chat egress proxy. open-webui on {{ infra_host }} is the only
+        # consumer, so this is scoped to that host like node_exporter below
+        # rather than to $LAN_ADMIN — and that scoping is the ONLY place the
+        # restriction can live, because tinyproxy sees every caller as
+        # 10.77.0.1 and cannot tell them apart.
+        ip saddr $INFRA_HOST tcp dport {{ chat_proxy_port }} accept
+
         # node_exporter (init ns, not the jail) scraped by Prometheus on
         # {{ infra_host }} ONLY — scoped to that single host, not $LAN_ADMIN.
         ip saddr $INFRA_HOST tcp dport 9100 accept

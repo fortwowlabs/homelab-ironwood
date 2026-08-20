@@ -528,13 +528,17 @@ infra_secret_apps:
   # host homelab user under rootless podman with no PUID/user override — the
   # comfortable case for once.
   #
-  # ENABLE_PERSISTENT_CONFIG=false is the important line. By default Open
-  # WebUI copies each of the settings below into its SQLite database on FIRST
-  # boot and thereafter ignores the environment entirely, so a later change
-  # here would render, restart, and silently do nothing. With persistence off
-  # this catalog stays the source of truth, matching how every other service
-  # in this repo is configured. The trade: the corresponding toggles in the
-  # admin UI stop sticking across a restart. Change them here instead.
+  # ENABLE_PERSISTENT_CONFIG is the important line, and since 2026-08-10 it is
+  # `true` — see the note on the value itself below, and docs/services.md.
+  # Read that before editing anything in `env:`, because the consequence is
+  # not the one this comment used to claim: Open WebUI copies each setting
+  # into its SQLite database, and from then on the DB row wins and the
+  # environment is IGNORED. So the values below are FIRST-BOOT SEEDS, not
+  # enforced state, and a later edit here can render, restart and silently do
+  # nothing for any key that has been touched in the admin UI. The trade runs
+  # the other way round from every other service in this repo: admin-UI
+  # changes stick across restarts, and this catalog is not the source of
+  # truth. `ENABLE_SIGNUP` is where that bites hardest (see its WARNING).
   #
   # Web search points at SearXNG inside svc-download's VPN jail, reached
   # through its generated socket proxy on the LAN. That indirection is the
@@ -641,5 +645,24 @@ infra_secret_apps:
       ENABLE_WEB_SEARCH: "true"
       WEB_SEARCH_ENGINE: searxng
       SEARXNG_QUERY_URL: "http://{{ hostvars[download_host].ansible_host }}:{{ download_apps.searxng.ui_port }}/search?q=<query>"
+      # Chat's own page fetches — the second half of a web search, and the
+      # half that used to leave the house directly. SearXNG returns URLs;
+      # Open WebUI reads them itself, from here. See
+      # docs/superpowers/specs/2026-08-13-chat-egress-through-vpn-design.md.
+      #
+      # This is a request, not a guarantee. A library that ignores these vars
+      # would still leak, which is why svc-infra also drops non-LAN traffic
+      # from this container's cgroup (roles/svc_infra/templates/
+      # chat-egress.nft.j2). Env says should; the firewall says must.
+      http_proxy: "http://{{ hostvars[download_host].ansible_host }}:{{ chat_proxy_port }}"
+      https_proxy: "http://{{ hostvars[download_host].ansible_host }}:{{ chat_proxy_port }}"
+      HTTP_PROXY: "http://{{ hostvars[download_host].ansible_host }}:{{ chat_proxy_port }}"
+      HTTPS_PROXY: "http://{{ hostvars[download_host].ansible_host }}:{{ chat_proxy_port }}"
+      # Everything on the LAN stays direct: Ollama and ComfyUI on the GPU host,
+      # SearXNG's own IP:port, and loopback. Routing inference through Sweden
+      # would be slow and pointless. Note this includes svc-download, so the
+      # SEARXNG_QUERY_URL above is unaffected by the lines above it.
+      no_proxy: "localhost,127.0.0.1,{{ lan_cidr }},{{ gpu_host_ip }},{{ hostvars[download_host].ansible_host }}"
+      NO_PROXY: "localhost,127.0.0.1,{{ lan_cidr }},{{ gpu_host_ip }},{{ hostvars[download_host].ansible_host }}"
     require_vault: [vault_openwebui_secret_key]
     backup_paths: [open-webui]

@@ -58,7 +58,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 	validate-ansible validate-yaml validate-shell validate-links \
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
 	check check-diff verify verify-disruptive scan image-digest image-check image-bump \
-	release-check release-report image-release owui-image-config image-gen-check drift reconcile access ping lint \
+	release-check release-report image-release roster-check drift reconcile access ping lint owui-image-config image-gen-check \
 	vault-edit clean
 
 help: ## Show this help
@@ -131,6 +131,15 @@ validate-catalog:
 	$(PYTHON) tests/validate_scan_image_coverage.py
 	$(PYTHON) tests/validate_image_provenance.py
 	$(PYTHON) tests/validate_release_overrides.py
+# The roster is the only description of which models exist on which host. It
+# sits with the catalog gates because it validates the same kind of artifact:
+# a data file this repo owns and other things read verbatim.
+	$(PYTHON) tests/validate_model_roster.py
+# Sits with the catalog gates because its first assertion is a catalog one:
+# the nft rule names open-webui.service, and that name is the
+# infra_secret_apps key. Delete the app and the firewall silently guards a
+# unit that no longer exists.
+	$(PYTHON) tests/validate_chat_egress.py
 	$(PYTHON) tests/validate_openwebui_image_config.py
 
 validate-provisioning:
@@ -222,6 +231,11 @@ image-release: ## What version is REF, and what has upstream released since?
 	@test -n "$(REF)" || { echo 'usage: make image-release REF=lscr.io/linuxserver/sonarr' >&2; exit 64; }
 	@scripts/image-release.sh "$(REF)"
 
+DB ?= /opt/homelab/appdata/open-webui/webui.db
+
+roster-check: ## Compare models.yml against Ollama and Open WebUI (needs both up; override DB= off svc-infra)
+	$(PYTHON) scripts/roster_reconcile.py \
+	  --webui-db $(DB)
 owui-image-config: ## Push inventory/group_vars/all/images.yml into Open WebUI (needs OWUI_ADMIN_TOKEN)
 	$(PYTHON) scripts/owui_image_config.py $(ARGS)
 

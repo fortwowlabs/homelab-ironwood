@@ -483,6 +483,104 @@
       Sonarr/Radarr are up. ***
   when: not (download_recyclarr_enabled | bool)
 
+- name: Ensure the chat egress proxy appdata directory exists
+  ansible.builtin.file:
+    path: /srv/appdata/chat-proxy
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Render the chat egress proxy configuration
+  ansible.builtin.template:
+    src: tinyproxy.conf.j2
+    dest: /srv/appdata/chat-proxy/tinyproxy.conf
+    owner: root
+    group: root
+    mode: "0644"
+  register: download_chat_proxy_config
+
+- name: Render the chat egress proxy Quadlet
+  ansible.builtin.template:
+    src: chat-proxy.container.j2
+    dest: /etc/containers/systemd/chat-proxy.container
+    owner: root
+    group: root
+    mode: "0644"
+  register: download_chat_proxy_quadlet
+
+- name: Install the chat egress proxy relay units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - chat-proxy-relay.socket
+    - chat-proxy-relay.service
+  register: download_chat_proxy_relay_units
+
+# Both drop-in directories are created explicitly. `copy` does not create a
+# missing parent, and the failure would be a plain "Destination directory does
+# not exist" on a first deploy only — the sort of thing that passes every
+# offline gate and every re-run against a host that already has the directory.
+- name: Ensure the chat egress proxy drop-in directories exist
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /etc/systemd/system/chat-proxy-relay.socket.d
+    - /etc/systemd/system/chat-proxy.service.d
+
+- name: Bind the chat egress proxy relay to this host's LAN address
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/chat-proxy-relay.socket.d/listen.conf
+    content: |
+      [Socket]
+      ListenStream={{ ansible_host }}:{{ chat_proxy_port }}
+    owner: root
+    group: root
+    mode: "0644"
+  register: download_chat_proxy_listen
+
+# `LogRetention=` is NOT a systemd directive. systemd 257 on this host answers a
+# drop-in containing it with "Unknown key 'LogRetention' in section [Service],
+# ignoring" and exits 0 — a retention bound that reads as enforced and is not.
+# The only per-unit mechanism systemd actually has is a journal namespace, so
+# the unit gets one here and the window itself is set on that namespace's own
+# journald instance in the next task. The pair is what enforces the bound:
+# a namespace with no journald@<name>.conf just inherits the defaults.
+- name: Give the chat egress proxy its own journal namespace
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/chat-proxy.service.d/retention.conf
+    content: |
+      [Service]
+      LogNamespace={{ chat_proxy_log_namespace }}
+    owner: root
+    group: root
+    mode: "0644"
+  register: download_chat_proxy_retention
+
+# MaxFileSec is not decoration. journald applies MaxRetentionSec when it
+# rotates, so a namespace quiet enough never to hit a size limit would keep its
+# active file — and every entry in it — indefinitely, and the bound would be
+# nominal. Rotating daily makes the retention window real to within a day.
+- name: Bound the chat egress proxy's log retention
+  ansible.builtin.copy:
+    dest: "/etc/systemd/journald@{{ chat_proxy_log_namespace }}.conf"
+    content: |
+      [Journal]
+      MaxRetentionSec={{ chat_proxy_log_retention }}
+      MaxFileSec=1d
+    owner: root
+    group: root
+    mode: "0644"
+  register: download_chat_proxy_journald
+
 - name: Render WireGuard peer configuration
   ansible.builtin.template:
     src: peer.conf.j2

@@ -15,16 +15,20 @@ orthogonalising the refusal direction out of the weights, rather than by
 retraining. "Heretic" in a model name refers to the tool that automates this;
 it is a category label now, not a brand.
 
-Measured 2026-08-09. Resident size and processor split come from `ollama ps`,
-GPU usage from `nvidia-smi`, one model at a time.
+**Sizes and fit are in [gpu-capacity.md](gpu-capacity.md), which is generated
+from a measurement run.** They used to be duplicated here and in
+`gpu-host.md`, and the two copies had drifted. The roster itself — which
+models exist, on which host, and why — is declared in
+`inventory/group_vars/all/models.yml` and gated by
+`tests/validate_model_roster.py`.
 
-| Model | Resident | Fits card? | Role |
-|---|---|---|---|
-| `huihui_ai/gemma-4-abliterated:26b` | 17 GB | ✅ 100% GPU | **Default.** Warmest prose — carries the personas |
-| `huihui_ai/Qwen3.6-abliterated:27b` | 18 GB | ✅ 100% GPU | Technical and agentic work |
-| `davidau-fable-fusion:27b-q4km` | 19 GB | ✅ 100% GPU | Creative writing, roleplay |
-| `huihui_ai/gemma-4-abliterated:31b` | 20 GB | ✅ 100% GPU **at `num_ctx` ≤ 16384** | Dense variant — stronger reasoning, see below |
-| `qwen3-coder:30b` | 21 GB | ✅ 100% GPU | Continue's default. Stock weights |
+| Model | Role |
+|---|---|
+| `huihui_ai/gemma-4-abliterated:26b` | **Default.** Warmest prose — carries the personas |
+| `huihui_ai/Qwen3.6-abliterated:27b` | Technical and agentic work |
+| `davidau-fable-fusion:27b-q4km` | Creative writing, roleplay |
+| `huihui_ai/gemma-4-abliterated:31b` | Dense variant — stronger reasoning, see below |
+| `qwen3-coder:30b` | Continue's default. Stock weights |
 
 ### One model at a time
 
@@ -33,25 +37,30 @@ reloads, costing roughly 20–30 seconds. That is the deliberate trade: an
 occasional pause in exchange for never running a weaker model than the card can
 handle.
 
-### `gemma-4-abliterated:31b` needs its context capped
+### `gemma-4-abliterated:31b` no longer needs its context capped
 
-At Ollama's default 32768 context this model reports `10%/90% CPU/GPU` — it
-spills to system RAM and generation slows by roughly an order of magnitude. Its
-first verification run hit a 30-minute timeout before completing on a second
-attempt with the model already warm.
+**Resolved 2026-08-12. The cap is gone.** It stood for months and the reason it
+stood was correct: at Ollama's default 32768 context this model reported
+`10%/90% CPU/GPU`, spilling to system RAM and slowing by roughly an order of
+magnitude. Its first verification run hit a 30-minute timeout. **The weights
+were never the problem; the KV cache was.**
 
-**The weights are not the problem; the KV cache is.** Measured 2026-08-10 on an
-idle card (1920 MiB baseline):
+The fix chosen at the time was to halve the context to 16384. The fix that
+actually addresses the cause is to shrink the cache instead of the
+conversation: the host now runs `OLLAMA_KV_CACHE_TYPE=q8_0`, and under it this
+model measures **100% GPU at the full 32768**. See
+[gpu-capacity.md](gpu-capacity.md) for the three-way f16/q8_0/q4_0 comparison
+and [gpu-host.md](gpu-host.md#the-kv-cache-is-quantized-on-this-host) for how
+the setting is applied and verified.
 
-| `num_ctx` | Resident | Processor | GPU used of 24564 MiB |
-|---|---|---|---|
-| 32768 | 21 GB | ⚠️ 10%/90% CPU/GPU | 23626 MiB |
-| **16384** | 20 GB | ✅ **100% GPU** | 23465 MiB |
-| 8192 | 20 GB | ✅ **100% GPU** | 22817 MiB |
+Worth keeping in mind, because it is the kind of thing that gets forgotten:
+**this depends on the host setting.** If the KV cache ever goes back to `f16`,
+this model spills again at 32768 and the 16384 cap has to come back with it.
+`models.yml` says so on the entry itself.
 
-So set `num_ctx` to 16384 on any persona or request using this model. It then
-runs entirely on the GPU with about 1 GiB to spare. Left at the default it
-still works — it is just slow enough that you will assume something is broken.
+The independent survey reproduced the original hand measurement exactly —
+`SPILLED` at 90% GPU under f16 — which is the main reason to trust the rest of
+the generated table.
 
 **Nothing warns you when this happens.** The model loads, answers, and only
 `ollama ps` shows the split. Check it after changing context on any model near
@@ -63,18 +72,87 @@ the ceiling.
 then deleted. At 23.9 GB downloaded it is **23 GB resident even at
 `num_ctx=2048`** and never reached 100% GPU — 4%/96% at the smallest context
 tested, 23%/77% at the default. Unlike the 31b, no context setting rescues it:
-the weights alone exceed the card. It was the only uncensored coding model in
-the roster, so that use case is currently unserved; a smaller abliterated coder
-would be the way back to it.
+the weights alone exceed the card.
 
-**Deleting it from Ollama did not delete it from Open WebUI.** As of
-2026-08-10 the `model` table on svc-infra still holds a row with id
-`aratan/qwen3.6-claude-coder-35b-A3b-mlx-Q4KM-abliterated:latest`,
-`is_active = 1`, while `/api/tags` on the GPU host lists eight models and
-not that one. Open WebUI's model list is its own table, not a view over
-Ollama, so removing a model upstream leaves the entry behind and a user who
-picks it gets a failure at generation time rather than an absence in the
-dropdown. Removing a model means removing it in both places.
+**That gap is now filled**, and the way back was exactly what this paragraph
+predicted — a smaller abliterated coder.
+`huihui_ai/qwen3-coder-abliterated:30b-a3b-instruct-q4_K_M` is a 30B-A3B MoE at
+18.6 GB, and it runs at 100% GPU at the **full 32768** context, not merely at
+the 16384 its acceptance rule required. It answered the control prompt, so it
+is confirmed uncensored rather than assumed to be. Sizes are in
+[gpu-capacity.md](gpu-capacity.md); the entry and its reasoning are in
+`inventory/group_vars/all/models.yml`.
+
+Worth keeping the contrast: `aratan` failed because its **weights** exceeded
+the card, which no setting can fix. The 31b's problem was its **KV cache**,
+which quantizing did fix. Those are different failures that look identical in
+`ollama ps`, and telling them apart is what the survey is for.
+
+### An abliterated Muse Glimmer was tried and rejected — 2026-08-12
+
+`hf.co/Blackfrost-AI/Muse-Glimmer-30B-Abliterated-GGUF:Q4_K_M`. It downloaded
+cleanly, registered, and **fits the card easily** — 19915 MiB at 16384 and
+20041 at 32768, both 100% GPU, better headroom than the stock Glimmer it would
+have replaced.
+
+It is nonetheless unusable. **It emits the literal string ` to=self` and stops
+after three tokens, for every prompt tried** — a trivial arithmetic question, a
+haiku request, the control prompt. `/api/chat` returns an empty string. That
+token is an agentic channel marker, so the likely cause is a chat template
+Ollama 0.32.9 cannot drive; the model card asks for "a recent llama.cpp
+(`master`) with `llama-server`", which is probably the real requirement rather
+than the optional speed note it appears to be.
+
+**The interesting part is that the control initially passed it.** ` to=self`
+contains no refusal marker and is not empty, so the original two rules returned
+`ANSWERED` — a broken model certified as working uncensored. That is the exact
+"probe that succeeds at asking the wrong question" failure `CLAUDE.md` warns
+about, and it went undetected because this script had no self-check of its own.
+It has one now, plus a minimum-length rule, and the case that would have caught
+this is in the table.
+
+**This is why a fits-the-card verdict is not an acceptance.** Three gates, not
+one: it must fit, it must answer, and — for a vision model — it must see. This
+model passed the first and failed the second.
+
+Re-check when llama.cpp support lands upstream and Ollama vendors it. The
+weights are on disk if that happens; nothing about them is known to be wrong.
+They are declared `held: true` in `models.yml` so that keeping them stops
+reading as undeclared drift — see the `held:` note at the top of that file.
+
+**It was still being offered to users until 2026-08-14**, which is the part
+that mattered and the part nobody had checked. It appeared in the model
+selector, and asking it anything through Open WebUI returned an empty reply —
+the same ` to=self` failure, now confirmed end to end rather than only against
+Ollama directly. It was hidden by creating a `model` row with
+`is_active = 0`; the weights were left in place.
+
+### What the Open WebUI model table is, and is not — measured 2026-08-14
+
+An earlier version of this section said the stale `aratan` row meant "a user
+who picks it gets a failure at generation time rather than an absence in the
+dropdown". Measured against Open WebUI 0.11.0, that is **wrong in both
+directions**, and the correction is worth more than the original claim.
+
+- **A stale row is not necessarily user-visible.** 0.11.0 merges the `model`
+  table against Ollama's tags and drops what Ollama no longer has. The
+  `aratan` row sat at `is_active = 1` for four days and never appeared in the
+  selector. It was bookkeeping drift, not a live trap. The row was deleted on
+  2026-08-14.
+- **A model with no row at all IS offered.** This is the direction that bites.
+  The table is an override store, not the dropdown, so anything installed in
+  Ollama is selectable without any row existing. That is precisely how the
+  broken Muse Glimmer stayed on offer.
+
+So "removing a model means removing it in both places" is right, but the
+reasoning was inverted: the risk is not the row left behind, it is the model
+present in Ollama that no row constrains. Hiding one requires *adding* a
+deactivated row, not deleting anything.
+
+This also bounds what `scripts/roster_reconcile.py` can tell you. It reads the
+table, so it cannot see what is offered; a clean run says the three lists it
+can read agree, and says so in those words. The authoritative source is
+`GET /api/models` with an admin token, which that script does not hold.
 
 The coding default, `qwen3-coder:30b`, is **not** abliterated on purpose. Coding
 models rarely refuse, so abliteration buys almost nothing while costing

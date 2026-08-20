@@ -414,7 +414,7 @@
       "type": "stat",
       "title": "Scan age",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 29 },
+      "gridPos": { "h": 4, "w": 5, "x": 0, "y": 29 },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
@@ -449,7 +449,7 @@
       "type": "stat",
       "title": "Release age",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 29 },
+      "gridPos": { "h": 4, "w": 5, "x": 5, "y": 29 },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
@@ -484,7 +484,7 @@
       "type": "stat",
       "title": "Drift age by VM",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 29 },
+      "gridPos": { "h": 4, "w": 5, "x": 10, "y": 29 },
       "fieldConfig": {
         "defaults": {
           "unit": "s",
@@ -518,9 +518,44 @@
     },
     {
       "type": "stat",
+      "title": "Chat egress age",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 4, "x": 15, "y": 29 },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "no data",
+          "color": { "mode": "thresholds" },
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "red", "value": 7200 }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "options": {
+        "colorMode": "value",
+        "graphMode": "none",
+        "textMode": "auto",
+        "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false }
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": { "type": "prometheus", "uid": "prometheus" },
+          "expr": "time() - homelab_chat_egress_last_success_timestamp_seconds",
+          "instant": true
+        }
+      ]
+    },
+    {
+      "type": "stat",
       "title": "Textfile collector errors",
       "datasource": { "type": "prometheus", "uid": "prometheus" },
-      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 29 },
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 29 },
       "fieldConfig": {
         "defaults": {
           "noValue": "no data",

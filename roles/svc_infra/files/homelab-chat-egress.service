@@ -1,0 +1,17 @@
+# homelab-iac managed — roles/svc_infra/files/homelab-chat-egress.service
+[Unit]
+Description=Verify chat's egress goes through the VPN and cannot go elsewhere
+After=network-online.target chat-egress.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Type=oneshot disables the start timeout by default. A probe wedged in
+# `activating` is not `failed`, so OnFailure would never fire and the check
+# would go quiet with every indicator green — the precise failure this unit
+# exists to make impossible. Budget: the Mullvad fetch at 25s, the host control
+# at 10s, the bypass at 8s, three podman execs, and an ntfy publish at 15s with
+# two 5s-spaced retries. Under two minutes of real work; 180s is the bound.
+TimeoutStartSec=180
+EnvironmentFile=/etc/homelab-notify.env
+ExecStart=/usr/local/sbin/homelab-chat-egress-probe.sh

@@ -1,0 +1,101 @@
+#!/usr/sbin/nft -f
+{{ ansible_managed | comment }}
+# /etc/nftables/chat-egress.nft
+#
+# Open WebUI may reach the LAN and nothing else. Everything it legitimately
+# does — Ollama and ComfyUI on the GPU host, SearXNG, the jail proxy — is a LAN
+# address, so anything internet-bound that bypassed its proxy configuration has
+# an internet destination by definition and is dropped here.
+#
+# Scope discipline copied from svc-download's host-backstop.nft: OWN table,
+# explicit `delete table` guard, NO ruleset flush. firewalld owns this VM's
+# other rules and must not be disturbed; independent tables at the same hook
+# are all evaluated and a drop in any of them is final.
+#
+# Rootless podman is why this matches on cgroup rather than address: the
+# container's packets are re-originated by a userspace process and carry the
+# host's own source IP, so there is nothing address-shaped to match on. The
+# path and level below were measured on the live host, not assumed — see
+# docs/superpowers/plans/notes/2026-08-14-cgroup-match-finding.md.
+#
+# ---------------------------------------------------------------------------
+# READ THIS BEFORE TRUSTING THIS FILE: the match is by INODE, not by path.
+# ---------------------------------------------------------------------------
+# `socket cgroupv2` resolves the path below to a cgroup inode ONCE, when the
+# ruleset is loaded, and the kernel then compares that integer. Confirmed on
+# the host:
+#
+#     nft --debug=netlink list table inet chat_egress
+#     [ cmp eq reg 1 0xab511502 0x00000000 ]      # inode 34951595
+#
+# systemd destroys and recreates a unit's cgroup on every restart, so the
+# next open-webui restart gives it a NEW inode and this rule matches nothing.
+# The failure is silent and green: the unit stays `active`, the table stays
+# listed, and the drop counter simply reads 0 — indistinguishable from "no
+# leaks", which is the exact shape of half-failure CLAUDE.md warns about.
+#
+# Two things exist because of that, and neither is optional:
+#   1. chat-egress-reload.timer re-applies this file whenever the rule has
+#      gone stale. Staleness is cheap to see: `nft list table` prints the
+#      quoted path below while the inode still resolves, and a bare integer
+#      once it does not.
+#   2. The confirm task in chat-egress.yml greps for that quoted path, not
+#      merely for the chain name, so a stale rule fails the deploy.
+#
+# RESIDUAL, stated plainly: re-applying cannot close the window, only shorten
+# it. Between an unattended open-webui restart and the next refresh tick,
+# chat's egress is unrestricted. The tick is 60s, and that is the real bound
+# only because chat-egress-reload.timer pins AccuracySec=1s — systemd may fire
+# a timer up to its accuracy slack late, so the 15s slack this carried until
+# 2026-08-19 made the true window ~75s. Change one and the other is wrong.
+# Closing it entirely means
+# matching on something stable across restarts — a dedicated podman user plus
+# `meta skuid` — which was considered and deferred as most of a new plan.
+
+define LAN = {{ lan_cidr }}
+
+table inet chat_egress
+delete table inet chat_egress
+
+table inet chat_egress {
+    chain output {
+        # policy ACCEPT, deliberately. svc-download's backstop guards a whole
+        # VM and defaults to drop; this table has exactly one subject and must
+        # leave the other ~28 containers on this host untouched. A drop policy
+        # here would take svc-infra off the network.
+        type filter hook output priority 0; policy accept;
+
+        socket cgroupv2 level {{ chat_egress_cgroup_level }} "{{ chat_egress_cgroup_path }}" jump chat_policy
+    }
+
+    chain chat_policy {
+        oifname "lo" accept
+        ct state established,related accept
+
+        # IPv4 only, and everything below it therefore falls through to the
+        # drop — including all IPv6. That is fail-closed rather than designed:
+        # svc-infra has a ULA address but NO default IPv6 route, so today no
+        # IPv6 egress is possible anyway and dropping it costs nothing. It
+        # stops costing nothing the day something on this LAN is addressed
+        # over IPv6 and chat is pointed at it by hostname — the symptom would
+        # be a service that works from the host and not from chat. If IPv6
+        # ever lands here, add a deliberate `ip6 daddr` accept; do not
+        # discover this by debugging it.
+        ip daddr $LAN accept
+
+        # `counter` is UNCONDITIONAL and must stay that way: the probe in
+        # chat-egress-probe.sh.j2 reads it to prove this rule is what refused a
+        # direct fetch, rather than the network merely being down. It is a
+        # number, not a destination, so it costs nothing when logging is off.
+        #
+        # The `log` half follows chat_proxy_log_requests, because it records
+        # destinations exactly as the proxy log does — a false setting that
+        # still wrote every blocked destination into the kernel log would not
+        # mean what it says.
+{% if chat_proxy_log_requests %}
+        log prefix "chat-egress-drop " counter drop
+{% else %}
+        counter drop
+{% endif %}
+    }
+}

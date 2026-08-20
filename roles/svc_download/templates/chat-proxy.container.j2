@@ -1,0 +1,34 @@
+{{ ansible_managed | comment }}
+# /etc/containers/systemd/chat-proxy.container   (inside vpn netns)
+# NOT catalog-managed (no download_apps entry): `proxy: true` generates a Caddy
+# vhost, an SSO gate, a dashboard tile and an HTTP health check that expects a
+# 200 from a page. A forward proxy serves none of those and would fail the
+# generated verify probe. Same reasoning as recyclarr.container.j2 next door.
+[Unit]
+Description=Chat egress forward proxy (inside vpn netns)
+Requires=vpn-netns.service
+After=vpn-netns.service
+BindsTo=vpn-netns.service
+PartOf=vpn-netns.service
+
+[Container]
+Image={{ chat_proxy_image }}
+ContainerName=chat-proxy
+# No User=. The image bakes USER 57981 and that is what runs: a forward proxy
+# binds one high port, reads one world-readable config and writes nothing, so
+# it needs no privilege at all. Deliberately unlike node-exporter.container.j2,
+# which sets User=0 because it genuinely has to read host pseudo-filesystems.
+# Containers in this jail are ROOTFUL, so container-root would be host root —
+# the rootless subuid reasoning that makes uid 0 the easy answer on svc-infra
+# and svc-media does not apply here, and neither does its conclusion.
+Environment=TZ={{ timezone }}
+PodmanArgs=--network=ns:/run/netns/vpn
+DNS={{ mullvad_dns }}
+Volume=/srv/appdata/chat-proxy/tinyproxy.conf:/etc/tinyproxy/tinyproxy.conf:Z,ro
+
+[Service]
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

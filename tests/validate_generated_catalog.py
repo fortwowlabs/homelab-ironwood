@@ -114,6 +114,10 @@ def main() -> int:
         "timezone": "Etc/UTC",
         "truenas_ip": "192.0.2.20",
         "backup_retention_days": 14,
+        # The chat egress proxy is not a catalog entry, so its port reaches the
+        # backstop template as a bare inventory variable and has to be supplied
+        # here for the render to complete at all.
+        "chat_proxy_port": 8118,
     }
 
     failures: list[str] = []
@@ -172,6 +176,36 @@ def main() -> int:
         failures.append("firewall: INFRA_HOST was not defined from the svc-infra inventory address")
     if not re.search(r"^\s*ip saddr \$INFRA_HOST tcp dport 9100 accept$", backstop, re.MULTILINE):
         failures.append("firewall: node_exporter scrape rule was not rendered for INFRA_HOST")
+
+    # The chat egress proxy has exactly one consumer, open-webui on svc-infra,
+    # and this rule is the ONLY place that restriction can live: the socket
+    # proxy re-originates every request from 10.77.0.1, so tinyproxy's own
+    # Allow line cannot tell one caller from another. A rule that widened to
+    # $LAN_ADMIN would put an open Mullvad relay on the LAN and break nothing
+    # visible, so assert the source scope, not just the port.
+    #
+    # Counting is the point. "A correctly scoped rule exists" is satisfied by a
+    # ruleset that ALSO carries an unscoped one three lines down, and in nftables
+    # the loosest accept wins — so the check has to be that 8118 is accepted in
+    # exactly one place, not that one of the places is right.
+    chat_port = common["chat_proxy_port"]
+    chat_accepts = [
+        line.strip()
+        for line in backstop.splitlines()
+        if re.search(rf"\bdport\b[^\n]*\b{chat_port}\b[^\n]*\baccept\b", line)
+    ]
+    if len(chat_accepts) != 1:
+        failures.append(
+            f"firewall: expected exactly one accept rule for the chat egress proxy "
+            f"port, found {len(chat_accepts)}: {chat_accepts}"
+        )
+    elif not re.fullmatch(
+        rf"ip saddr \$INFRA_HOST tcp dport {chat_port} accept", chat_accepts[0]
+    ):
+        failures.append(
+            f"firewall: the chat egress proxy rule is not scoped to $INFRA_HOST: "
+            f"{chat_accepts[0]!r}"
+        )
 
     for role in ("svc_download", "svc_media", "svc_infra"):
         node_exporter = (

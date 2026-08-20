@@ -50,6 +50,41 @@ Set it under *System Properties → Environment Variables → System variables*,
 not in a shell — Ollama runs as a background service and will not see a
 variable set in one terminal. Restart Ollama afterwards.
 
+**That advice is necessary but not sufficient, and the gap bit us.** See
+[the KV cache section](#setting-it-is-not-the-same-as-it-taking-effect) below:
+writing the variable to the registry does not reach a process launched from a
+shell that predates the write. The same failure applies to `OLLAMA_HOST`.
+
+### Minimum version: 0.32.9
+
+`muse-glimmer:30b` needs **Ollama ≥ 0.32.9** (released 2026-08-11, the first
+build handling it). On 0.32.6 the pull fails with a bare *"Please download the
+latest version"* and no mention of which model or why.
+
+The upgrade is a per-user install — `OllamaSetup.exe /VERYSILENT /NORESTART`
+into `%LOCALAPPDATA%\Programs\Ollama`, no administrator needed. Two things
+follow it, neither optional:
+
+- **Re-apply and verify the KV cache setting**, which the installer drops.
+- **Re-check the firewall.** The installer creates `ollama.exe` rules scoped
+  to `Remote: Any` on the Private and Public profiles, which override the
+  narrow LAN rule entirely. They were found enabled again on 2026-08-12 and
+  disabled by hand:
+
+  ```powershell
+  Get-NetFirewallRule -DisplayName "ollama.exe" | Disable-NetFirewallRule
+  ```
+
+  That needs an elevated shell. Confirm afterwards from a **tailnet peer**
+  that `http://100.107.5.66:11434/api/tags` stops answering while
+  `http://192.168.1.40:11434/api/tags` still does — both halves, because the
+  first alone cannot distinguish a narrowed scope from a dead service.
+
+  **Do not assume disabling them closes the tailnet path.** It was done on
+  2026-08-12 and the path still answered on 2026-08-13 — see
+  [the measurement below](#-that-fix-was-applied-and-it-did-not-work--measured-2026-08-13).
+  Run the confirmation, and believe the curl rather than the rule state.
+
 Pull the four chat models Open WebUI offers, the coding model, and the two
 small models Continue needs for autocomplete and embeddings:
 
@@ -58,6 +93,8 @@ small models Continue needs for autocomplete and embeddings:
 ollama pull huihui_ai/gemma-4-abliterated:26b     # default
 ollama pull huihui_ai/Qwen3.6-abliterated:27b     # technical work
 ollama pull huihui_ai/gemma-4-abliterated:31b     # see the CPU-spill warning
+# Vision + agentic. NEEDS OLLAMA >= 0.32.9 - see the version note below.
+ollama pull muse-glimmer:30b                      # the only model here that can see
 # Coding
 ollama pull qwen3-coder:30b                       # Continue chat/edit/apply
 # (an abliterated coder was tried here and removed - see "What actually fits")
@@ -210,7 +247,7 @@ adapter, where the source address is `100.110.75.114`, which
 an identical inner packet. The airtight version of this test is the same two
 curls from a peer on cellular; every such peer was offline at the time.
 
-The fix needs an elevated shell **on TERRA**:
+The obvious fix needs an elevated shell **on TERRA**:
 
 ```powershell
 Get-NetFirewallRule -DisplayName "ollama.exe" | Disable-NetFirewallRule
@@ -220,6 +257,41 @@ Then re-run both curls from a tailnet peer and require that they stop
 answering while `192.168.1.40` still does — a check that fails closed rather
 than one that merely looks quiet. Re-check after Ollama updates; the installer
 created these rules and may recreate them.
+
+#### ⚠️ That fix was applied and it did not work — measured 2026-08-13
+
+The `ollama.exe` rules were disabled on TERRA on 2026-08-12 and read back as
+`enabled=False` from that machine. **The tailnet path still answers.** Verified
+2026-08-13 from `brandons-macbook-pro`, the same peer as before:
+
+```
+curl http://100.107.5.66:11434/api/tags     -> 200, 12 models, Ollama 0.32.9
+curl http://100.107.5.66:8188/system_stats  -> 200
+curl http://192.168.1.40:11434/api/tags     -> 200  (LAN still works, as required)
+```
+
+`route -n get 100.107.5.66` resolves to `utun6`, the Tailscale adapter, so this
+is genuinely the tailnet path and not the LAN one under a different address.
+
+**So disabling the `ollama.exe` rules is not sufficient, and the diagnosis
+above is incomplete.** That was already implied by the ComfyUI half — ComfyUI
+has no `ollama.exe` rule and answered anyway — but it is now measured for both.
+Something other than Ollama's installer rules is admitting decapsulated
+Tailscale traffic. Candidates not yet eliminated, in the order worth checking:
+
+1. A Tailscale-created firewall rule. The client adds its own allow rules, and
+   they are scoped to the tailnet interface rather than to a remote subnet.
+2. The Tailscale adapter landing in the **Private** profile, where a broad
+   inbound allow would match traffic that `-RemoteAddress 192.168.1.0/24`
+   was written to exclude.
+3. Tailscale Serve or a subnet-router/exit-node setting forwarding the ports.
+
+Until one of those is confirmed, treat **both services as reachable by all 8
+tailnet peers, unauthenticated**. The reliable containment is at the Tailscale
+layer rather than the Windows one — a tailnet ACL denying `:11434` and `:8188`
+to every peer, which is enforced by the coordination server and cannot be
+reverted by an Ollama installer. That is the recommended next step, and unlike
+the firewall edit it does not need administrator rights on TERRA.
 
 ### 5. Tell the homelab it exists
 
@@ -236,22 +308,80 @@ conversation. A green container proves nothing about whether inference works.
 
 ## What actually fits on the card
 
-Measured 2026-08-09, one model at a time, each stopped before the next was
-loaded. **Two of the six do not fit and silently spill to CPU** — Ollama does
-not warn, it just runs slowly, so `ollama ps` is the only place this is
-visible.
+**The table that used to live here has moved to
+[gpu-capacity.md](gpu-capacity.md), which is generated rather than
+hand-written.** There were two copies of it — one here, one in
+`chat-models.md` — and they had already drifted apart. Regenerate it with
+`scripts/vram_survey.py` and `scripts/vram_report.py`; do not re-add a copy.
 
-| Model | Resident | Processor | GPU used of 24564 MiB |
-|---|---|---|---|
-| `huihui_ai/gemma-4-abliterated:26b` | 17 GB | **100% GPU** | 20339 MiB |
-| `huihui_ai/Qwen3.6-abliterated:27b` | 18 GB | **100% GPU** | 20411 MiB |
-| `davidau-fable-fusion:27b-q4km` | 19 GB | **100% GPU** | 20800 MiB |
-| `qwen3-coder:30b` | 21 GB | **100% GPU** | 22634 MiB |
-| `huihui_ai/gemma-4-abliterated:31b` @ `num_ctx` 16384 | 20 GB | **100% GPU** | 23465 MiB |
-| `huihui_ai/gemma-4-abliterated:31b` @ default 32768 | 21 GB | ⚠️ 10%/90% CPU/GPU | 23626 MiB |
+The shape of the problem has not changed: exceeding the card does not fail, it
+silently spills layers to system RAM and slows generation by roughly an order
+of magnitude, and `ollama ps` is the only place that shows. The practical
+ceiling is around **21 GB resident**.
 
-The practical ceiling is around **21 GB resident**. Above that Ollama offloads
-layers to system RAM and generation slows by roughly an order of magnitude.
+### The KV cache is quantized on this host
+
+`OLLAMA_KV_CACHE_TYPE=q8_0` with `OLLAMA_FLASH_ATTENTION=1`, adopted
+2026-08-12 on the evidence in `gpu-capacity.md`. It frees 0.4–1.2 GB on every
+large model and — the reason it was adopted — makes
+`huihui_ai/gemma-4-abliterated:31b` fit entirely on the GPU at the full 32768
+context, which it could not do under `f16`. Its `num_ctx` cap is gone.
+
+`q4_0` was measured too and saves a further ~400 MB, but it changed no
+verdict that `q8_0` had not already changed, so the extra memory bought
+nothing while carrying more quality risk. Upstream calls `q8_0` no noticeable
+loss and `q4_0` small-to-medium.
+
+**The setting is server-global.** There is no per-model override, so this
+applies to the coding model as much as to chat, and changing it means
+restarting Ollama.
+
+#### Setting it is not the same as it taking effect
+
+This is the trap, and it is a sharper version of the `OLLAMA_HOST` warning
+further up this page. Writing the variable to the User or Machine environment
+and restarting Ollama **is not sufficient.** Windows builds a process's
+environment from the registry at *launch*, so anything started from a shell
+that predates the write — including `Start-Process` from such a shell — gets
+the old values. Observed 2026-08-12: the variables were set, Ollama was
+restarted, and the server still reported `OLLAMA_FLASH_ATTENTION:false` with
+an empty cache type.
+
+Set the variables in the launching process, then start the tray app:
+
+```powershell
+[Environment]::SetEnvironmentVariable('OLLAMA_FLASH_ATTENTION','1','User')
+[Environment]::SetEnvironmentVariable('OLLAMA_KV_CACHE_TYPE','q8_0','User')
+Get-Process ollama,'ollama app' -EA SilentlyContinue | Stop-Process -Force
+$env:OLLAMA_FLASH_ATTENTION='1'; $env:OLLAMA_KV_CACHE_TYPE='q8_0'
+Start-Process 'C:\Users\tv\AppData\Local\Programs\Ollama\ollama app.exe'
+```
+
+The User-scope write is what makes it survive a reboot; the `$env:` pair is
+what makes it apply *now*. **Verify, every time** — do not infer that it
+worked from having set it:
+
+**An Ollama upgrade silently reverts this.** Measured on 2026-08-12 upgrading
+0.32.6 → 0.32.9: the installer relaunches Ollama from its own environment,
+which does not carry the User-scope variables, and the server came back
+reporting `OLLAMA_FLASH_ATTENTION:false` with an empty cache type. Nothing
+errored. The visible consequence would have been `gemma-4-abliterated:31b`
+quietly spilling again at 32768 — an order of magnitude slower — while
+`models.yml` and `chat-models.md` both assert it fits. So the rule is broader
+than "verify after changing it": **verify after anything that restarts Ollama**,
+upgrades included.
+
+```powershell
+Select-String 'server config' "$env:LOCALAPPDATA\Ollama\server.log" | Select-Object -Last 1
+```
+
+Require `OLLAMA_FLASH_ATTENTION:true` and `OLLAMA_KV_CACHE_TYPE:q8_0` in that
+line. Why this matters more than it looks: upstream documents that an
+unsupported architecture falls back to `f16` **without saying so**. A survey
+run against a server that never received the variable produces exactly the
+same output as a card that cannot do quantized cache — every model unchanged,
+`FALLBACK` across the board. The wrong conclusion, "this card does not support
+it", is the one you would reach and record.
 
 **Two lessons from producing this table**, both of which cost time:
 

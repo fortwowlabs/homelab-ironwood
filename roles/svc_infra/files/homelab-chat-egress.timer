@@ -1,0 +1,17 @@
+# homelab-iac managed — roles/svc_infra/files/homelab-chat-egress.timer
+[Unit]
+Description=Periodic chat egress verification
+
+[Timer]
+# Hourly, unlike the weekly alert canary. This one guards a live data path
+# rather than a delivery route: the window between a rule silently ceasing to
+# match and somebody noticing is the window in which chat is leaking, so it is
+# worth keeping to an hour. Each run is four HTTP requests.
+OnCalendar=hourly
+# Spread off the hour so it does not collide with the estate's scheduled work
+# (03:05-03:40 backups, 04:00 verify, 04:40 freshness, 05:30 scan).
+RandomizedDelaySec=300
+Persistent=true
+
+[Install]
+WantedBy=timers.target
