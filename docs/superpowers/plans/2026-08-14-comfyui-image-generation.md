@@ -1596,7 +1596,7 @@ https://huggingface.co/LyliaEngine/Pony_Diffusion_V6_XL/resolve/main/ponyDiffusi
 Get-FileHash -Algorithm SHA256 ponyDiffusionV6XL_v6StartWithThisOne.safetensors
 ```
 
-Expected: `614f55e8bd8701b9168957361a00c7a76c5de1aa625ade08edfca3db2675b2cc`
+Expected: `67ab2fd8ec439a89b3fedb15cc65f54336af163c7eb5e4f2acc98f090a29b0b3`
 
 **Do not skip this.** A truncated or error-page download wearing a `.safetensors` name is the failure `docs/gpu-host.md` already warns about. Confirm ComfyUI sees it:
 

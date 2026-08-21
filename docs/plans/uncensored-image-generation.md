@@ -118,15 +118,34 @@ lives in git.
 | `models/text_encoders/` | [`t5xxl_flan_fp8_scaled.safetensors`](https://huggingface.co/silveroxides/t5xxl_flan_enc/resolve/main/t5xxl_flan_fp8_scaled.safetensors) | 4.80 GB |
 | `models/vae/` | [`ae.safetensors`](https://huggingface.co/Comfy-Org/Lumina_Image_2.0_Repackaged/resolve/main/split_files/vae/ae.safetensors) | 0.31 GB |
 
-SHA256, read from Hugging Face's CDN etag so the expected value is knowable in
-advance — verify with `Get-FileHash -Algorithm SHA256` before wiring anything:
+**Corrected 2026-08-20. Every checksum previously in this table was wrong, and
+the method that produced them was unsound.** They were "read from Hugging
+Face's CDN etag", but for a Xet-backed repository the `etag` header carries the
+**Xet content-address hash, not the SHA256 of the file**. The same value also
+appears as a path component in the CDN redirect URL, which is what made it look
+authoritative. Downloading Pony and hashing it produced a mismatch; the file was
+intact and the table was wrong.
 
-| File | SHA256 |
-|---|---|
-| `ponyDiffusionV6XL_v6StartWithThisOne` | `614f55e8bd8701b9168957361a00c7a76c5de1aa625ade08edfca3db2675b2cc` |
-| `Chroma1-HD-fp8_scaled_…_rev2` | `377eff193fc866064ed587bd4140b3fd59bad0555b32b02224d60353b3049ebc` |
-| `t5xxl_flan_fp8_scaled` | `e9b22d1142585f501864671e07af481f8800415296f6f54c10a88e71e05a7a60` |
-| `ae` | `f73eecf7c469ff442523dc712cc161d631df071bf4d9d793494fbf00cdd80a82` |
+That matters more here than a stale number usually would. This page justified an
+unaffiliated CivitAI mirror partly on the grounds that "the checksum above pins
+exactly which bytes were reviewed". It pinned nothing — it could never have
+matched, so the first honest verification was always going to fail.
+
+The authoritative SHA256 is the `lfs.sha256` field from Hugging Face's API at
+`https://huggingface.co/api/models/<repo>?blobs=true`, or equivalently the
+`X-Linked-ETag` response header — **not** `etag`. Verify with `Get-FileHash
+-Algorithm SHA256` before wiring anything:
+
+| File | SHA256 | Bytes |
+|---|---|---|
+| `ponyDiffusionV6XL_v6StartWithThisOne` | `67ab2fd8ec439a89b3fedb15cc65f54336af163c7eb5e4f2acc98f090a29b0b3` | 6938041050 |
+| `Chroma1-HD-fp8_scaled_…_rev2` | `f8df6efac8f9c4e778ec07b9c9362d43612cd6874271d602df90b34f72552931` | 9193371409 |
+| `t5xxl_flan_fp8_scaled` | `48aa948d6ff1a33a5610afe550f85d3448972c3f0a2da51827b96f9057b8717b` | 5157349116 |
+| `ae` | `afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38` | 335304388 |
+
+Only the Pony row is verified against bytes on disk — downloaded and hashed on
+2026-08-20, matches. The other three come from the same authoritative API field,
+but nothing here has downloaded them yet.
 
 **Do not use `black-forest-labs/FLUX.1-schnell` for the VAE. It is gated and
 returns 401**, which is exactly the download that lands as an HTML error page

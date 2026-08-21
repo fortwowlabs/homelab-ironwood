@@ -380,7 +380,7 @@ suspect.
 ### Step 2 — Pony Diffusion V6 XL
 
 Download to `models/checkpoints/` and verify SHA256
-`614f55e8bd8701b9168957361a00c7a76c5de1aa625ade08edfca3db2675b2cc` with
+`67ab2fd8ec439a89b3fedb15cc65f54336af163c7eb5e4f2acc98f090a29b0b3` with
 `Get-FileHash` before wiring anything. Add `pony.json`, flip `image_workflow`
 and `IMAGE_GENERATION_MODEL`, push, re-run the check.
 

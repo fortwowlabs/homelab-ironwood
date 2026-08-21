@@ -60,6 +60,7 @@ CLASS_INPUTS = {
     "VAEDecode": {"samples", "vae"},
     "SaveImage": {"filename_prefix", "images"},
     "PreviewImage": {"images"},
+    "ConditioningConcat": {"conditioning_to", "conditioning_from"},
 }
 
 

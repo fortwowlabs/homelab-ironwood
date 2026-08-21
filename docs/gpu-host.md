@@ -187,6 +187,54 @@ believing the install works:
 ```powershell
 Invoke-WebRequest -Uri "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors" `
   -OutFile "C:\ComfyUI\ComfyUI_windows_portable\ComfyUI\models\checkpoints\sd_xl_base_1.0.safetensors"
+
+#### The second checkpoint: Pony Diffusion V6 XL
+
+In-chat generation runs on Pony V6 XL, not on stock SDXL. Both live in
+`models\checkpoints\`; which one is submitted is decided by `image_workflow`
+in `inventory/group_vars/all/images.yml` and applied with
+`make owui-image-config`. SDXL stays installed because it is the fallback the
+workflow gate is exercised against.
+
+```powershell
+Invoke-WebRequest -Uri "https://huggingface.co/LyliaEngine/Pony_Diffusion_V6_XL/resolve/main/ponyDiffusionV6XL_v6StartWithThisOne.safetensors" `
+  -OutFile "C:\ComfyUI\ComfyUI_windows_portable\ComfyUI\models\checkpoints\ponyDiffusionV6XL_v6StartWithThisOne.safetensors"
+```
+
+**Verify before wiring it up** — 6938041050 bytes, and:
+
+```powershell
+Get-FileHash -Algorithm SHA256 C:\ComfyUI\ComfyUI_windows_portable\ComfyUI\models\checkpoints\ponyDiffusionV6XL_v6StartWithThisOne.safetensors
+# 67ab2fd8ec439a89b3fedb15cc65f54336af163c7eb5e4f2acc98f090a29b0b3
+```
+
+Two things about that hash are worth knowing, because getting either wrong
+wastes an afternoon or worse.
+
+**Do not read it off the `etag` header.** This repository is Xet-backed, so
+`etag` carries the Xet content-address hash, and the same value appears as a
+path component in the CDN redirect — which makes it look authoritative. It is
+not the SHA256 and will never match `Get-FileHash`. The authoritative value is
+`lfs.sha256` from `https://huggingface.co/api/models/<repo>?blobs=true`, or the
+`X-Linked-ETag` header. Four checksums in
+[the image generation plan](plans/uncensored-image-generation.md) were recorded
+the wrong way and every one of them was wrong; they were corrected on
+2026-08-20 after this download failed to match.
+
+**Pony is distributed on CivitAI, which requires an API token, so
+`LyliaEngine/Pony_Diffusion_V6_XL` is an unaffiliated third-party mirror.** Two
+things make that acceptable rather than reckless: `.safetensors` is a data-only
+format that cannot execute code on load, unlike the `.ckpt` pickles it
+replaced, and the checksum above pins exactly which bytes were reviewed — which
+is only true now that the checksum is a real SHA256.
+
+Pony was trained with the tags `score_9, score_8_up, score_7_up` and degrades
+visibly without them, but Open WebUI overwrites the mapped prompt node wholesale
+on every request. So the tags do not live in the prompt node: they sit in a
+fixed `CLIPTextEncode` (node 10) merged into the user's prompt by a
+`ConditioningConcat` (node 11), and the mapping points at the user node only.
+That is why `inventory/comfyui-workflows/pony.json` has two nodes `sdxl.json`
+does not.
 ```
 
 ~6.5 GB. If it lands as a few KB, that is an HTML error page wearing a

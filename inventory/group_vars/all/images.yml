@@ -23,7 +23,7 @@
 # Which file in inventory/comfyui-workflows/ to submit. Every mapped node ID
 # below must exist in EVERY workflow there, not just this one, so that changing
 # this line can never be the step that discovers a broken mapping.
-image_workflow: sdxl
+image_workflow: pony
 
 # comfyui_base_url and image_generation_enabled DUPLICATE gpu_host_ip and
 # gpu_host_online in main.yml. That is deliberate: this file is read by plain
@@ -37,7 +37,7 @@ image_generation_enabled: true
 # /object_info/CheckpointLoaderSimple. This is where the checkpoint name comes
 # from: _apply_workflow_nodes writes it into the mapped `model` node. With it
 # empty, a flawless mapping still submits an empty checkpoint name.
-image_generation_model: "sd_xl_base_1.0.safetensors"
+image_generation_model: "ponyDiffusionV6XL_v6StartWithThisOne.safetensors"
 
 # 1024x1024 because SDXL is trained at 1024 and degrades badly below it.
 # The runtime check asserts the returned PNG is exactly this size — a 512x512
