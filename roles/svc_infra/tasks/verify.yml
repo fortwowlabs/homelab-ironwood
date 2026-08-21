@@ -228,6 +228,73 @@
     name: service_vm
     tasks_from: failed-units
 
+# --- chat egress (F4/F2) --------------------------------------------------
+# `make verify` did not look at chat egress at all until 2026-08-21: the
+# hourly probe was the only runtime check, so a workstation-driven verify
+# reported a green estate while enforcement could have been absent for an
+# hour. These two are the cheap half of what the probe does — they cannot
+# prove the tunnel is being used (that needs an actual fetch), but they catch
+# the two states that are silent and green.
+
+- name: Verify the chat egress policy is loaded and still matching
+  ansible.builtin.command: nft list table inet chat_egress
+  register: infra_chat_egress_verify
+  changed_when: false
+  # The quoted path is the whole point. nftables resolves the cgroup to an
+  # INODE when the rule loads, and a rule whose cgroup was recreated renders
+  # as a bare number instead — table listed, loader active, counter zero, and
+  # nothing enforced. Comparing against chat_egress_cgroup_path (one
+  # definition, in roles/svc_infra/defaults) is what tells those apart.
+  failed_when: >-
+    'chat_policy' not in infra_chat_egress_verify.stdout
+    or '"' ~ chat_egress_cgroup_path ~ '"' not in infra_chat_egress_verify.stdout
+
+- name: Read Open WebUI's stored web.search.trust_env
+  ansible.builtin.command:
+    argv:
+      - podman
+      - exec
+      - open-webui
+      - python
+      - -c
+      - |
+        import sqlite3
+        c = sqlite3.connect("/app/backend/data/webui.db")
+        r = c.execute(
+            "select value from config where key = 'web.search.trust_env'"
+        ).fetchone()
+        print("absent" if r is None else str(r[0]).strip().lower())
+  become: true
+  become_user: homelab
+  environment:
+    XDG_RUNTIME_DIR: "/run/user/{{ svc_uid }}"
+  args:
+    # Required, not tidiness — same reason as roles/svc_infra/tasks/images.yml:
+    # Ansible runs a command from a directory the connecting user owns and
+    # `homelab` cannot enter, so without this podman never starts.
+    chdir: /tmp
+  register: infra_chat_trust_env
+  changed_when: false
+
+- name: Verify Open WebUI has not been switched off its proxy in the admin UI
+  ansible.builtin.assert:
+    that:
+      - infra_chat_trust_env.stdout | trim in ['absent', 'true']
+    fail_msg: >-
+      Open WebUI's web.search.trust_env is
+      {{ infra_chat_trust_env.stdout | trim }}. That is an admin-UI toggle
+      stored in its database, and ENABLE_PERSISTENT_CONFIG is true, so the row
+      wins over the catalog. With it false, Open WebUI's own web loader stops
+      honouring http_proxy and its fetches are dropped by the chat_egress
+      table instead of going through the tunnel — web search breaks and
+      nothing else notices, because the hourly probe checks that a BYPASS is
+      refused, never that the legitimate path still works.
+    success_msg: >-
+      web.search.trust_env is
+      {{ 'unset, so the default (true) applies'
+         if (infra_chat_trust_env.stdout | trim) == 'absent'
+         else 'true' }}.
+
 - name: Mark svc-infra verification complete
   ansible.builtin.set_fact:
     svc_infra_verified: true
