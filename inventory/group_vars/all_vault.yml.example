@@ -124,6 +124,21 @@ vault_netbox_superuser_password: "REPLACE_openssl_rand_hex_16"   # openssl rand 
 # every user out — set once and leave it.
 vault_openwebui_secret_key: "REPLACE_openssl_rand_hex_32"   # openssl rand -hex 32
 
+# Open WebUI admin API token, for scripts/owui_image_config.py and
+# scripts/image_generation_check.py (make owui-image-config, make
+# image-gen-check, and the nightly homelab-image-gen@.service). There is no
+# API or CLI path to generate this ahead of time -- create it once the
+# service is up, at Settings > Account > API Keys > Create new secret key,
+# from an account with the admin role.
+#
+# Deploying with this blank is fine, the same shape as the Beszel tokens
+# above: the task that writes it renders an empty file rather than failing
+# the play, and every caller treats an auth failure as "could not look" --
+# owui_image_config.py exits 1, and the nightly check reads inconclusive
+# (SuccessExitStatus=2, no page, no metric write) until the real value is
+# filled in and the deploy re-run.
+vault_openwebui_admin_token: ""
+
 # SearXNG (v6, download_apps): server.secret_key. Rendered into
 # /srv/appdata/searxng/settings.yml rather than an Environment= line, because
 # the download quadlet render is not no_log. The image's entrypoint would
