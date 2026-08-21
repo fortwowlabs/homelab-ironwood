@@ -11,15 +11,32 @@
 # Contract: this script NEVER exits nonzero. It is the thing that reports
 # failures; if it failed it would trigger its own OnFailure and, worse, would
 # mark the alerting path itself as broken while telling nobody.
+#
+# WHY THE PUSH IS DEDUPLICATED
+#
+# Every OnFailure= in the estate routes here, and this fires on every failed
+# start. For an hourly unit that meant 24 messages a day at Priority urgent
+# for one unresolved fault — and urgent is the loudest thing this estate can
+# send, so a fault nobody can fix before morning trained the alert topic to be
+# swiped away. homelab-chat-egress.service made that concrete: its own probe
+# suppresses across six hours, and this path published urgent hourly anyway,
+# erasing the distinction the probe took two rounds to build.
+#
+# Suppression is on the PUSH only. syslog below is unconditional, because it
+# is the durable record and the next Ansible run reads it.
 set -uo pipefail
 
 unit="${1:-unknown.service}"
 host=$(hostname -s)
 topic="${NTFY_ALERT_TOPIC:-${NTFY_TOPIC}}"
+STATE_DIR=/var/lib/homelab
+REALERT_SECS=$(( {{ alert_realert_hours | default(6) }} * 3600 ))
 AUTH=()
 if [[ -n "${NTFY_TOKEN:-}" ]]; then
     AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
 fi
+
+mkdir -p "$STATE_DIR" 2>/dev/null || true
 
 # The last lines of the unit's own journal, so the phone alert carries the
 # reason and not just the name. ntfy truncates long bodies server-side; keep
@@ -29,19 +46,69 @@ context=$(journalctl -u "$unit" -n 20 --no-pager -o cat 2>/dev/null | tail -c 30
 
 result=$(systemctl show -p Result --value "$unit" 2>/dev/null || echo unknown)
 
-# syslog first: if ntfy is unreachable this is the only record that survives,
-# and journald is where the next Ansible run will look.
-logger -p daemon.err -t notify-failure "UNIT FAILED ${unit} (result=${result}) on ${host}"
+# One state file per unit. This is an instantiated template, so several units
+# can fail at once; a single shared file would race between them.
+safe_unit=$(printf '%s' "$unit" | tr -c 'A-Za-z0-9._@-' '_')
+STATE="$STATE_DIR/notify-failure.${safe_unit}.state"
 
-curl -fsS --max-time 10 --retry 2 --retry-delay 5 -X POST \
+# Hash the FAULT IDENTITY — unit and result — and never the journal excerpt.
+# `context` carries timestamps and changes on every run, so hashing it would
+# make every alert look new and defeat the suppression completely. That is not
+# hypothetical: the chat-egress probe shipped with exactly that defect and
+# needed a second fix round to remove it. A changed `result` is a different
+# fault and re-alerts at once.
+hash=$(printf '%s\n%s' "$unit" "$result" | sha256sum | cut -d' ' -f1)
+now=$(date +%s)
+
+prev_hash=""
+prev_at=0
+if [[ -r "$STATE" ]]; then
+    read -r prev_hash prev_at < "$STATE" || true
+fi
+[[ "$prev_at" =~ ^[0-9]+$ ]] || prev_at=0
+
+# Unreadable, empty or corrupt state fails OPEN — it alerts. A state file that
+# cannot be parsed must never buy silence.
+suppress=no
+suppress_note=""
+if [[ -n "$prev_hash" && "$hash" == "$prev_hash" ]] && (( now - prev_at < REALERT_SECS )); then
+    suppress=yes
+    suppress_note=" [push suppressed: same fault within {{ alert_realert_hours | default(6) }}h]"
+fi
+
+# syslog first: if ntfy is unreachable this is the only record that survives,
+# and journald is where the next Ansible run will look. Unconditional, so a
+# suppressed alert is still a recorded one.
+logger -p daemon.err -t notify-failure \
+    "UNIT FAILED ${unit} (result=${result}) on ${host}${suppress_note}"
+
+if [[ "$suppress" == yes ]]; then
+    exit 0
+fi
+
+if curl -fsS --max-time 10 --retry 2 --retry-delay 5 -X POST \
     "${AUTH[@]}" \
     -H "Title: UNIT FAILED on ${host}: ${unit}" \
     -H "Priority: urgent" \
     -H "Tags: rotating_light" \
     -d "result=${result}
 
-${context}" \
-    "${NTFY_URL}/${topic}" >/dev/null 2>&1 \
-    || logger -p daemon.err -t notify-failure "ALERT DELIVERY FAILED (ntfy unreachable) for ${unit}"
+${context}
+
+Repeats of this same fault are suppressed for {{ alert_realert_hours | default(6) }}h. A different result re-alerts at once, and syslog records every occurrence." \
+    "${NTFY_URL}/${topic}" >/dev/null 2>&1; then
+    # Record only on a delivered push. An alert nobody received must not buy
+    # silence for the next six hours.
+    tmp=$(mktemp "${STATE}.XXXXXX" 2>/dev/null) || tmp=""
+    if [[ -n "$tmp" ]]; then
+        if printf '%s %s\n' "$hash" "$now" > "$tmp"; then
+            mv -f "$tmp" "$STATE" || rm -f "$tmp"
+        else
+            rm -f "$tmp"
+        fi
+    fi
+else
+    logger -p daemon.err -t notify-failure "ALERT DELIVERY FAILED (ntfy unreachable) for ${unit}"
+fi
 
 exit 0
