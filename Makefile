@@ -59,6 +59,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
 	check check-diff verify verify-disruptive scan image-digest image-check image-bump \
 	release-check release-report image-release roster-check drift reconcile access ping lint owui-image-config image-gen-check \
+	owui-personas owui-export \
 	vault-edit clean
 
 help: ## Show this help
@@ -206,6 +207,12 @@ owui-image-config: ## Push inventory/group_vars/all/images.yml into Open WebUI (
 
 image-gen-check: ## Generate one image end to end and assert it is a 1024x1024 PNG
 	$(PYTHON) scripts/image_generation_check.py $(ARGS)
+
+owui-personas: ## Seed inventory/group_vars/all/personas.yml into Open WebUI (needs OWUI_ADMIN_TOKEN)
+	$(PYTHON) scripts/owui_personas.py $(ARGS)
+
+owui-export: ## Record Open WebUI's live config so UI drift shows in git diff (needs OWUI_ADMIN_TOKEN)
+	$(PYTHON) scripts/owui_config_export.py $(ARGS)
 
 verify-disruptive: ## Explicitly run the fail-closed recovery drill
 	$(ANSIBLE) $(DISRUPTIVE_PLAYBOOK) $(VAULT) $(ARGS)
