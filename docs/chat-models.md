@@ -298,24 +298,40 @@ same message to the bare base model and to the persona and confirm the replies
 differ in the way the prompt describes. Reading the persona's reply on its own
 proves nothing.
 
-### These personas are not in git
+### These personas are seeded from git — 2026-08-22
 
-**They live in Open WebUI's database, not in this repository.** They are created
-by hand in Workspace → Models, and `backup_paths: [open-webui]` captures
-`webui.db` nightly — so they are recoverable, but they are not rebuildable from
-a clean clone the way everything else here is.
+**They are declared in `inventory/group_vars/all/personas.yml` and created by
+`make owui-personas`.** That closes the exception this section used to record:
+until 2026-08-22 they existed only in `webui.db`, recoverable from the nightly
+backup but not rebuildable from a clean clone.
 
-This is a deliberate exception. The alternative was defining them as YAML and
-POSTing them to `/api/v1/models` from an Ansible task, which needs
-compare-before-write logic to avoid reporting `changed` on every deploy and
-destroying the `changed=0` proof the whole repo depends on. That was judged
-disproportionate for two paragraphs of text.
+```bash
+export OWUI_ADMIN_TOKEN='...'      # Settings -> Account -> API keys
+make owui-personas ARGS=--dry-run  # report what is missing, change nothing
+make owui-personas                 # create the missing ones
+```
 
-**The copies above are the source of truth for a rebuild. Nothing detects drift
-between them and the live copy.** With image generation deferred, this is now
-the only state this change creates outside git, which makes the exception more
-visible than it was when it sat beside committed workflow files. Revisit if the
-persona set grows or starts mattering operationally.
+**The seeder creates what is missing and never touches what exists**, and that
+is the design rather than a shortcut. The agreed model for this app is seeded
+from git, modified in the UI, captured by the backup — an updating seeder would
+fight the second half of that, reverting anything tuned in the UI on every run
+and renaming `Thera` back to `Therapist` each time.
+
+So it is idempotent by construction: a second run reports everything present
+and does nothing. The cost is real and worth stating — **editing the text in
+`personas.yml` does not update a persona that already exists.** To push an edit
+from git, delete the persona in the UI and re-seed.
+
+`tests/validate_personas.py` runs in `make validate` and checks the two things
+that are otherwise invisible until somebody uses a persona: a `base_model` that
+is not in `models.yml` (which still creates cleanly, still appears in the
+dropdown, and fails only on the first message), and a duplicated `id` (which
+silently collapses two personas into one, because `id` is the seeder's match
+key).
+
+`public: true` grants a `user:*` read, which is what makes a persona visible to
+accounts other than its creator. Personas default to private-to-creator — that
+is why the first two were invisible to everyone else until 2026-08-10.
 
 ## Image generation is unchanged
 

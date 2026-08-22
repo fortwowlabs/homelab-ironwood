@@ -1,8 +1,49 @@
-# Open WebUI settings as code — deferred
+# Open WebUI settings as code
 
-**Status: not implemented.** Wanted as of 2026-08-10, when
-`ENABLE_PERSISTENT_CONFIG` was flipped to `true` and this repo stopped being
-the authority on Open WebUI's configuration.
+**Status: built 2026-08-22, not yet run against the live instance.** Wanted
+since 2026-08-10, when `ENABLE_PERSISTENT_CONFIG` was flipped to `true` and
+this repo stopped being the authority on Open WebUI's configuration.
+
+## What exists now
+
+| Piece | Where |
+|---|---|
+| Exporter | `scripts/owui_config_export.py`, `make owui-export` |
+| Drift gate | `tests/validate_openwebui_config_drift.py`, in `make validate` |
+| Persona seeder | `scripts/owui_personas.py`, `make owui-personas` |
+| Persona catalog | `inventory/group_vars/all/personas.yml` |
+
+```bash
+export OWUI_ADMIN_TOKEN='...'   # Settings -> Account -> API keys
+make owui-export                # writes inventory/group_vars/all/openwebui-config.yml
+```
+
+**The one step left is running that export once.** Until it has been, the drift
+gate reports `INCONCLUSIVE` and protects nothing — it says so in its own output
+rather than printing a reassuring OK. It deliberately does not fail the build
+in that state: on a fresh clone nobody has an admin token yet, and a gate that
+blocks all work until someone finds one would simply be disabled. The state
+that fails is an export that exists and disagrees with the repo.
+
+**Only two keys are enforced**, and that narrowing is deliberate rather than a
+first cut. Most of this config is *meant* to drift — that is the point of
+seed-then-modify. `ui.enable_signup` and `ui.default_user_role` are different
+in kind, because `chat.fortwow.dev` is publicly reachable and deliberately not
+behind Authelia, so Open WebUI's own login is the whole front door. Widen
+`ENFORCED` in the gate if another setting turns out to deserve the same
+treatment.
+
+**Redaction is by allowlist.** Values are written only for keys under known-safe
+prefixes; everything else is recorded by name with the value replaced. The limit
+is real: drift in a redacted key is invisible, so rotating a token produces no
+diff. Accepted — this tracks settings, not secrets.
+
+**Still not built: the importer.** `POST /api/v1/configs/import` is what would
+make a clean-clone rebuild real. Until then the honest statement is that this
+service is restorable from backup and now *observable* from git, but not
+reproducible from it.
+
+The original design follows.
 
 The agreed model for this app is **seeded from git → modified in the UI →
 captured by the backup**. Backup alone is not enough: a `webui.db` inside a
