@@ -25,6 +25,15 @@ from pathlib import Path
 
 import yaml
 
+# The roster is the only description of which models exist on which host. It
+# sits with the catalog gates because it validates the same kind of artifact:
+# a data file this repo owns and other things read verbatim.
+#
+# Which `make validate-*` target runs this gate. Discovered by
+# tests/run_gates.py, so a gate with no group fails the build rather than
+# silently never running.
+GATE_GROUP = "catalog"
+
 ROOT = Path(__file__).resolve().parents[1]
 ROSTER_PATH = ROOT / "inventory/group_vars/all/models.yml"
 CONTROL_PATH = ROOT / "scripts/abliteration_control.py"

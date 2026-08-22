@@ -38,6 +38,17 @@ import sys
 import tempfile
 from pathlib import Path
 
+# In the shell group because it exercises a shell template, but it is doing
+# something the other shell gates do not: running the script against fixtures
+# and asserting it FAILS in the four ways it has to. On live hosts the answer
+# is always OK, so without this nobody could tell the check had stopped
+# working.
+#
+# Which `make validate-*` target runs this gate. Discovered by
+# tests/run_gates.py, so a gate with no group fails the build rather than
+# silently never running.
+GATE_GROUP = "shell"
+
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "roles/service_vm/templates/container-drift.sh.j2"
 

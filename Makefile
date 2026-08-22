@@ -99,77 +99,42 @@ validate-yaml:
 
 validate-shell:
 	$(SHELLCHECK) $(SHELL_FILES)
-	$(PYTHON) tests/validate_shell_templates.py
-# Sits here because it exercises a shell template, but it is doing something the
-# other shell gates do not: running the script against fixtures and asserting it
-# FAILS in the four ways it has to. On live hosts the answer is always OK, so
-# without this nobody could tell the check had stopped working.
-	$(PYTHON) tests/validate_container_drift.py
-# Same reason as the drift check above: on a healthy host the retry wrapper
-# succeeds on its first call every time, so the retry and — more importantly —
-# its refusal to retry forever are never exercised in production.
-	$(PYTHON) tests/validate_dnf_makecache_retry.py
-# Python rather than shell, but it belongs with the drift check above for the
-# same reason: it is a script whose refusal paths are the point, and on a
-# healthy host it succeeds every time. Its "leave the old file alone rather
-# than publish zeros" branch is the one that keeps a broken emitter legible.
-	$(PYTHON) tests/validate_metric_write.py
+# Gates are discovered, not listed. Each tests/validate_*.py names its own
+# group in a GATE_GROUP constant and tests/run_gates.py collects them, so
+# adding a gate is a new FILE rather than a new line here. Three branches in
+# one week collided on this target when it was a list, always with the same
+# resolution of keeping both lines.
+#
+# The discovery also refuses to run at all if any tests/validate_*.py declares
+# no group — a gate nobody invokes used to be indistinguishable from a passing
+# estate, and remembering to add a line here was the only thing preventing it.
+	$(PYTHON) tests/run_gates.py shell
 
 validate-links:
-	$(PYTHON) tests/validate_links.py
+	$(PYTHON) tests/run_gates.py links
 
 validate-catalog:
-	$(PYTHON) tests/validate_catalog.py
-	$(PYTHON) tests/validate_infra_catalog.py
-# Sits with the catalog gates because it validates a provisioned artifact the
-# same way: the dashboards are files this repo owns and Grafana loads verbatim.
-# The metric cross-check is the reason it exists — a name renamed in a play
-# leaves the panel blank and reports nothing anywhere.
-	$(PYTHON) tests/validate_grafana_dashboards.py
-	$(PYTHON) tests/validate_generated_catalog.py
-	$(PYTHON) tests/validate_sso.py
-	$(PYTHON) tests/validate_scan_image_coverage.py
-	$(PYTHON) tests/validate_image_provenance.py
-	$(PYTHON) tests/validate_release_overrides.py
-# The roster is the only description of which models exist on which host. It
-# sits with the catalog gates because it validates the same kind of artifact:
-# a data file this repo owns and other things read verbatim.
-	$(PYTHON) tests/validate_model_roster.py
-# Sits with the catalog gates because its first assertion is a catalog one:
-# the nft rule names open-webui.service, and that name is the
-# infra_secret_apps key. Delete the app and the firewall silently guards a
-# unit that no longer exists.
-	$(PYTHON) tests/validate_chat_egress.py
-	$(PYTHON) tests/validate_openwebui_image_config.py
+	$(PYTHON) tests/run_gates.py catalog
 
 validate-provisioning:
-	$(PYTHON) tests/validate_pve_states.py
+	$(PYTHON) tests/run_gates.py provisioning
 
 validate-systemd:
-	$(PYTHON) tests/validate_systemd_units.py
-	$(PYTHON) tests/validate_onfailure.py
-# Sits with the OnFailure gate because it guards the same thing from the other
-# end: validate_onfailure.py checks that a failure reaches the alerter, and this
-# checks that what the alerter publishes reaches a topic somebody reads.
-	$(PYTHON) tests/validate_alert_topics.py
+	$(PYTHON) tests/run_gates.py systemd
 
 validate-secrets:
-	$(PYTHON) tests/validate_secrets.py
+	$(PYTHON) tests/run_gates.py secrets
 	$(PYTHON) tests/scan_history_secrets.py
-	$(PYTHON) tests/validate_secret_tasks.py
-	$(PYTHON) tests/validate_secret_output.py
-	$(PYTHON) tests/validate_vault_guards.py
 # Second opinion on the working tree with gitleaks' ~170 upstream rules. The
-# four gates above stay: they know this repo's conventions (vault_ naming, the
-# placeholder forms in all_vault.yml.example) and gitleaks does not. Scope and
-# the two allowlists are explained in .gitleaks.toml. History is deliberately
-# not re-scanned here — scan_history_secrets.py already walks every blob.
+# discovered gates above stay: they know this repo's conventions (vault_
+# naming, the placeholder forms in all_vault.yml.example) and gitleaks does
+# not. Scope and the two allowlists are explained in .gitleaks.toml. History is
+# deliberately not re-scanned here — scan_history_secrets.py already walks
+# every blob.
 	$(GITLEAKS) dir . --config .gitleaks.toml --no-banner --redact
 
 validate-ci:
-	$(PYTHON) tests/validate_ci_safety.py
-	$(PYTHON) tests/validate_verify_safety.py
-	$(PYTHON) tests/validate_scan_readonly.py
+	$(PYTHON) tests/run_gates.py ci
 
 preflight: ## Authenticate, show the safe inventory graph, and require VM connectivity
 	$(INVENTORY_CMD) --graph $(VAULT)

@@ -32,6 +32,15 @@ from pathlib import Path
 import yaml
 from jinja2 import DictLoader, Environment, FileSystemLoader, StrictUndefined
 
+# In the catalog group because its first assertion is a catalog one: the nft
+# rule names open-webui.service, and that name is the infra_secret_apps key.
+# Delete the app and the firewall silently guards a unit that no longer exists.
+#
+# Which `make validate-*` target runs this gate. Discovered by
+# tests/run_gates.py, so a gate with no group fails the build rather than
+# silently never running.
+GATE_GROUP = "catalog"
+
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = "roles/svc_infra/templates/chat-egress.nft.j2"
 MAIN_VARS = "inventory/group_vars/all/main.yml"
