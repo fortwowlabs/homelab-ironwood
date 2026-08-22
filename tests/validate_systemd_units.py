@@ -45,6 +45,35 @@ TIMER = ROOT / "roles/svc_infra/files/homelab-verify@.timer"
 # and had exactly this defect.
 UNIT_GLOBS = ("roles/**/*.service", "roles/**/*.service.j2")
 
+# The oneshot sweep above only needs services. This second set is wider on
+# purpose: .socket and .timer files were covered by NOTHING here until
+# 2026-08-21. chat-proxy-relay.socket matched no glob in this file at all, and
+# a report claimed both new units had been "parsed by a real systemd" when
+# neither had been.
+ANALYZE_GLOBS = (
+    "roles/**/*.service",
+    "roles/**/*.socket",
+    "roles/**/*.timer",
+)
+
+# The one class of defect worth gating on off-host. `systemd-analyze verify`
+# EXITS 0 even when it refuses a unit outright — measured: a socket with no
+# Listen setting prints "Refusing" and still returns 0 — so the exit code
+# carries no signal and the OUTPUT has to be read instead.
+#
+# Missing dependencies and missing executables are inherent to verifying a
+# unit away from the host it runs on, so they are noise here. An unknown
+# directive is not: systemd ignores it silently, so the setting a unit appears
+# to carry does nothing whatsoever. This estate shipped exactly that with
+# LogRetention=, which is not a systemd directive, and it was caught by hand
+# rather than by this gate.
+UNKNOWN_KEY_RE = re.compile(r"Unknown key name '([^']+)' in section '([^']+)'")
+
+# This gate's own positive control. If injecting a directive that cannot exist
+# stops being reported, systemd-analyze changed its output or is not really
+# reading these files, and every clean result below means nothing.
+CONTROL_DIRECTIVE = "ThisDirectiveDoesNotExist=1"
+
 # Anchored at line start so a directive named inside a comment does not satisfy
 # the check. Several of these units explain in prose why the timeout is there.
 ONESHOT_RE = re.compile(r"^[ \t]*Type=oneshot[ \t]*$", re.MULTILINE)
@@ -89,6 +118,87 @@ def check_oneshot_timeouts() -> tuple[list[str], int]:
         )
 
     return failures, len(oneshot)
+
+
+
+def check_unknown_directives(systemd_analyze: str) -> tuple[list[str], int]:
+    """Fail on directives systemd does not recognise and silently ignores.
+
+    Returns (failures, number of unit files inspected). Jinja unit TEMPLATES
+    are deliberately NOT covered: verifying one needs a render with fixture
+    variables, which lives in validate_shell_templates.py. That gap is real,
+    and chat-egress.service.j2 sits inside it.
+    """
+    failures: list[str] = []
+    paths = sorted(
+        {path for glob in ANALYZE_GLOBS for path in ROOT.glob(glob) if path.is_file()}
+    )
+
+    control_lines = [
+        "[Unit]",
+        "Description=unknown-key gate control",
+        "[Service]",
+        "Type=oneshot",
+        "TimeoutStartSec=30",
+        "ExecStart=/bin/true",
+        CONTROL_DIRECTIVE,
+        "",
+    ]
+
+    def unknown_keys(unit_path: Path, cwd: Path) -> list[str]:
+        result = subprocess.run(
+            [systemd_analyze, "verify", str(unit_path)],
+            cwd=cwd,
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        blob = result.stdout + "\n" + result.stderr
+        return [
+            match.group(1) + " in [" + match.group(2) + "]"
+            for match in UNKNOWN_KEY_RE.finditer(blob)
+        ]
+
+    with tempfile.TemporaryDirectory(prefix="homelab-unitkeys-") as directory:
+        staged = Path(directory)
+        # Stage every unit side by side so cross-unit references resolve as far
+        # as they can off-host, then verify one file at a time.
+        for path in paths:
+            (staged / path.name).write_text(
+                path.read_text(encoding="utf-8"), encoding="utf-8"
+            )
+
+        control = staged / "zzz-gate-control.service"
+        control.write_text("\n".join(control_lines), encoding="utf-8")
+
+        if not unknown_keys(control, staged):
+            failures.append(
+                "the unknown-directive control was NOT reported by "
+                "systemd-analyze. Either its output format changed or it is "
+                "not really inspecting these files, so every clean result "
+                "from this check is meaningless until that is fixed."
+            )
+
+        for path in paths:
+            text = path.read_text(encoding="utf-8")
+            for key in unknown_keys(staged / path.name, staged):
+                name = key.split(" in [", 1)[0]
+                # Verifying a .timer makes systemd load its sibling .service,
+                # so an unknown key in the service is reported again under the
+                # timer. Attribute each key to the file that actually sets it;
+                # its real owner is in `paths` too and reports it there.
+                if not re.search(
+                    r"^[ 	]*" + re.escape(name) + r"[ 	]*=", text, re.MULTILINE
+                ):
+                    continue
+                failures.append(
+                    path.relative_to(ROOT).as_posix()
+                    + " sets " + key + ", which systemd does not recognise and "
+                    "IGNORES. The unit looks like it carries that setting and "
+                    "does not."
+                )
+
+    return failures, len(paths)
 
 
 def main() -> int:
@@ -148,6 +258,10 @@ def main() -> int:
     failures.extend(oneshot_failures)
 
     systemd_analyze = shutil.which("systemd-analyze")
+    unknown_count = 0
+    if systemd_analyze:
+        unknown_failures, unknown_count = check_unknown_directives(systemd_analyze)
+        failures.extend(unknown_failures)
     if systemd_analyze:
         with tempfile.TemporaryDirectory(prefix="homelab-systemd-") as directory:
             fixture_dir = Path(directory)
@@ -193,6 +307,8 @@ def main() -> int:
     print(
         f"Instantiated nightly systemd units: OK{suffix}; "
         f"{oneshot_count} Type=oneshot units all set TimeoutStartSec"
+        + (f"; {unknown_count} unit files carry no unknown directives"
+           if systemd_analyze else "")
     )
     return 0
 
