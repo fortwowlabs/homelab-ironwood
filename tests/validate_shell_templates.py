@@ -14,6 +14,11 @@ from jinja2 import Environment, FileSystemLoader, StrictUndefined
 
 from validate_generated_catalog import AttrDict, as_attr, comment, dict2items, split_url
 
+# Which `make validate-*` target runs this gate. Discovered by
+# tests/run_gates.py, so a gate with no group fails the build rather than
+# silently never running.
+GATE_GROUP = "shell"
+
 
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATES = (

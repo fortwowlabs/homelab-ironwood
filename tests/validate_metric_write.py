@@ -32,6 +32,16 @@ import tempfile
 import time
 from pathlib import Path
 
+# Python rather than shell, but it belongs with the container-drift gate for
+# the same reason: it is a script whose refusal paths are the point, and on a
+# healthy host it succeeds every time. Its "leave the old file alone rather
+# than publish zeros" branch is the one that keeps a broken emitter legible.
+#
+# Which `make validate-*` target runs this gate. Discovered by
+# tests/run_gates.py, so a gate with no group fails the build rather than
+# silently never running.
+GATE_GROUP = "shell"
+
 ROOT = Path(__file__).resolve().parents[1]
 HELPER = ROOT / "roles/svc_infra/files/homelab-metric-write"
 

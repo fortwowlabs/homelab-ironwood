@@ -9,6 +9,11 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Which `make validate-*` target runs this gate. Discovered by
+# tests/run_gates.py, so a gate with no group fails the build rather than
+# silently never running.
+GATE_GROUP = "secrets"
+
 
 ROOT = Path(__file__).resolve().parents[1]
 PLAYBOOK = ROOT / "tests/fixtures/secret-output.yml"

@@ -38,6 +38,15 @@ import sys
 import tempfile
 from pathlib import Path
 
+# Same reason as the container-drift gate: on a healthy host the retry wrapper
+# succeeds on its first call every time, so the retry and — more importantly —
+# its refusal to retry forever are never exercised in production.
+#
+# Which `make validate-*` target runs this gate. Discovered by
+# tests/run_gates.py, so a gate with no group fails the build rather than
+# silently never running.
+GATE_GROUP = "shell"
+
 ROOT = Path(__file__).resolve().parents[1]
 TEMPLATE = ROOT / "roles/service_vm/templates/dnf-makecache-retry.sh.j2"
 
