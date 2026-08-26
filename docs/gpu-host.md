@@ -129,10 +129,12 @@ Pull the four chat models Open WebUI offers, the coding model, and the two
 small models Continue needs for autocomplete and embeddings:
 
 ```powershell
-# Chat — all four are abliterated (see docs/chat-models.md)
+# Chat — abliterated, except the last one (see docs/chat-models.md)
 ollama pull huihui_ai/gemma-4-abliterated:26b     # default
 ollama pull huihui_ai/Qwen3.6-abliterated:27b     # technical work
+ollama pull huihui_ai/Qwen3.8-abliterated:27b     # newer generation of the above
 ollama pull huihui_ai/gemma-4-abliterated:31b     # see the CPU-spill warning
+ollama pull qwen3.8:27b                           # STOCK, on purpose - second aligned model
 # Vision + agentic. NEEDS OLLAMA >= 0.32.9 - see the version note below.
 ollama pull muse-glimmer:30b                      # the only model here that can see
 # Coding
@@ -143,7 +145,8 @@ ollama pull qwen2.5-coder:1.5b-base               # Continue autocomplete
 ollama pull nomic-embed-text                      # Continue embeddings
 ```
 
-About 112 GB in total once the DavidAU model below is added, which is why the
+About 145 GB in total once the DavidAU model below is added — the two Qwen3.8
+builds are 16.52 GiB each — which is why the
 disk check comes first: `Get-PSDrive C | Select-Object Used,Free`.
 
 **A model's download size is not its VRAM footprint**, and on this card the

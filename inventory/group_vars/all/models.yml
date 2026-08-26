@@ -59,6 +59,47 @@ model_roster:
     num_ctx: 32768
     why: Technical and agentic work.
 
+  - name: huihui_ai/Qwen3.8-abliterated:27b
+    tier: terra
+    role: chat
+    abliterated: true
+    num_ctx: 32768
+    why: >-
+      Newer generation of the technical/agentic pick above. Added alongside
+      huihui_ai/Qwen3.6-abliterated:27b rather than replacing it, because
+      nothing here has been used in anger yet - the 3.6 entry stays until the
+      3.8 has earned the slot. Only one of them is ever resident, so the cost
+      of holding both is disk, not VRAM.
+
+  - name: qwen3.8:27b
+    tier: terra
+    role: chat
+    abliterated: false
+    alignment_exception: >-
+      Stock weights - and unlike every other exception in this file, that is
+      NOT a claim that it refuses. It was added on 2026-08-26 to be a second
+      aligned calibrator alongside qwen3:30b, so that the one model holding up
+      scripts/abliteration_control.py would stop being a single point of
+      failure. It failed that test on the day it arrived: it ANSWERED the
+      control prompt, with a legal disclaimer attached but answered all the
+      same. qwen3:30b REFUSED the same prompt in the same session, so the
+      control is calibrated and this is a fact about this model rather than a
+      stale prompt.
+
+      Recorded rather than quietly reworded, because the useful finding is
+      that stock is not a synonym for aligned, and the next person who reaches
+      for a fresh stock model as a calibrator should find out here instead of
+      re-measuring it.
+    num_ctx: 32768
+    why: >-
+      Stock counterpart to huihui_ai/Qwen3.8-abliterated:27b, kept so the cost
+      of abliteration on this generation can be compared on the same prompts
+      at the same quantisation. It is deliberately NOT in
+      abliteration_control.py's ROSTER: that tuple is the set of models
+      required to come back uncensored, and while this one does answer, it is
+      not abliterated and nothing should start depending on it doing so.
+      BASELINE stays qwen3:30b.
+
   - name: davidau-fable-fusion:27b-q4km
     tier: terra
     role: chat

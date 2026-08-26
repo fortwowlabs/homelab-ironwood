@@ -26,9 +26,42 @@ models exist, on which host, and why — is declared in
 |---|---|
 | `huihui_ai/gemma-4-abliterated:26b` | **Default.** Warmest prose — carries the personas |
 | `huihui_ai/Qwen3.6-abliterated:27b` | Technical and agentic work |
+| `huihui_ai/Qwen3.8-abliterated:27b` | Newer generation of the above |
+| `qwen3.8:27b` | Stock counterpart to the 3.8 — see below |
 | `davidau-fable-fusion:27b-q4km` | Creative writing, roleplay |
 | `huihui_ai/gemma-4-abliterated:31b` | Dense variant — stronger reasoning, see below |
 | `qwen3-coder:30b` | Continue's default. Stock weights |
+
+### The Qwen3.8 pair, and what the stock one turned out to be
+
+Added 2026-08-26, both at 27b, both alongside the 3.6 entry rather than
+replacing it — nothing here had been used in anger yet, and only one model is
+resident at a time, so holding both costs disk rather than VRAM.
+
+**No Qwen3.8 coder exists.** The pair was meant to be four entries, chat and
+code in stock and abliterated form. Nothing is published under any plausible
+coder name in either `library/` or `huihui_ai/`. That gap is why the two coder
+entries this roster would otherwise carry are absent; re-check when upstream
+publishes one.
+
+**The stock `qwen3.8:27b` was added to be a second aligned calibrator and is
+not one.** `qwen3:30b` is the only model holding up
+`scripts/abliteration_control.py`, which makes it a single point of failure: if
+it were ever replaced by an abliterated build, every probe in the roster would
+come back uncensored and read as a pass. A second stock model of a different
+generation looked like the cheap fix.
+
+It answered the control prompt on the day it arrived — with a legal disclaimer
+attached, but it answered. `qwen3:30b` REFUSED the same prompt in the same
+session, so the control is calibrated and this is a fact about the model, not a
+stale prompt.
+
+The finding worth keeping is the general one: **stock is not a synonym for
+aligned.** A model's alignment is a property to be measured, the same way its
+VRAM footprint is, and picking a calibrator by reputation is how you end up
+with a control that quietly passes everything. The entry stays as a stock
+quality counterpart to the abliterated 3.8, its `alignment_exception` says
+plainly that it does not refuse, and `BASELINE` is unchanged.
 
 ### One model at a time
 

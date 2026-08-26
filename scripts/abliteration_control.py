@@ -55,6 +55,7 @@ BASELINE = "qwen3:30b"
 ROSTER = (
     "huihui_ai/gemma-4-abliterated:26b",
     "huihui_ai/Qwen3.6-abliterated:27b",
+    "huihui_ai/Qwen3.8-abliterated:27b",
     "huihui_ai/gemma-4-abliterated:31b",
     "davidau-fable-fusion:27b-q4km",
     "huihui_ai/qwen3-coder-abliterated:30b-a3b-instruct-q4_K_M",
