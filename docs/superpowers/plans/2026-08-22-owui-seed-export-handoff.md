@@ -1,11 +1,40 @@
 # Handoff: Open WebUI seeding + settings-as-code
 
-**Written 2026-08-22 from TERRA (Windows GPU host).**
-**Branch `feat/owui-seed-and-export`, 3 commits, pushed, tree clean, 3 ahead of `main`.**
+**DONE 2026-08-26.** Merged to `main` as `5488391`, deployed, verified, CI green.
+Kept as the record of what was built and of what running it live disproved.
 
-```bash
-git fetch origin && git switch feat/owui-seed-and-export
-```
+| Step | Result |
+|---|---|
+| `make validate` | exit 0, including `systemd-analyze` and `gitleaks` |
+| `make infra` ×1 | `changed=3` — archive build, unpack, record revision |
+| `make infra` ×2 | **`changed=0`** |
+| `make verify` | clean on all five hosts |
+| CI on `main` | success, 1m24s |
+| `make owui-personas --dry-run` | both personas `present`, exit 0 |
+| Drift gate | `OK (2 enforced keys checked against 447 exported)` |
+
+## Three bugs only a live run could find
+
+This page originally led with "none of the API calls have run against the live
+instance". That was worth flagging, because all three of these would have
+shipped:
+
+1. **`/api/v1/models/` — with the trailing slash — returns HTTP 200 and the
+   SPA's HTML.** A wrong path here never 404s; it looks like a healthy server
+   right up to the parse. The bare path returns JSON. The tool now reports
+   "reached it, got HTML" separately from "could not reach it", because the old
+   message named the wrong fault and sent the first diagnosis at the network.
+2. **The listing is `{"data": [...]}`, not a bare list.** The shape guard
+   refused rather than guessing, which was correct: an unrecognised envelope
+   must not read as an empty estate, or the seeder would have created
+   duplicates of two personas that already existed.
+3. **The generated export failed the repo's own yamllint** — 15 indentation
+   errors, because PyYAML writes sequences flush with their parent key. Caught
+   by `make validate` on the first real export.
+
+`make owui-personas --dry-run` reporting both personas `present` and exiting 0
+is the idempotence check passing for real. The export was audited before being
+committed: 122 shown values of 447 keys, no credential among them.
 
 ---
 
@@ -30,45 +59,28 @@ Commits: `dd323e7` personas, `7953647` exporter+gate, `4734686` docs.
 
 ---
 
-## THE IMPORTANT PART: none of it has touched the live instance
+## How it was verified
 
-Both scripts need `OWUI_ADMIN_TOKEN`, which TERRA does not have. **Every API
-call is unexercised.** They are built from Open WebUI's own source
+Both scripts were built from Open WebUI's own source
 (`backend/open_webui/models/models.py` for `ModelForm`,
-`models/access_grants.py` for sharing) rather than guessed, but that is not the
-same as working.
+`models/access_grants.py` for sharing) rather than guessed -- but that is not
+the same as working, and the first three live runs proved it.
 
-What *was* tested: argument handling, missing token, unreachable host,
-malformed responses, redaction against planted secrets, and both gates'
-positive controls (revert a rule → the self-check names it).
+Offline: argument handling, missing token, unreachable host, malformed
+responses, redaction against planted secrets, and both gates' positive controls
+(revert a rule, the self-check names it).
 
-### First live run — do this before anything else
-
-```bash
-export OWUI_ADMIN_TOKEN='...'       # Settings -> Account -> API keys
-make owui-personas ARGS=--dry-run   # EXPECT: both report "present", nothing to do
-```
-
-That is the cheap check that the API shape is right. Both personas already
-exist (created by hand), so a correct tool reports `present` for each and exits
-0 without writing. If it reports `MISSING`, the id matching is wrong — do not
-let it create duplicates; investigate first.
-
-```bash
-make owui-export                    # writes inventory/group_vars/all/openwebui-config.yml
-```
-
-**Read the generated file before committing it.** Confirm no secret leaked past
-the allowlist. Then commit it — the drift gate is inert until it exists.
-
----
+Live, against chat.fortwow.dev with the vault's admin token: the persona
+dry-run reports both `present` and exits 0, and the export is idempotent
+(a second run reports `unchanged`).
 
 ## Gotchas that will cost you time
 
-**The drift gate currently protects nothing and says so.** With no export it
-prints `INCONCLUSIVE` and exits 0. That is deliberate: failing the build on a
-fresh clone where nobody has a token would just get the gate disabled. It
-starts protecting after the first `make owui-export` is committed.
+**The drift gate is live now, but only because an export is committed.** With
+no export it prints `INCONCLUSIVE` and exits 0 rather than failing -- deliberate,
+because failing the build on a fresh clone where nobody has a token would just
+get the gate disabled. Delete the export file and it silently goes back to
+protecting nothing.
 
 **The seeder never updates.** Editing `personas.yml` does not change a persona
 that already exists. Delete it in the UI and re-seed. This is the design — an
@@ -84,10 +96,11 @@ Accepted; this tracks settings, not secrets. If a key you care about shows as
 `<redacted>`, add its prefix to `SAFE_PREFIXES` in the exporter — the drift
 gate already fails loudly if an *enforced* key is redacted.
 
-**Two gate groups fail on Windows, pre-existing.** `shell` (a Windows temp path
-used as a regex/exec path) and `secrets` (wants `.venv/bin/ansible-playbook`).
-Confirmed by stashing and re-running on a clean tree. **If they fail on macOS,
-that is a real finding, not this.**
+**Two gate groups fail under Git Bash on Windows** -- `shell` (a Windows temp
+path used as a regex/exec path) and `secrets` (wants `.venv/bin/ansible-playbook`).
+Confirmed pre-existing by stashing. Both **pass in WSL**, which is where
+`make validate` should be run on this machine anyway. If they fail there or on
+macOS, that is a real finding.
 
 **Heredocs mangle backslashes in this Git Bash.** Two files and one Makefile
 edit were corrupted that way before I switched to `python -c` with `chr()`
@@ -97,23 +110,23 @@ the failure.
 
 ---
 
-## To finish
+## Done, for the record
 
 ```bash
-make validate          # from a POSIX box
-make infra             # expect changed=3, then
-make infra             # must be changed=0
-make verify
-git switch main && git merge --ff-only feat/owui-seed-and-export
-git push origin main && git branch -d feat/owui-seed-and-export
-git push origin --delete feat/owui-seed-and-export
+# in WSL on TERRA -- Ansible cannot run on native Windows
+cd ~/dev/homelab-ironwood
+USE_VAULT_FILE=1 make validate
+USE_VAULT_FILE=1 make infra      # changed=3, then changed=0
+USE_VAULT_FILE=1 make verify
 ```
 
-Note: **nothing in this branch is deployed by Ansible.** `personas.yml` and the
-scripts are read only by the make targets and gates, so `make infra` should
-report no change from them beyond the usual svc-infra archive sync. That is by
-design — a task that POSTs every run would report `changed` every run and
-destroy the `changed=0` proof.
+**Nothing here is deployed by Ansible.** `personas.yml` and the scripts are read
+only by the make targets and gates, so the only `changed` on deploy was the
+usual svc-infra archive sync. That is by design: a task that POSTs every run
+would report `changed` every run and destroy the `changed=0` proof.
+
+See `docs/deployment.md` for the WSL specifics, including the Git Bash quoting
+trap that made one of these runs report the wrong branch.
 
 ---
 

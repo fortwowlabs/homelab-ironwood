@@ -91,6 +91,55 @@ make validate
 vault or contact the homelab. It covers syntax, Ansible/YAML/shell lint, links,
 catalog consistency, and secret scanning.
 
+### Deploying from TERRA, via WSL
+
+TERRA is the Windows GPU host and also a workstation. **Ansible cannot run on
+native Windows** — it needs POSIX (`fcntl`, `pwd`) — so deploys go through WSL,
+which has its own clone and its own `.venv`:
+
+```bash
+wsl -d Ubuntu-24.04
+cd ~/dev/homelab-ironwood
+USE_VAULT_FILE=1 make validate
+USE_VAULT_FILE=1 make infra
+```
+
+`USE_VAULT_FILE=1` selects `--vault-password-file .vault_pass` instead of
+prompting, which a non-interactive session cannot answer.
+
+**That clone is separate from the Windows one at `C:\Users\tv\dev`, and the two
+drift.** Check `git log -1` inside WSL before deploying — it is not necessarily
+on the branch you just committed to on the Windows side.
+
+**The trap that makes this worse than it sounds:** driving WSL from Git Bash
+with `wsl.exe -- bash -c '...'` lets Git Bash expand `$(...)` and `$VAR`
+*before* the string reaches WSL, even inside single quotes. So
+`echo "branch: $(git branch --show-current)"` reports the **Windows** checkout
+while appearing to report WSL. On 2026-08-22 that produced a confident,
+completely wrong reading, and a `make infra` run against `main` believing it was
+a feature branch. It also hung a command for half an hour: `$f` expanded to
+empty, so `grep pattern` ran with no filename and blocked reading stdin.
+
+Put the commands in a script file and run `wsl.exe -d Ubuntu-24.04 -- bash
+/mnt/c/path/to/script.sh` instead. Add `MSYS_NO_PATHCONV=1` or Git Bash rewrites
+the `/mnt/c/...` argument into a Windows path.
+
+### `gh` on TERRA
+
+Installed at `~/.local/bin/gh` inside WSL rather than through apt, because
+passwordless sudo is not available there. It authenticates from
+`vault_github_token`:
+
+```bash
+export GH_TOKEN=$(.venv/bin/ansible-vault view --vault-password-file .vault_pass \
+    inventory/group_vars/all/vault.yml | grep '^vault_github_token:' | cut -d' ' -f2-)
+~/.local/bin/gh run list --limit 5
+```
+
+CI runs on push to `main`, after the merge rather than before it, so it is an
+alarm and not a gate — but nothing surfaces a red run on its own. Check it after
+merging.
+
 ## Inventory and vault
 
 1. Set shared non-secret values in `inventory/group_vars/all/main.yml`.
