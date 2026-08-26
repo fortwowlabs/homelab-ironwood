@@ -10,9 +10,19 @@
 # on the card, not the model's own footprint. gpu-capacity.md carries each
 # pass's baseline and is the place the baseline-adjusted comparison lives.
 #
-# All figures below are from the q8_0 pass of 2026-08-12, because q8_0 is what
-# the host now runs — see the KV cache section of docs/gpu-host.md. Numbers
-# taken under f16 do not describe this host any more.
+# All figures below are from a q8_0 pass, because q8_0 is what the host now
+# runs — see the KV cache section of docs/gpu-host.md. Numbers taken under f16
+# do not describe this host any more. Most are from the pass of 2026-08-12
+# (idle baseline 1464 MiB); the two Qwen3.8 entries are from a second pass on
+# 2026-08-26 (idle baseline 1433 MiB), so comparing a 3.8 figure against a
+# 3.6 one carries ~30 MiB of baseline difference before anything else.
+#
+# The 2026-08-26 pair are NOT in docs/gpu-capacity.md. That report is generated
+# by merging every pass, its FALLBACK detection needs an f16 pass to compare
+# against, and the pass JSONs it was built from were never committed — so it
+# cannot be regenerated without re-running all three passes for all models.
+# Committing the pass files would fix that; until someone does, the report
+# covers the 2026-08-12 roster and this file is the only record of the rest.
 #
 # `abliterated: false` REQUIRES `alignment_exception` saying why, because every
 # chat model here is abliterated on purpose and an un-abliterated one is either
@@ -62,6 +72,8 @@ model_roster:
   - name: huihui_ai/Qwen3.8-abliterated:27b
     tier: terra
     role: chat
+    measured_mib: 20657
+    measured_on: "2026-08-26"
     abliterated: true
     num_ctx: 32768
     why: >-
@@ -74,6 +86,8 @@ model_roster:
   - name: qwen3.8:27b
     tier: terra
     role: chat
+    measured_mib: 20671
+    measured_on: "2026-08-26"
     abliterated: false
     alignment_exception: >-
       Stock weights - and unlike every other exception in this file, that is

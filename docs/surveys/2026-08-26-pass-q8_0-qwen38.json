@@ -1,0 +1,44 @@
+{
+  "cache_type": "q8_0",
+  "flash_attention": true,
+  "baseline_mib": 1433,
+  "taken": "2026-08-26",
+  "rows": [
+    {
+      "model": "huihui_ai/Qwen3.8-abliterated:27b",
+      "num_ctx": 16384,
+      "verdict": "MEASURED",
+      "card_used_mib": 19953,
+      "size_total": 17315859003,
+      "size_vram": 17315859003,
+      "evidence": "17315859003 of 17315859003 bytes resident on GPU (100%)"
+    },
+    {
+      "model": "huihui_ai/Qwen3.8-abliterated:27b",
+      "num_ctx": 32768,
+      "verdict": "MEASURED",
+      "card_used_mib": 20657,
+      "size_total": 17399745083,
+      "size_vram": 17399745083,
+      "evidence": "17399745083 of 17399745083 bytes resident on GPU (100%)"
+    },
+    {
+      "model": "qwen3.8:27b",
+      "num_ctx": 16384,
+      "verdict": "MEASURED",
+      "card_used_mib": 19953,
+      "size_total": 17315859003,
+      "size_vram": 17315859003,
+      "evidence": "17315859003 of 17315859003 bytes resident on GPU (100%)"
+    },
+    {
+      "model": "qwen3.8:27b",
+      "num_ctx": 32768,
+      "verdict": "MEASURED",
+      "card_used_mib": 20671,
+      "size_total": 17399745083,
+      "size_vram": 17399745083,
+      "evidence": "17399745083 of 17399745083 bytes resident on GPU (100%)"
+    }
+  ]
+}
