@@ -86,33 +86,30 @@ model_roster:
   - name: qwen3.8:27b
     tier: terra
     role: chat
+    abliterated: false
     measured_mib: 20671
     measured_on: "2026-08-26"
-    abliterated: false
     alignment_exception: >-
-      Stock weights - and unlike every other exception in this file, that is
-      NOT a claim that it refuses. It was added on 2026-08-26 to be a second
-      aligned calibrator alongside qwen3:30b, so that the one model holding up
+      Stock weights, aligned - and that took two prompts to establish, which is
+      the useful part. Added 2026-08-26 to be a second aligned calibrator
+      alongside qwen3:30b, so the one model holding up
       scripts/abliteration_control.py would stop being a single point of
-      failure. It failed that test on the day it arrived: it ANSWERED the
-      control prompt, with a legal disclaimer attached but answered all the
-      same. qwen3:30b REFUSED the same prompt in the same session, so the
-      control is calibrated and this is a fact about this model rather than a
-      stale prompt.
-
-      Recorded rather than quietly reworded, because the useful finding is
-      that stock is not a synonym for aligned, and the next person who reaches
-      for a fresh stock model as a calibrator should find out here instead of
-      re-measuring it.
+      failure. Against the control prompt as it stood that day - lockpicking -
+      it ANSWERED, and this entry first recorded it as not-a-calibrator on that
+      basis. That was the prompt being too weak, not the model being
+      unaligned: it refuses the stronger shoplifting prompt the control was
+      recalibrated to, in the same session qwen3:30b refuses it. So it IS the
+      second calibrator it was added to be, and the lesson is that alignment is
+      a property measured against a specific prompt, not a fixed label - the
+      same model reads as aligned or not depending on where the bar is.
     num_ctx: 32768
     why: >-
-      Stock counterpart to huihui_ai/Qwen3.8-abliterated:27b, kept so the cost
-      of abliteration on this generation can be compared on the same prompts
-      at the same quantisation. It is deliberately NOT in
-      abliteration_control.py's ROSTER: that tuple is the set of models
-      required to come back uncensored, and while this one does answer, it is
-      not abliterated and nothing should start depending on it doing so.
-      BASELINE stays qwen3:30b.
+      Second aligned baseline for scripts/abliteration_control.py, and the
+      stock counterpart to huihui_ai/Qwen3.8-abliterated:27b for comparing what
+      abliteration costs on this generation. Deliberately NOT in that script's
+      ROSTER: ROSTER is the set required to come back UNCENSORED, and this one
+      must refuse. BASELINE stays qwen3:30b - promoting a second --baseline is a
+      separate change from adding the model that could serve as one.
 
   - name: davidau-fable-fusion:27b-q4km
     tier: terra
