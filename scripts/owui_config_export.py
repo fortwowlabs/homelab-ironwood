@@ -72,6 +72,20 @@ SECRET_MARKERS = ("key", "secret", "token", "password", "credential")
 REDACTED = "<redacted>"
 
 
+class IndentedDumper(yaml.SafeDumper):
+    """Indent sequences under their key, which yamllint requires.
+
+    PyYAML writes a list flush with its parent key by default. This repo's
+    .yamllint.yml leaves the `indentation` rule at its default, which wants
+    the list indented one level further -- so the first generated file failed
+    `make validate` on 15 indentation errors. A generated file that cannot
+    pass the repo's own lint is a generated file nobody will keep regenerating.
+    """
+
+    def increase_indent(self, flow: bool = False, indentless: bool = False):
+        return super().increase_indent(flow, False)
+
+
 def is_safe(key: str) -> bool:
     lowered = key.lower()
     if any(marker in lowered for marker in SECRET_MARKERS):
@@ -154,8 +168,8 @@ def main() -> int:
         "#\n"
         "# Refresh with `make owui-export`.\n"
     )
-    rendered = header + yaml.safe_dump(document, sort_keys=True,
-                                       default_flow_style=False, allow_unicode=True)
+    rendered = header + yaml.dump(document, Dumper=IndentedDumper, sort_keys=True,
+                                  default_flow_style=False, allow_unicode=True)
 
     if args.stdout:
         print(rendered, end="")
