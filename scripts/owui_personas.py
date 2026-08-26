@@ -49,6 +49,17 @@ CATALOG_PATH = ROOT / "inventory" / "group_vars" / "all" / "personas.yml"
 PUBLIC_READ = {"principal_type": "user", "principal_id": "*", "permission": "read"}
 
 
+class NotJSON(Exception):
+    """Reached Open WebUI, but it answered with something that is not JSON.
+
+    Worth its own type rather than being folded into the unreachable case.
+    `/api/v1/models/` -- with the trailing slash -- returns HTTP 200 and the
+    SPA's HTML shell, so a wrong path looks like a healthy server right up
+    until the parse. Reporting that as "could not reach" sent the first live
+    run looking at the network instead of at the URL.
+    """
+
+
 def api(base_url: str, path: str, token: str, timeout: int,
         payload: object | None = None) -> object:
     headers = {"Authorization": f"Bearer {token}"}
@@ -60,7 +71,17 @@ def api(base_url: str, path: str, token: str, timeout: int,
         f"{base_url.rstrip('/')}{path}", data=data, headers=headers)
     with urllib.request.urlopen(request, timeout=timeout) as response:
         body = response.read()
-        return json.loads(body) if body else None
+        if not body:
+            return None
+        try:
+            return json.loads(body)
+        except json.JSONDecodeError as exc:
+            head = body[:80].decode("utf-8", "replace").replace("\n", " ")
+            raise NotJSON(
+                f"{path} returned HTTP {response.status} but not JSON "
+                f"(starts {head!r}). A path that serves the web UI answers 200 "
+                "with HTML rather than 404."
+            ) from exc
 
 
 def desired_form(persona: dict) -> dict:
@@ -110,10 +131,13 @@ def main() -> int:
         return 3
 
     try:
-        live = api(args.base_url, "/api/v1/models/", token, args.timeout)
+        live = api(args.base_url, "/api/v1/models", token, args.timeout)
     except urllib.error.HTTPError as exc:
         print(f"could not list models: HTTP {exc.code}. Nothing was created.",
               file=sys.stderr)
+        return 1
+    except NotJSON as exc:
+        print(f"{exc} Nothing was created.", file=sys.stderr)
         return 1
     except Exception as exc:
         print(f"could not reach {args.base_url}: {exc}. Nothing was created.",
@@ -166,7 +190,7 @@ def main() -> int:
     # Read back rather than trusting the 200. A create that succeeds and stores
     # something different is the failure this repo keeps re-learning.
     try:
-        after = api(args.base_url, "/api/v1/models/", token, args.timeout)
+        after = api(args.base_url, "/api/v1/models", token, args.timeout)
         after_ids = {m.get("id") for m in after if isinstance(m, dict)}
     except Exception as exc:
         print(f"\ncreated {created} but could not read back ({exc}) -- unverified",
