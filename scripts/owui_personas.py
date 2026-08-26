@@ -84,6 +84,22 @@ def api(base_url: str, path: str, token: str, timeout: int,
             ) from exc
 
 
+def model_list(payload: object) -> list | None:
+    """The models listing, whichever envelope this version wraps it in.
+
+    0.11.0 answers `/api/v1/models` with {"data": [...]}, but the same route
+    has returned a bare list in other versions and `/api/v1/models/base` does
+    so today. Returns None for anything else, so an envelope this does not
+    recognise refuses loudly instead of reading as an empty estate -- an empty
+    list here would mean "no personas exist" and create duplicates of both.
+    """
+    if isinstance(payload, list):
+        return payload
+    if isinstance(payload, dict) and isinstance(payload.get("data"), list):
+        return payload["data"]
+    return None
+
+
 def desired_form(persona: dict) -> dict:
     """The ModelForm Open WebUI expects (backend/open_webui/models/models.py)."""
     params = dict(persona.get("params") or {})
@@ -144,13 +160,14 @@ def main() -> int:
               file=sys.stderr)
         return 1
 
-    if not isinstance(live, list):
+    items = model_list(live)
+    if items is None:
         print(f"unexpected response listing models: {type(live).__name__}. "
               "Refusing to create anything on an answer this tool does not "
               "understand.", file=sys.stderr)
         return 1
 
-    existing = {m.get("id") for m in live if isinstance(m, dict)}
+    existing = {m.get("id") for m in items if isinstance(m, dict)}
     missing = [p for p in personas if p["id"] not in existing]
 
     for persona in personas:
@@ -190,7 +207,8 @@ def main() -> int:
     # Read back rather than trusting the 200. A create that succeeds and stores
     # something different is the failure this repo keeps re-learning.
     try:
-        after = api(args.base_url, "/api/v1/models", token, args.timeout)
+        after = model_list(api(args.base_url, "/api/v1/models", token,
+                               args.timeout)) or []
         after_ids = {m.get("id") for m in after if isinstance(m, dict)}
     except Exception as exc:
         print(f"\ncreated {created} but could not read back ({exc}) -- unverified",
