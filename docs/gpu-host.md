@@ -289,6 +289,118 @@ Then confirm `http://192.168.1.40:8188` loads from another machine — and that
 `/system_stats` reports `cuda:0`, since a CPU fallback also loads fine and
 merely takes twenty minutes per image.
 
+#### MiniMax H3: video generation, driven directly from ComfyUI
+
+Unlike Pony above, **H3 is not reachable through Open WebUI at all** — there
+is no video-generation config surface in `ImagesConfig`
+(`docs/superpowers/specs/2026-08-14-comfyui-image-generation-design.md`
+confirmed this). It is driven straight from ComfyUI's own web UI at
+`http://192.168.1.40:8188`: no catalog entry, no admin-API push, no `make`
+target. Full design:
+`docs/superpowers/specs/2026-08-27-video-generation-design.md`.
+
+**Requires ComfyUI ≥ 0.30.0.** This host measured **0.31.0**, which clears
+the floor. All four native H3 node classes ship with that build and needed no
+custom-node install: `EmptyMiniMaxH3LatentAV`, `MiniMaxH3ImageToVideo`,
+`MiniMaxH3ReferenceToVideo`, `MiniMaxH3SigmaShift`. (Distinct `Minimax*Node` /
+`MinimaxHailuo*` classes also exist in the same build — those call MiniMax's
+hosted cloud API, not the local weights below. Do not confuse them.)
+
+##### Weight files
+
+All five come from `Comfy-Org/MiniMax-H3` on Hugging Face — the
+ComfyUI-packaged form, not the raw Diffusers release — at the pruned-int8
+tier, the only tier with any chance of fitting a 24 GB card. **Verified on
+both byte count and SHA256** against the repo's own `lfs.sha256`, the same
+discipline the Pony checksum above exists to enforce: byte count alone would
+not have caught a complete-but-corrupted transfer.
+
+| File | Destination | Size (bytes) | SHA256 |
+|---|---|---|---|
+| `minimax_h3_fl2va_pruned_int8_convrot.safetensors` | `models/diffusion_models/` — T2V + I2V | 20970379616 | `e889202c41dafb67b10d67b97f0d8541508036a6090af23425a5c2615d03c47a` |
+| `minimax_h3_ref2va_pruned_int8_convrot.safetensors` | `models/diffusion_models/` — R2V | 20970379616 | `9255f52b6677845ad238f20dfaafa94727053694127ab7f255c048f0f9365779` |
+| `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` | `models/text_encoders/` — shared by all three | 15687142551 | `35a88d51044231fe332301d7a62aa81e3f2cba62febeb446e2c1e3e0ef76f2c6` |
+| `minimax_h3_video_vae_fp16.safetensors` | `models/vae/` | 5207808496 | `7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522` |
+| `minimax_h3_audio_vae_fp32.safetensors` | `models/vae/` | 605254808 | `8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48` |
+
+Total on disk 63.4 GB, against a 2.0 TiB free disk — not the constraint.
+
+##### The turbo LoRAs are downloaded but switched off, and their necessity is unproven
+
+The official T2V/I2V and R2V templates each reference a turbo LoRA behind a
+switch node that defaults to `False` —
+`minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors` for T2V/I2V and
+`minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors` for R2V, ~1.96 GB
+each, hash-verified the same way as the five files above. Both were
+downloaded on the reasoning that ComfyUI validates the `LoraLoaderModelOnly`
+node's COMBO input against files actually present on disk even when the
+branch feeding it is switched off, so a missing file looked likely to fail
+prompt validation regardless of the switch state.
+
+**That reasoning turned out to be wrong.** The T2V validation failure hit
+during setup traced back to an unrelated bug in this session's own
+template-to-API converter (a dotted autogrow input name, `values.a`, folded
+into the wrong shape) — not a missing LoRA file. The turbo LoRA simply
+happened to be present when the first successful queue went in, so **whether
+it is actually required is unproven, and it is not currently in use.** All
+three modes below were generated with the switch left at its template
+default, `False`. Do not read this section as recommending the LoRA be
+turned on, or as evidence the file needs to be present at all — that would
+need testing with it absent, which was not done.
+
+##### Measured: all three modes fit, R2V is tight
+
+Card: RTX 4090, 24564 MiB. Idle baseline **2876 MiB**, measured after freeing
+VRAM ComfyUI was still holding from an earlier Pony session, with nothing
+resident in Ollama. **That is higher than the 1464–2012 MiB baselines in
+[gpu-capacity.md](gpu-capacity.md)** because this was measured during a live
+interactive desktop session — VS Code, Steam, the NVIDIA overlay and Explorer
+were all holding VRAM at the time. Recorded as the real number rather than an
+idealised one, the same discipline that file exists for.
+
+The design's open question — whether the ~39.6 GB on-disk pruned-int8 stack
+could ever be co-resident on a 24 GB card — is answered: it does not need to
+be. ComfyUI sequences the three stages (text encoder → diffusion → VAE
+decode) without ever holding all of them at once, and **generation succeeded
+in all three modes, with no OOM.** The Ollama chat model was not resident
+during any of the three runs, consistent with the design's VRAM strategy of
+stopping it before generating — `ollama ps` had nothing resident from the
+start of this work, so nothing needed to be manually stopped this time, but
+the requirement stands for any future run that follows a chat session.
+
+| Mode | Checkpoint | Wall clock | Output | Peak VRAM of 24564 MiB |
+|---|---|---|---|---|
+| T2V | `fl2va` | 392 s | 387,730 bytes (0.37 MB) | 21826 MiB |
+| I2V | `fl2va` | 420 s | 2,365,000 bytes (2.26 MB) | ~21615 MiB |
+| R2V | `ref2va` | 844 s | 2,204,062 bytes (2.10 MB) | 23042 MiB |
+
+All three: 1344×768, 5.17 s (124 frames @ 24 fps), H.264 video + AAC audio, 20
+sampling steps, turbo LoRA off. The output-size spread is not a broken
+render — T2V's near-static test scene simply compresses far harder under
+H.264 than I2V/R2V's more detailed ones. Each `.mp4` was confirmed by parsing
+its container atoms directly (duration, dimensions, and both a video and an
+audio track present), not by file size alone.
+
+**R2V is the tight one: only ~1.5 GiB of headroom.** Reference-image
+conditioning rides through every sampling step, which is both why R2V takes
+roughly twice as long as T2V/I2V and why its peak runs ~1.2 GB higher.
+Anything else holding VRAM at generation time — a game, a second ComfyUI
+model, even a heavier desktop session than the one this was measured
+against — plausibly OOMs R2V where T2V/I2V would still fit.
+
+##### System RAM is at the low end of guidance, not comfortably above it
+
+Measured `Win32_ComputerSystem.TotalPhysicalMemory` = 33,409,974,272 bytes =
+**31.1 GiB**. Third-party guidance for H3 suggests 32–64 GB. 31.1 GiB sits at
+the low end of that range rather than comfortably inside it — recorded as a
+live risk, not a resolved one.
+
+##### Output and retention
+
+Output lands in ComfyUI's default output folder with a `homelab-h3` filename
+prefix. Retention is manual, by design —
+`docs/superpowers/specs/2026-08-27-video-generation-design.md` explains why.
+
 ### 4. Open the firewall, narrowly
 
 Windows Defender Firewall blocks both ports inbound by default. Add rules for
