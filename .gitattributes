@@ -1,0 +1,23 @@
+# Every consumer of this repository is Linux: the three service VMs, the
+# systemd units and shell scripts rendered onto them, the Ansible that renders
+# them, and the GitHub Actions runner. No .bat, .cmd or .ps1 file is tracked
+# here, so nothing in the tree wants CRLF.
+#
+# Git for Windows ships core.autocrlf=true in its SYSTEM config
+# (C:/Program Files/Git/etc/gitconfig). Every blob in this repo's object
+# database is LF, but that setting gave the Windows workstation a CRLF working
+# tree on checkout, and `make validate` could not pass there at all: yamllint's
+# new-lines rule rejects every YAML file, so validate-yaml failed identically
+# whatever the change was. A gate that fails the same way for every input is
+# not measuring anything -- the same "check nobody can tell is broken" failure
+# this repo worries about in scan.yml and the credential canary.
+#
+# eol=lf pins the working tree to LF on every platform and takes precedence
+# over core.autocrlf, so the gate measures the change instead of the checkout.
+# It travels with the repo, which a local `git config` would not.
+* text=auto eol=lf
+
+# The only tracked binary. text=auto would very probably detect it on its own,
+# but "very probably" is not what should stand between a line-ending rewrite
+# and the one file in this repo it could silently corrupt.
+tests/fixtures/vision-probe.png binary
