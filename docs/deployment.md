@@ -111,6 +111,29 @@ prompting, which a non-interactive session cannot answer.
 drift.** Check `git log -1` inside WSL before deploying — it is not necessarily
 on the branch you just committed to on the Windows side.
 
+**Deploy from the WSL clone, never from `/mnt/c` — being inside WSL is not
+enough.** It is tempting to skip the second clone by running WSL's `ansible`
+against the Windows checkout, since WSL can see it at
+`/mnt/c/Users/tv/dev/homelab-ironwood`. That runs, and it is wrong. DrvFs
+mounts the drive `drwxrwxrwx`, and Ansible refuses to read `ansible.cfg` from a
+world-writable directory — it says so in a `[WARNING]`, then continues. Measured
+2026-08-27, from the two clones on this host:
+
+| Run from | `ansible --version` reports |
+|---|---|
+| `/home/tv/dev/homelab-ironwood` | `config file = …/ansible.cfg`, collections from `collections/` |
+| `/mnt/c/Users/tv/dev/homelab-ironwood` | **`config file = None`**, collections from `~/.ansible/collections` |
+
+So a deploy from `/mnt/c` silently discards every setting this repo pins in
+`ansible.cfg` and resolves collections somewhere else entirely. It does not
+fail; it does something different. The warning is one line in a stream of
+Ansible output and is easy to miss.
+
+The Windows clone is for editing and for `make validate`, which is unaffected
+by this and passes there since `.gitattributes` pinned the working tree to LF.
+Deploys belong to the WSL clone, which also holds `vault.yml` and
+`.vault_pass` — the Windows clone need not have them at all.
+
 **The trap that makes this worse than it sounds:** driving WSL from Git Bash
 with `wsl.exe -- bash -c '...'` lets Git Bash expand `$(...)` and `$VAR`
 *before* the string reaches WSL, even inside single quotes. So
