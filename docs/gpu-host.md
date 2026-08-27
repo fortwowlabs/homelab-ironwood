@@ -449,6 +449,178 @@ Output lands in ComfyUI's default output folder with a `homelab-h3` filename
 prefix. Retention is manual, by design —
 `docs/superpowers/specs/2026-08-27-video-generation-design.md` explains why.
 
+#### A missing model does not fail here — it silently loads a different one
+
+Installing H3 broke image generation, and the way it broke is worth keeping,
+because nothing in the failure points at the cause.
+
+**Symptom, 2026-08-27:** every generation in ComfyUI's own UI died with
+`IndexError: list index out of range` at a `KSampler`, apparently from "the
+default workflow, changing nothing".
+
+Neither half of that was true, and neither was the obvious reading that H3 had
+broken something. The graph was the stock **Z-Image Turbo** template, whose
+three model files had never been downloaded. **When a loader's saved filename
+is absent, ComfyUI's frontend does not fail — it selects the first entry in the
+dropdown.** Until H3 arrived, `models\diffusion_models\`, `models\text_encoders\`
+and `models\vae\` held no model files at all, because this host generated
+images only through `CheckpointLoaderSimple`. H3 put the first-ever file in all
+three at once, and the template quietly rebound itself to a 19.5 GiB video
+model:
+
+| Loader | Template expects | What it silently loaded |
+|---|---|---|
+| `UNETLoader` | `z_image_turbo_bf16.safetensors` | `minimax_h3_ref2va_pruned_int8_convrot.safetensors` |
+| `CLIPLoader` | `qwen_3_4b.safetensors` | `qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors` |
+| `VAELoader` | `ae.safetensors` | `minimax_h3_audio_vae_fp32.safetensors` |
+
+The substituted files exist, so the graph passes validation and fails far
+later, inside the model's own forward pass — the bottom frame of the
+traceback, in `comfy\ldm\minimax\model.py`:
+
+```python
+def forward(self, x, timestep, context, ...):
+    audio_src = x[1]
+```
+
+H3 is omni-modal: `x` must be `[video_latent, audio_latent]`. The template's
+`EmptySD3LatentImage` supplies a single image latent, so `x[1]` is out of
+range. Note the VAE it chose was the **audio** VAE — first alphabetically —
+the same fallback showing itself a third time in one graph.
+
+**The rule this leaves behind:** on this host, a template naming a model you
+have not downloaded will not say so. It will run a different model. Before
+trusting an unfamiliar template, confirm every filename it names is present;
+each template's own `MarkdownNote` node lists them with upstream URLs. And when
+a generation fails inside a model rather than at validation, read the
+traceback's **bottom** frame first — it names the model that actually loaded,
+which is the one piece of evidence the error message itself withholds.
+
+The narrower lesson for image generation specifically: `CheckpointLoaderSimple`
+is not exposed to this trap in the same way, because `models\checkpoints\` has
+only ever held real image checkpoints. The three split-file directories are
+where it bites.
+
+**Installing the image models below changed what a fallback lands on, and that
+is a mitigation rather than a fix.** The dropdowns are ordered alphabetically,
+so the first entry in each is now an image model rather than a slice of H3:
+`flux1-dev.safetensors` for `UNETLoader`, `clip_l.safetensors` for
+`CLIPLoader`, `ae.safetensors` for `VAELoader`. A template missing its models
+will now silently load something that at least produces an image, which is a
+quieter and arguably more dangerous failure than the loud `IndexError` above.
+The check is still to confirm the filenames before trusting a template.
+
+#### The image models installed alongside Pony and SDXL
+
+Added 2026-08-27, so the stock templates have their real models rather than
+leaving the dropdowns to guess. All are ungated public downloads; every one is
+`.safetensors`, which cannot execute code on load.
+
+| models\ subdirectory | File | Bytes | Used by |
+|---|---|---|---|
+| `diffusion_models` | `z_image_turbo_bf16.safetensors` | 12309866400 | Z-Image Turbo |
+| `text_encoders` | `qwen_3_4b.safetensors` | 8044982048 | Z-Image Turbo |
+| `diffusion_models` | `flux1-dev.safetensors` | 23802932552 | Flux.1 dev |
+| `text_encoders` | `clip_l.safetensors` | 246144152 | Flux.1 dev |
+| `text_encoders` | `t5xxl_fp16.safetensors` | 9787841024 | Flux.1 dev |
+| `vae` | `ae.safetensors` | 335304388 | **both** of the above |
+| `checkpoints` | `sd_xl_refiner_1.0.safetensors` | 6075981930 | SDXL base+refiner |
+
+SHA256, each verified against the downloaded bytes:
+
+```
+2407613050b809ffdff18a4ac99af83ea6b95443ecebdf80e064a79c825574a6  z_image_turbo_bf16.safetensors
+6c671498573ac2f7a5501502ccce8d2b08ea6ca2f661c458e708f36b36edfc5a  qwen_3_4b.safetensors
+4610115bb0c89560703c892c59ac2742fa821e60ef5871b33493ba544683abd7  flux1-dev.safetensors
+660c6f5b1abae9dc498ac2d21e1347d2abdb0cf6c0c0c8576cd796491d9a6cdd  clip_l.safetensors
+6e480b09fae049a72d2a8c5fbccb8d3e92febeb233bbe9dfe7256958a9167635  t5xxl_fp16.safetensors
+afc8e28272cd15db3919bacdb6918ce9c1ed22e96cb12c4d5ed0fba823529e38  ae.safetensors
+7440042bbdc8a24813002c09b6b69b64dc90fded4472613437b7f55f9b7d9c5f  sd_xl_refiner_1.0.safetensors
+```
+
+Those hashes were taken from `lfs.oid` in
+`https://huggingface.co/api/models/<repo>/tree/main/<dir>`, which is a real
+SHA256 — the same trap documented for Pony above applies here, so do not read
+them off `etag`. Note that endpoint lists a **directory**; handing it a full
+file path returns 404.
+
+**Fetch these with `curl.exe`, not the `Invoke-WebRequest` used for the two
+checkpoints above.** PowerShell 5.1 buffers an entire response in memory before
+writing it, which is survivable for a 6.5 GB checkpoint on this 31.1 GiB
+machine and is not survivable for `flux1-dev.safetensors` at 22.17 GiB. `curl`
+also resumes a partial transfer, which matters over this host's Wi-Fi link:
+
+```powershell
+curl.exe -L --fail --no-progress-meter -C - -o <dest>.part <url>
+```
+
+Do not pipe `curl.exe` through `2>&1` in PowerShell: it wraps native stderr in
+ErrorRecords, and under `$ErrorActionPreference='Stop'` ordinary progress
+output then kills the run. Verify the hash on the `.part` file and only then
+rename it into place — a truncated `.safetensors` that loads is worse than one
+that fails.
+
+**`ae.safetensors` is named by two templates from two different repositories,
+and that is not a collision.** Z-Image points at `Comfy-Org/z_image_turbo` and
+Flux at `Comfy-Org/Lumina_Image_2.0_Repackaged`. Both are 335304388 bytes with
+SHA256 `afc8e28…529e38` — the same file. One copy serves both templates. Do
+not "disambiguate" them by renaming: both templates default to the bare name
+`ae.safetensors`, and renaming would re-arm the silent-fallback trap above.
+
+##### The saved workflows
+
+Three stock templates are copied verbatim into
+`ComfyUI\user\default\workflows\`, so they open from the Workflows sidebar
+instead of having to be found in Browse Templates each time:
+
+```
+Z-Image Turbo - text to image.json
+Flux.1 dev - text to image.json
+SDXL base+refiner - text to image.json
+```
+
+They are unmodified copies, which is deliberate — it keeps them diffable
+against upstream when a template changes. The Z-Image and Flux templates are
+subgraph-based: their top level holds three nodes, and the real graph lives
+under `definitions.subgraphs`. A loader scan that walks only `nodes` finds
+nothing in them and will wrongly conclude they reference no models.
+
+##### Measured 2026-08-27: all three run, and Flux is the tight one
+
+Each generated a 1024×1024 PNG from its template's own prompt. Execution time
+is ComfyUI's `execution_start` → `execution_success` out of `/history`, not
+wall clock. Card total is 24564 MiB; idle desktop baseline was 1542–1555 MiB.
+
+| Workflow | Execution | Peak VRAM | Headroom |
+|---|---|---|---|
+| SDXL base+refiner | 9.7 s | 13860 MiB | 10704 MiB |
+| Z-Image Turbo | 11.0 s | 21762 MiB | 2802 MiB |
+| Flux.1 dev | 21.7 s | 23564 MiB | **1000 MiB** |
+
+**Flux.1 dev fits, but only just.** `flux1-dev.safetensors` is 22.17 GiB and
+`t5xxl_fp16.safetensors` another 9.12 GiB — more than the card holds — so
+ComfyUI sequences them the way it does for H3 rather than keeping both
+resident. It works, with roughly 1 GiB spare. Anything else holding VRAM at
+the time — a chat model, a game, a second ComfyUI model — plausibly OOMs it.
+The `t5xxl_fp8_e4m3fn_scaled.safetensors` encoder the template offers as an
+alternative is the lever to pull if that becomes a problem; it was not needed
+here and so was not downloaded.
+
+**Z-Image peaks nearly as high as Flux despite being half the size**, because
+its `qwen_3_4b` text encoder (7.49 GiB) sits alongside the 11.46 GiB model.
+Model file size is not a proxy for VRAM cost when the encoder ships separately.
+
+**These numbers required restarting ComfyUI between runs, and the first
+attempt at them was wrong.** `POST /free` unloads the model but does not
+return the memory to the card: torch's caching allocator keeps its reservation,
+so `nvidia-smi` still reports the previous model's footprint. Measured back to
+back after Flux, Z-Image and SDXL "peaked" at 21700 and 21060 MiB — figures
+that were almost entirely Flux's leftover reservation rather than their own
+cost. SDXL's true peak is 13860 MiB, some 7 GiB lower. This is the same class
+of error as the R2V queue-delay above: a measurement taken in a convenient
+order rather than a clean one. Restart between models, or do not publish the
+number.
+
 ### 4. Open the firewall, narrowly
 
 Windows Defender Firewall blocks both ports inbound by default. Add rules for
