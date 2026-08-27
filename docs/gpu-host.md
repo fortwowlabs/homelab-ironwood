@@ -350,9 +350,20 @@ need testing with it absent, which was not done.
 
 ##### Measured: all three modes fit, R2V is tight
 
-Card: RTX 4090, 24564 MiB. Idle baseline **2876 MiB**, measured after freeing
-VRAM ComfyUI was still holding from an earlier Pony session, with nothing
-resident in Ollama. **That is higher than the 1464–2012 MiB baselines in
+Card: RTX 4090, 24564 MiB. Idle baseline measured after freeing VRAM ComfyUI
+was still holding from an earlier Pony session, with nothing resident in
+Ollama, then a peak reading taken for each mode — the same "State | VRAM
+used" table this doc already uses for chat models in
+["Sharing the card with image generation"](#sharing-the-card-with-image-generation):
+
+| State | VRAM used of 24564 MiB |
+|---|---|
+| Idle (live desktop session — VS Code, Steam, NVIDIA overlay, Explorer all resident) | 2876 MiB |
+| T2V peak | 21826 MiB |
+| I2V peak | ~21615 MiB |
+| R2V peak | 23042 MiB |
+
+**That idle baseline is higher than the 1464–2012 MiB baselines in
 [gpu-capacity.md](gpu-capacity.md)** because this was measured during a live
 interactive desktop session — VS Code, Steam, the NVIDIA overlay and Explorer
 were all holding VRAM at the time. Recorded as the real number rather than an
@@ -368,11 +379,11 @@ stopping it before generating — `ollama ps` had nothing resident from the
 start of this work, so nothing needed to be manually stopped this time, but
 the requirement stands for any future run that follows a chat session.
 
-| Mode | Checkpoint | Wall clock | Output | Peak VRAM of 24564 MiB |
-|---|---|---|---|---|
-| T2V | `fl2va` | 392 s | 387,730 bytes (0.37 MB) | 21826 MiB |
-| I2V | `fl2va` | 420 s | 2,365,000 bytes (2.26 MB) | ~21615 MiB |
-| R2V | `ref2va` | 844 s | 2,204,062 bytes (2.10 MB) | 23042 MiB |
+| Mode | Checkpoint | Wall clock | Output |
+|---|---|---|---|
+| T2V | `fl2va` | 392 s | 387,730 bytes (0.37 MB) |
+| I2V | `fl2va` | 420 s | 2,365,000 bytes (2.26 MB) |
+| R2V | `ref2va` | 844 s | 2,204,062 bytes (2.10 MB) |
 
 All three: 1344×768, 5.17 s (124 frames @ 24 fps), H.264 video + AAC audio, 20
 sampling steps, turbo LoRA off. The output-size spread is not a broken
@@ -381,7 +392,8 @@ H.264 than I2V/R2V's more detailed ones. Each `.mp4` was confirmed by parsing
 its container atoms directly (duration, dimensions, and both a video and an
 audio track present), not by file size alone.
 
-**R2V is the tight one: only ~1.5 GiB of headroom.** Reference-image
+**R2V is the tight one: only ~1.5 GiB of headroom** (23042 of 24564 MiB, from
+the table above). Reference-image
 conditioning rides through every sampling step, which is both why R2V takes
 roughly twice as long as T2V/I2V and why its peak runs ~1.2 GB higher.
 Anything else holding VRAM at generation time — a game, a second ComfyUI
