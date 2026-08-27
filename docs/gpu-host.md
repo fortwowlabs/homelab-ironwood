@@ -221,6 +221,10 @@ believing the install works:
 ```powershell
 Invoke-WebRequest -Uri "https://huggingface.co/stabilityai/stable-diffusion-xl-base-1.0/resolve/main/sd_xl_base_1.0.safetensors" `
   -OutFile "C:\ComfyUI\ComfyUI_windows_portable\ComfyUI\models\checkpoints\sd_xl_base_1.0.safetensors"
+```
+
+~6.5 GB. If it lands as a few KB, that is an HTML error page wearing a
+`.safetensors` name — delete it and retry.
 
 #### The second checkpoint: Pony Diffusion V6 XL
 
@@ -269,10 +273,6 @@ fixed `CLIPTextEncode` (node 10) merged into the user's prompt by a
 `ConditioningConcat` (node 11), and the mapping points at the user node only.
 That is why `inventory/comfyui-workflows/pony.json` has two nodes `sdxl.json`
 does not.
-```
-
-~6.5 GB. If it lands as a few KB, that is an HTML error page wearing a
-`.safetensors` name — delete it and retry.
 
 The stock `run_nvidia_gpu.bat` binds loopback only, and editing it would be
 reverted by the next ComfyUI update, silently taking the LAN bind with it.
