@@ -15,6 +15,40 @@ repo's only knowledge of it is two variables in
 | `gpu_host_ip` | Its reserved LAN address — `192.168.1.40` |
 | `gpu_host_online` | Whether Open WebUI should try to talk to it at all |
 
+## TERRA's addresses
+
+The machine answers on **two** addresses, and only one of them is configured
+anywhere in this repo. Both are recorded here because the difference between
+them is the difference between an intended path and an open finding, and until
+now the tailnet address appeared only inside the incident write-ups further
+down — which is the wrong place to look it up.
+
+| Address | What it is | Who can reach it |
+|---|---|---|
+| `192.168.1.40` | Reserved LAN address (DHCP reservation in pfSense). Held by the **Wi-Fi** adapter, not the wired one. | The LAN. This is `gpu_host_ip`, and it is the address every configured path uses. |
+| `100.107.5.66` | Its Tailscale address. Nothing in this repo configures it. | **All 8 tailnet peers.** |
+
+**Neither Ollama nor ComfyUI has any authentication, and both answer on the
+tailnet address as well as the LAN one.** That is not a design decision — it is
+the unresolved finding recorded in [§4](#4-open-the-firewall-narrowly) below,
+where a fix was applied on 2026-08-12 and measured *not to have worked* on
+2026-08-13. Treat `100.107.5.66:11434` and `100.107.5.66:8188` as reachable by
+every peer until a tailnet ACL says otherwise.
+
+Two consequences that are easy to get wrong:
+
+- **`comfyui.fortwow.dev` does not change this.** That vhost (added 2026-08-27)
+  puts Authelia in front of the *hostname*; Caddy never gates the port. Both
+  `192.168.1.40:8188` and `100.107.5.66:8188` stay open exactly as before. The
+  vhost is a convenience, not a control.
+- **A tailnet-address test is the only one that proves scoping.** Testing from
+  the LAN cannot distinguish a correctly scoped firewall rule from a broken
+  one, because the LAN is allowed either way. `docs/gpu-host.md`'s own
+  measurements were taken from `brandons-macbook-pro` (`100.110.75.114`) for
+  this reason — and note that `tailscale status` may report the path to TERRA
+  as `direct 192.168.1.40:41641` while the test is still genuinely exercising
+  the tailnet, because Windows Firewall evaluates the decapsulated packet.
+
 `gpu_host_online: false` is the default and is the state to leave it in until
 the PC actually exists and answers. While it is false, Open WebUI deploys with
 `ENABLE_OLLAMA_API` switched off, so the chat UI offers no models rather than
