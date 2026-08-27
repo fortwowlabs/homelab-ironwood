@@ -698,6 +698,34 @@ caddy_services:
   # /api/ surface Continue-style clients use would not survive a redirect to
   # the portal either.
   chat:        { backend: "{{ hostvars[infra_host].ansible_host }}:3007", group: Infra, icon: open-webui }
+  # ComfyUI on the GPU host — the ONLY entry here whose backend is not a
+  # service VM. Three things follow from that, and none of them are true of
+  # anything else in this list:
+  #
+  # 1. It has NO authentication of its own, so `comfyui` belongs in
+  #    sso_protected_services and this vhost is meaningless without it. The
+  #    direct http://{{ gpu_host_ip }}:8188 remains open on the LAN either
+  #    way — Caddy gates the hostname, never the port (docs/services.md).
+  # 2. TERRA is a desktop that gets rebooted, gamed on and switched off, so
+  #    this vhost 502s whenever it is away. That is not a fault to chase; it
+  #    is what publishing a workstation looks like. `make verify` smoke-tests
+  #    Caddy backends, so expect this one to be the flaky line.
+  # 3. It is reachable today by all 8 tailnet peers, unauthenticated — an
+  #    OPEN finding in docs/gpu-host.md whose attempted fix was measured not
+  #    to work on 2026-08-13. This vhost does not widen that (Caddy adds a
+  #    gated path, not an ungated one), but it does not close it either, and
+  #    the tailnet ACL recommended there is still the fix.
+  #
+  # Video generation does not go through here at all — H3 is driven from
+  # ComfyUI's own UI (docs/superpowers/specs/2026-08-27-video-generation-design.md);
+  # this vhost only saves typing the IP.
+  #
+  # ComfyUI's UI is WebSocket-driven (queue progress, previews) and that
+  # upgrade now traverses forward_auth. It carries the same session cookie as
+  # the page that opened it, so it should pass — but a UI that loads and then
+  # never updates its progress bar is the symptom if it does not, and the
+  # direct IP:port is the comparison that tells the two apart.
+  comfyui:     { backend: "{{ gpu_host_ip }}:8188",    group: Infra, icon: comfyui }
   # WebSocket live-sync (/notifications/hub) rides the same port as the web
   # UI (see the vaultwarden catalog comment in infra-apps.yml) and Caddy's
   # reverse_proxy passes Upgrade/Connection through automatically — no
@@ -793,3 +821,15 @@ sso_protected_services:
   # (SEARXNG_QUERY_URL in infra-apps.yml), not the proxied hostname, so this
   # gates browser use without touching the machine-to-machine path.
   - searxng
+  # ComfyUI has no login of its own — same category as prometheus and
+  # syncthing above, and the reason its vhost exists at all. An unprotected
+  # comfyui vhost would publish an unauthenticated remote-execution surface
+  # (it loads arbitrary workflow graphs and writes files) under a friendly
+  # hostname, which is strictly worse than the status quo of having to know
+  # the IP. If this name is ever removed from this list, remove the vhost in
+  # the same commit.
+  #
+  # Open WebUI's in-chat image generation is unaffected: it dials the GPU
+  # host's IP:port directly (comfyui_base_url in images.yml), never the
+  # proxied hostname — the same machine-to-machine carve-out searxng gets.
+  - comfyui
