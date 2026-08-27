@@ -8,9 +8,8 @@ mechanism — this is a small, cheap extension of the pipeline that already
 works; video is a new subsystem with its own runtime and VRAM question. They
 were splitting apart in every way that matters except which file they lived
 in, which made this page harder to find than it should have been. Video
-generation now has its own design effort — see
-`docs/superpowers/specs/2026-08-27-video-generation-design.md` once it lands,
-or the `docs/video-generation-design` branch in the meantime.
+generation now has its own design effort, implemented — see
+`docs/superpowers/specs/2026-08-27-video-generation-design.md`.
 
 ## What actually changed since this was requested
 
@@ -69,5 +68,7 @@ Nobody has yet:
 
 Read the `IMAGES_EDIT_COMFYUI_*` code path and confirm the claim above before
 sourcing any checkpoint — if editing turns out to need its own mechanism
-after all, that changes the cost estimate that makes this worth doing before
-video.
+after all, that changes the cost estimate for this work. (Video generation
+shipped 2026-08-27 — see
+`docs/superpowers/specs/2026-08-27-video-generation-design.md` — so it is no
+longer the comparison point for sequencing this.)

@@ -282,17 +282,18 @@ added to a pipeline that had never worked.** That pipeline was fixed
 2026-08-20 — see `docs/superpowers/specs/2026-08-14-comfyui-image-generation-design.md`
 — so both are now unblocked. On 2026-08-27 they were split into their own
 pages, because past that shared blocker they have nothing in common: one is
-a small extension of the mechanism that already works, the other is a new
-subsystem with an unverified model, a real VRAM question, and no runtime
-decision made.
+a small extension of the mechanism that already works, the other was a new
+subsystem with its own model, its own runtime question, its own VRAM
+measurement.
 
 - **Qwen Image Edit** — `docs/plans/image-editing.md`. Cheap, reuses the
   existing catalog/validator/push-tool/check pattern.
-- **MiniMax H3 video generation** — `docs/superpowers/specs/2026-08-27-video-generation-design.md`
-  (in progress on the `docs/video-generation-design` branch). Its own
-  runtime, its own VRAM measurement, and — found during that design work,
-  not anticipated here — a license territory restriction that needs
-  resolving before anything else about it matters.
+- **MiniMax H3 video generation** — `docs/superpowers/specs/2026-08-27-video-generation-design.md`,
+  implemented 2026-08-27. Its model is hash-verified, its VRAM footprint is
+  measured and fits, and its runtime is decided — driven directly from
+  ComfyUI, not Open WebUI. The license territory restriction found during
+  that design work is resolved: the operator confirmed 2026-08-27 that this
+  estate is outside the excluded territories (EU/UK/US/South Korea).
 
 ## Not investigated
 

@@ -299,6 +299,17 @@ confirmed this). It is driven straight from ComfyUI's own web UI at
 target. Full design:
 `docs/superpowers/specs/2026-08-27-video-generation-design.md`.
 
+The three H3 templates (T2V, I2V, R2V) come from ComfyUI's Template Library
+on demand rather than shipping with the portable install, so the machine
+needs network access the first time that library is opened. **Be plain about
+a second gap too: the measurements below were not taken through the GUI.**
+They were taken by submitting API-format graphs derived from the official
+templates directly to `/prompt`, because the templates ship in editor format
+and the T2V/I2V ones wrap their graph in a subgraph that `/prompt` cannot
+accept as-is. The GUI path described above — opening the Template Library,
+pointing its dropdowns at the files below, and queuing from the web UI — is
+the intended way to drive H3, but it is documented, not verified.
+
 **Requires ComfyUI ≥ 0.30.0.** This host measured **0.31.0**, which clears
 the floor. All four native H3 node classes ship with that build and needed no
 custom-node install: `EmptyMiniMaxH3LatentAV`, `MiniMaxH3ImageToVideo`,
@@ -310,7 +321,14 @@ hosted cloud API, not the local weights below. Do not confuse them.)
 
 All five come from `Comfy-Org/MiniMax-H3` on Hugging Face — the
 ComfyUI-packaged form, not the raw Diffusers release — at the pruned-int8
-tier, the only tier with any chance of fitting a 24 GB card. **Verified on
+tier, one of the two smallest tiers on offer. The non-pruned int8 diffusion
+model (31.7 GiB) and bf16 (61.7 GiB) are the ones that clearly cannot fit a
+24 GB card; pruned-int8 was chosen over them, not because it was the only
+candidate that could fit. A pruned-fp8-scaled tier
+(`minimax_h3_fl2va_pruned_fp8_scaled.safetensors`, 20,958,205,608 bytes — 12
+MB smaller than the pruned-int8 file used here) also exists in the same repo
+and was **not** evaluated; nothing here claims pruned-int8 is the smallest or
+best-fitting option, only that it is a verified-working one. **Verified on
 both byte count and SHA256** against the repo's own `lfs.sha256`, the same
 discipline the Pony checksum above exists to enforce: byte count alone would
 not have caught a complete-but-corrupted transfer.
@@ -379,11 +397,15 @@ stopping it before generating — `ollama ps` had nothing resident from the
 start of this work, so nothing needed to be manually stopped this time, but
 the requirement stands for any future run that follows a chat session.
 
-| Mode | Checkpoint | Wall clock | Output |
+| Mode | Checkpoint | Execution time¹ | Output |
 |---|---|---|---|
-| T2V | `fl2va` | 392 s | 387,730 bytes (0.37 MB) |
-| I2V | `fl2va` | 420 s | 2,365,000 bytes (2.26 MB) |
-| R2V | `ref2va` | 844 s | 2,204,062 bytes (2.10 MB) |
+| T2V | `fl2va` | 386.2 s | 387,730 bytes (0.37 MB) |
+| I2V | `fl2va` | 418.7 s | 2,365,000 bytes (2.26 MB) |
+| R2V | `ref2va` | 455.4 s | 2,204,062 bytes (2.10 MB) |
+
+¹ ComfyUI's own `/history` execution timestamps (`execution_start` to
+`execution_success`), excluding time spent waiting in the queue — see the
+trap recorded just below the table.
 
 All three: 1344×768, 5.17 s (124 frames @ 24 fps), H.264 video + AAC audio, 20
 sampling steps, turbo LoRA off. The output-size spread is not a broken
@@ -392,10 +414,24 @@ H.264 than I2V/R2V's more detailed ones. Each `.mp4` was confirmed by parsing
 its container atoms directly (duration, dimensions, and both a video and an
 audio track present), not by file size alone.
 
-**R2V is the tight one: only ~1.5 GiB of headroom** (23042 of 24564 MiB, from
-the table above). Reference-image
-conditioning rides through every sampling step, which is both why R2V takes
-roughly twice as long as T2V/I2V and why its peak runs ~1.2 GB higher.
+**The first pass at this table timed submission-to-completion, and that made
+R2V look twice as slow as it actually is.** R2V was queued behind I2V —
+ComfyUI serialises the queue rather than running two prompts at once — so its
+submission-to-completion figure (844 s) silently included ~389 s spent
+waiting for I2V to finish on the same GPU. `/history`'s own timestamps expose
+this: R2V's `execution_start` landed 277 ms after I2V's `execution_success`,
+which is proof of queue delay, not slow execution. The execution-time figures
+in the table above are the ones worth planning against; a submission-to-completion
+timing is only honest when nothing else is queued ahead of the job being
+timed, and that should have been checked the first time rather than assumed.
+
+**R2V is the tight one on VRAM: only ~1.5 GiB of headroom** (23042 of 24564
+MiB, from the earlier table, ~1.2 GB higher than T2V/I2V's 21826 MiB peak).
+On execution time it is unremarkable — about 9% slower than I2V, not the
+"roughly twice as long" the polluted wall-clock number first suggested.
+Upstream's account (the node's own tooltip) attributes the extra VRAM to
+reference-image conditioning riding through every sampling step; that is
+upstream's explanation of the mechanism, not something measured here.
 Anything else holding VRAM at generation time — a game, a second ComfyUI
 model, even a heavier desktop session than the one this was measured
 against — plausibly OOMs R2V where T2V/I2V would still fit.

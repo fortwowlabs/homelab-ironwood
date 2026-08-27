@@ -59,7 +59,7 @@ On the GPU host itself (PowerShell):
 Get-PSDrive C | Select-Object Used,Free
 ```
 
-Expected: at least 60 GB free (the five weight files total ~42 GB; leave real headroom, not a razor margin — `docs/gpu-host.md` already treats this as the first check before any large pull for exactly this reason).
+Expected: at least 80 GB free (the five weight files total 63.44 GB decimal / 59.1 GiB — matching the design's own ~59 GB table; leave real headroom, not a razor margin — `docs/gpu-host.md` already treats this as the first check before any large pull for exactly this reason).
 
 ---
 

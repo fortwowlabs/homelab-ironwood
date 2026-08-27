@@ -1,6 +1,7 @@
 # MiniMax H3 video generation — design
 
-**Status: approved, not yet implemented.** Split out of
+**Status: implemented, 2026-08-27.** See the MiniMax H3 section of
+`docs/gpu-host.md` for what was actually measured. Split out of
 `docs/plans/uncensored-image-generation.md` on 2026-08-27 as its own design
 effort, separate from Qwen Image Edit (`docs/plans/image-editing.md`) —
 past their shared blocker (in-chat image generation not working, fixed
@@ -62,10 +63,14 @@ From `Comfy-Org/MiniMax-H3` on Hugging Face — the ComfyUI-packaged form,
 **not** `MiniMaxAI/MiniMax-H3` (that is the raw Diffusers-format release and
 is not what ComfyUI's native nodes load).
 
-All at the **pruned-int8** tier. This is not a quality choice — it is the
-only tier that has any chance of fitting a 24GB card at all. The non-pruned
-int8 diffusion model alone is 31.7 GB and bf16 is 61.7 GB; both exceed the
-card before a text encoder or VAE is even loaded.
+All at the **pruned-int8** tier. This is not a quality choice — pruned-int8
+is one of the two smallest tiers on offer, not the only one with any chance
+of fitting. The non-pruned int8 diffusion model alone is 31.7 GB and bf16 is
+61.7 GB; both clearly exceed the card before a text encoder or VAE is even
+loaded. A pruned-fp8-scaled tier
+(`minimax_h3_fl2va_pruned_fp8_scaled.safetensors`, 20,958,205,608 bytes — 12
+MB smaller than the pruned-int8 file chosen here) also exists in the same
+repo and was **not** evaluated.
 
 | File | Size | Destination |
 |---|---|---|
@@ -173,11 +178,21 @@ For each of T2V, I2V, R2V — generate one real clip and confirm, not assume:
 
 ## Open risks, recorded rather than resolved
 
-- **Real VRAM footprint is unmeasured.** See "VRAM strategy" above.
-- **System RAM is unverified** against the 32–64 GB third-party guidance.
-- **Whether `Comfy-Org/MiniMax-H3` is a gated HF repo is unconfirmed.**
-- **The NVFP4 text encoder's "works on any GPU" claim is third-party marketing,
-  unverified against this card.**
+- **VRAM footprint: fits.** Measured 2026-08-27 against a 2876 MiB idle
+  baseline (a live desktop session, VS Code/Steam/NVIDIA overlay/Explorer all
+  resident): peak 21826 MiB for T2V, ~21615 MiB for I2V, 23042 MiB for R2V —
+  all under the 24564 MiB card, with R2V the tightest at only ~1.5 GiB of
+  headroom. See the MiniMax H3 section of `docs/gpu-host.md`.
+- **System RAM: measured, at the low end of guidance.** 31.1 GiB
+  (`Win32_ComputerSystem.TotalPhysicalMemory` = 33,409,974,272 bytes) against
+  third-party guidance of 32–64 GB — at the low end of that range rather than
+  comfortably inside it. Recorded as a live risk, not a resolved one.
+- **`Comfy-Org/MiniMax-H3` is confirmed ungated.** No HF token was needed for
+  any of the five downloads.
+- **The NVFP4 text encoder's "works on any GPU" claim is still unverified
+  against alternatives.** It was never tested against the int8 or bf16 text
+  encoder tiers on this card, so whether NVFP4 specifically was necessary —
+  as opposed to merely sufficient — remains open.
 
 ## Out of scope
 
