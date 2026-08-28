@@ -53,6 +53,37 @@ still has to be explained before merging. Do not paper over a genuine diff by
 running the deploy twice and quoting the second number — check *which* tasks
 changed.
 
+### On TERRA the steps above run in two different places
+
+TERRA, the usual workstation, has **two independent clones**:
+`C:\Users\tv\dev\homelab-ironwood` for editing and `~/dev/homelab-ironwood`
+inside WSL for deploying. They are separate git repositories and they drift —
+check `git log -1` in whichever one you are about to use.
+
+- **Steps 2 and 5** (`make validate`, `git status`) run in either. Validate
+  passes on the Windows clone now that `.gitattributes` pins the working tree
+  to LF; before that it could not pass there at all, because yamllint's
+  `new-lines` rule rejected every YAML file no matter what the change was.
+- **Steps 3 and 6** (`make dl` / `make media` / `make infra`, `make verify`)
+  run **only in the WSL clone**, with `USE_VAULT_FILE=1`. Being inside WSL is
+  not sufficient: Ansible pointed at `/mnt/c` silently ignores `ansible.cfg`,
+  because DrvFs mounts the drive world-writable. It prints one `[WARNING]`,
+  then continues with `config file = None` and collections resolved from
+  `~/.ansible` instead of the repo — a deploy that does not fail but does
+  something other than intended.
+
+`vault.yml` and `.vault_pass` live in the WSL clone, which is the concrete
+form of the vault caveat above.
+
+**Read `docs/deployment.md` → "Deploying from TERRA, via WSL" before running
+anything there.** It also carries the trap that costs the most time: driving
+WSL from Git Bash with `wsl.exe -- bash -c '...'` lets Git Bash expand `$(...)`
+and `$VAR` *before* the string reaches WSL, even inside single quotes, so a
+command that looks like it reports WSL reports the **Windows** checkout
+instead. That has now produced a confidently wrong reading in two separate
+sessions. Put the commands in a script file and run
+`wsl.exe -d Ubuntu-24.04 -- bash /mnt/c/path/to/script.sh`.
+
 ### Step 8 was skipped for the repo's first 75 commits
 
 Twenty-two merged branches accumulated because the workflow had no delete step.
@@ -75,17 +106,30 @@ fires first and most often, and it is still the one to run before committing —
 "CI will catch it" is not a reason to skip it.
 
 **What it adds** is a second opinion from a machine that is not the author's
-workstation, and one check the workstation physically cannot perform:
-`systemd-analyze verify` against the unit files. `tests/validate_systemd_units.py`
-switches from static text matching to real parsing when `systemd-analyze` is on
-PATH, which on macOS it never is — so before this, no systemd had ever parsed a
-unit in this repo. A unit that is syntactically wrong in a way text matching
-cannot see would have deployed and failed on the host.
+workstation. It used to add one check the workstation physically could not
+perform — `systemd-analyze verify` against the unit files, which
+`tests/validate_systemd_units.py` runs in place of static text matching when
+`systemd-analyze` is on PATH. That was written when this repo was developed on
+macOS, where it never is, so no systemd had ever parsed a unit here.
+
+**That is no longer true on TERRA, and the difference is worth knowing.**
+Measured 2026-08-27: WSL carries systemd 255, and the local gate reports
+`OK + systemd-analyze`. So the unit parsing now happens before the merge as
+well as after it. CI's remaining value is the independent machine, not a check
+only it can run — do not reach for CI to cover unit syntax that local validate
+already parsed.
 
 So: a red CI run on `main` means something already merged is broken and needs a
 follow-up commit. Treat it as an alarm, not as a gate — and if it stays red,
 that is the same "nobody looks at it" failure this repo worries about
 everywhere else.
+
+**Checking it needs the `gh` recipe in `docs/deployment.md`, quote-strip and
+all.** The token is in the vault, and the extraction there ends in `tr -d` for
+a reason: without it the value arrives wrapped in its YAML quotes, GitHub
+answers `HTTP 401: Bad credentials`, and `gh` suggests re-authenticating — a
+failure that impersonates an expired PAT and invites rotating a working one.
+40 characters of `ghp_` is intact; 42 means the wrapper came through.
 
 ## Standing rules
 
@@ -190,6 +234,30 @@ functions. Two faults hid behind all-green checks in this repo: a wedged redis
 broker that blocked Django migrations for a day, and a service still accepting
 its upstream default credentials. When a change is supposed to make something
 work, check that specific thing, by using it.
+
+### Measure in a clean order, not a convenient one
+
+A measurement can be wrong without anything failing, and this repo has now been
+bitten twice in two days by the same shape of it: a number taken in whatever
+order was quickest, carrying the previous step's state.
+
+- H3's R2V looked twice as slow as it is, because it was queued behind I2V and
+  the timing ran from submission rather than from ComfyUI's own
+  `execution_start`.
+- Z-Image and SDXL looked like they needed ~21 GiB of VRAM each, because they
+  were measured straight after Flux and `POST /free` returns the model without
+  returning torch's allocator reservation. SDXL's real peak is 7 GiB lower.
+
+Both passed every check, produced plausible numbers, and got written down. The
+tell in each case was an implausible *relationship* — a model half the size
+costing the same, a mode 9% more expensive taking twice as long — not anything
+in the run itself.
+
+So: before recording a number, ask what the previous step left behind. Restart
+the service, drain the queue, or take the figure from the thing's own
+instrumentation rather than from a stopwatch wrapped around it. If that is not
+practical, publish the number with what contaminated it — an honest upper bound
+beats a clean-looking fiction.
 
 ### So does scanning, and it fails the same way
 
