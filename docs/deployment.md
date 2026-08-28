@@ -155,9 +155,20 @@ passwordless sudo is not available there. It authenticates from
 
 ```bash
 export GH_TOKEN=$(.venv/bin/ansible-vault view --vault-password-file .vault_pass \
-    inventory/group_vars/all/vault.yml | grep '^vault_github_token:' | cut -d' ' -f2-)
+    inventory/group_vars/all/vault.yml | grep '^vault_github_token:' \
+    | cut -d' ' -f2- | tr -d "\"' \r")
 ~/.local/bin/gh run list --limit 5
 ```
+
+**The `tr` is not optional, and leaving it off misdiagnoses itself.** The value
+is quoted in the vault, so `cut` hands back the quotes as part of the token: 42
+characters instead of 40. GitHub answers that with `HTTP 401: Bad credentials`
+and `gh` suggests re-authenticating — which reads exactly like an expired token
+and invites replacing a PAT that was never the problem. Measured 2026-08-27:
+the same secret failed with the quotes and returned `HTTP 200` without them.
+
+If it does 401 again, check the length before assuming expiry. A 40-character
+`ghp_…` is a classic PAT and is intact; 42 means the wrapper came through.
 
 CI runs on push to `main`, after the merge rather than before it, so it is an
 alarm and not a gate — but nothing surfaces a red run on its own. Check it after
