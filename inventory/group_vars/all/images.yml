@@ -77,3 +77,47 @@ image_workflow_nodes:
   - type: seed
     key: seed
     node_ids: ["3"]
+
+# --- Editing (IMAGES_EDIT_COMFYUI_*, a separate ImagesConfig subtree from
+# generation's COMFYUI_* above) ---
+#
+# image_edit_enabled DUPLICATES gpu_host_online, same rule and same reason as
+# image_generation_enabled above.
+image_edit_enabled: true
+
+# Which file in inventory/comfyui-edit-workflows/ (NOT comfyui-workflows/ —
+# the edit family is a separate directory because its mapping targets a
+# structurally different graph; see
+# docs/superpowers/specs/2026-08-27-comfyui-image-editing-design.md §4).
+image_edit_workflow: qwen-image-edit
+
+# The UNETLoader filename, as ComfyUI lists it in
+# /object_info/UNETLoader. Verified present on the GPU host in Task 1.
+image_edit_model: "qwen_image_edit_fp8_e4m3fn.safetensors"
+
+# No image_edit_size: leaving IMAGE_EDIT_SIZE unset means Open WebUI never
+# forwards width/height to ComfyUI, which is correct here — the workflow
+# derives output size from the input image via ImageScaleToTotalPixels, not
+# from a fixed target (design §1).
+#
+# No negative_prompt entry below: ComfyUIEditImageForm has no such field, so
+# a negative_prompt-type mapping entry would raise AttributeError inside
+# _apply_workflow_nodes and be swallowed into a silent None (design §1). The
+# fixed negative prompt (" ", Qwen's own documented default) lives baked into
+# node "16" of qwen-image-edit.json instead.
+image_edit_workflow_nodes:
+  - type: model
+    key: unet_name
+    node_ids: ["10"]
+  - type: prompt
+    key: prompt
+    node_ids: ["15"]
+  - type: image
+    key: image
+    node_ids: ["13"]
+  - type: steps
+    key: steps
+    node_ids: ["20"]
+  - type: seed
+    key: seed
+    node_ids: ["20"]
