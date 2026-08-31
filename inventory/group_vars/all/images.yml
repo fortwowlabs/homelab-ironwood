@@ -105,6 +105,21 @@ image_edit_model: "qwen_image_edit_fp8_e4m3fn.safetensors"
 # _apply_workflow_nodes and be swallowed into a silent None (design §1). The
 # fixed negative prompt (" ", Qwen's own documented default) lives baked into
 # node "16" of qwen-image-edit.json instead.
+#
+# No steps entry below either, confirmed by live testing against production
+# (2026-08-31): Open WebUI's public EditImageForm schema has no `steps` field
+# at all (only image, prompt, model, size, n, negative_prompt, background —
+# read from upstream backend/open_webui/routers/images.py), and
+# image_edit_image()'s comfyui-engine branch only ever builds
+# ComfyUIEditImageForm from image/prompt/width/height/n, never steps. So
+# payload.steps is always None going through the real API. Unlike seed,
+# which falls back to a random int in _apply_workflow_nodes when unset, the
+# steps branch writes payload.steps straight into the workflow with no
+# fallback — mapping type: steps here would unconditionally write null into
+# KSampler's steps input, which ComfyUI rejects, surfacing to users as a
+# bare HTTP 400 "Something went wrong :/". The workflow's own hardcoded
+# steps: 50 on node "20" of qwen-image-edit.json stands instead, exactly
+# like width/height already work by not being mapped.
 image_edit_workflow_nodes:
   - type: model
     key: unet_name
@@ -115,9 +130,6 @@ image_edit_workflow_nodes:
   - type: image
     key: image
     node_ids: ["13"]
-  - type: steps
-    key: steps
-    node_ids: ["20"]
   - type: seed
     key: seed
     node_ids: ["20"]

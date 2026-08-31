@@ -51,7 +51,7 @@ REQUIRED_TYPES = {"model", "prompt", "width", "height", "steps", "seed"}
 # width/height are not required (design §1 — ComfyUIEditImageForm forwards
 # them only if IMAGE_EDIT_SIZE is set, and this workflow derives size from
 # the input image instead).
-EDIT_REQUIRED_TYPES = {"model", "prompt", "image", "steps", "seed"}
+EDIT_REQUIRED_TYPES = {"model", "prompt", "image", "seed"}
 
 # negative_prompt has no field on ComfyUIEditImageForm at all (design §1) —
 # unlike generation, where it is merely optional-and-safe, here it is
@@ -145,7 +145,6 @@ def good_edit_catalog() -> dict:
             {"type": "model", "key": "unet_name", "node_ids": ["10"]},
             {"type": "prompt", "key": "prompt", "node_ids": ["15"]},
             {"type": "image", "key": "image", "node_ids": ["13"]},
-            {"type": "steps", "key": "steps", "node_ids": ["20"]},
             {"type": "seed", "key": "seed", "node_ids": ["20"]},
         ],
     }
