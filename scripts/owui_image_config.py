@@ -48,10 +48,12 @@ WORKFLOW_DIR = ROOT / "inventory" / "comfyui-workflows"
 SHOWABLE = {
     "ENABLE_IMAGE_GENERATION", "IMAGE_GENERATION_ENGINE", "IMAGE_GENERATION_MODEL",
     "IMAGE_SIZE", "IMAGE_STEPS", "COMFYUI_BASE_URL", "COMFYUI_WORKFLOW_NODES",
+    "ENABLE_IMAGE_EDIT", "IMAGE_EDIT_ENGINE", "IMAGE_EDIT_MODEL",
+    "IMAGES_EDIT_COMFYUI_BASE_URL", "IMAGES_EDIT_COMFYUI_WORKFLOW_NODES",
 }
 
 
-def managed_keys(catalog: dict, workflow_json: str) -> dict[str, object]:
+def managed_keys(catalog: dict, workflow_json: str, edit_workflow_json: str) -> dict[str, object]:
     """The Open WebUI fields this tool owns. Everything else is passed through
     from the live config untouched."""
     return {
@@ -63,6 +65,12 @@ def managed_keys(catalog: dict, workflow_json: str) -> dict[str, object]:
         "COMFYUI_BASE_URL": catalog["comfyui_base_url"],
         "COMFYUI_WORKFLOW": workflow_json,
         "COMFYUI_WORKFLOW_NODES": catalog["image_workflow_nodes"],
+        "ENABLE_IMAGE_EDIT": bool(catalog["image_edit_enabled"]),
+        "IMAGE_EDIT_ENGINE": "comfyui",
+        "IMAGE_EDIT_MODEL": catalog["image_edit_model"],
+        "IMAGES_EDIT_COMFYUI_BASE_URL": catalog["comfyui_base_url"],
+        "IMAGES_EDIT_COMFYUI_WORKFLOW": edit_workflow_json,
+        "IMAGES_EDIT_COMFYUI_WORKFLOW_NODES": catalog["image_edit_workflow_nodes"],
     }
 
 
@@ -127,7 +135,11 @@ def main() -> int:
         workflow_path = WORKFLOW_DIR / f"{catalog['image_workflow']}.json"
         workflow = json.loads(workflow_path.read_text())
         workflow_json = json.dumps(workflow)
-        desired = managed_keys(catalog, workflow_json)
+        edit_workflow_path = (ROOT / "inventory" / "comfyui-edit-workflows"
+                              / f"{catalog['image_edit_workflow']}.json")
+        edit_workflow = json.loads(edit_workflow_path.read_text())
+        edit_workflow_json = json.dumps(edit_workflow)
+        desired = managed_keys(catalog, workflow_json, edit_workflow_json)
     except (OSError, KeyError, ValueError, yaml.YAMLError) as error:
         print(f"catalog or workflow is unusable: {error}", file=sys.stderr)
         return 3
