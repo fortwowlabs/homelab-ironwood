@@ -103,3 +103,12 @@ onfailure_units_extra:
   # routine on a desktop that is off most nights, and paging on it nightly is
   # exactly the noise CLAUDE.md's Calibre-Web note warns about.
   - homelab-image-gen@.service
+  # Same reasoning as the image generation check above: scripts/image_edit_check.py
+  # publishes no verdict of its own anywhere either -- metrics via
+  # homelab-metric-write, no ntfy message -- so this drop-in is its only alert
+  # path, not a second one covering a gap. It pages on exit 1 (`broken`) and on
+  # the check failing to run at all. It does NOT page on exit 2
+  # (`inconclusive`), which homelab-image-edit@.service's own
+  # SuccessExitStatus=2 deliberately keeps out of `failed`, for the same
+  # "GPU host asleep is routine, don't page on it" reason.
+  - homelab-image-edit@.service
