@@ -72,10 +72,11 @@ def probe(base_url: str, token: str, catalog: dict,
 
     try:
         result = api_post(base_url, "/api/v1/images/edit", token, payload, timeout)
-    except urllib.error.HTTPError as error:
-        if error.code == 403:
-            return "inconclusive", {}
-        return "broken", {"homelab_image_edit_ok": 0.0}
+    except urllib.error.HTTPError:
+        # No documented status code here means "the edit mapping is
+        # specifically broken" the way generation's 400 does, so default
+        # conservatively: any HTTP error is could-not-look, not "broken".
+        return "inconclusive", {}
     except (urllib.error.URLError, OSError, ValueError):
         return "inconclusive", {}
 
@@ -109,12 +110,16 @@ def probe(base_url: str, token: str, catalog: dict,
 
     # The direct proof: read ComfyUI's own history for the most recent
     # prompt and confirm OUR checkpoint executed, not merely that an image
-    # of some size came back. Best-effort -- history is in-memory and reused
-    # across requests, so failing to confirm degrades to a weaker check
-    # rather than a hard failure.
+    # of some size came back. This is the PRIMARY proof mechanism for
+    # editing -- there's no dimension-based fallback the way generation has
+    # (that check asserts an exact 1024x1024 output; this workflow's output
+    # size is derived from the input image, so a size match here would prove
+    # nothing). So failing to confirm is treated as could-not-look, not as
+    # success: anything short of a confirmed True downgrades the verdict to
+    # inconclusive rather than falling through to ok.
     try:
-        history = api_get(base_url.replace("192.168.1.32:3007", "192.168.1.40:8188"),
-                          "/history", token="", timeout=timeout)
+        history = api_get(catalog["comfyui_base_url"], "/history", token="",
+                          timeout=timeout)
     except Exception:
         history = None
     ran_expected_model = None
@@ -136,6 +141,14 @@ def probe(base_url: str, token: str, catalog: dict,
               file=sys.stderr)
         metrics["homelab_image_edit_ok"] = 0.0
         return "broken", metrics
+
+    if ran_expected_model is None:
+        print("INCONCLUSIVE: could not confirm from ComfyUI's history that "
+              f"our checkpoint ({expected_model!r}) executed -- the history "
+              "fetch failed, came back empty, or had no UNETLoader node in "
+              "the latest prompt graph. An image did come back, but that is "
+              "not proof our mapping produced it.", file=sys.stderr)
+        return "inconclusive", {}
 
     metrics["homelab_image_edit_ok"] = 1.0
     print(f"image edit OK: {width}x{height} PNG, {len(data)} bytes, "
