@@ -286,6 +286,47 @@ def _edit_empty_model(catalog, workflows, edit_workflows, main_vars):
     catalog["image_edit_model"] = ""
 
 
+def _edit_drift_enabled(catalog, workflows, edit_workflows, main_vars):
+    main_vars["gpu_host_online"] = False
+
+
+def _edit_drop_output_node(catalog, workflows, edit_workflows, main_vars):
+    del edit_workflows["qwen-image-edit"]["22"]
+
+
+def _edit_editor_format(catalog, workflows, edit_workflows, main_vars):
+    edit_workflows["qwen-image-edit"] = {"nodes": [{"id": 10}], "links": []}
+
+
+def _edit_missing_workflow_file(catalog, workflows, edit_workflows, main_vars):
+    catalog["image_edit_workflow"] = "nonexistent"
+
+
+def _edit_unknown_node_type(catalog, workflows, edit_workflows, main_vars):
+    catalog["image_edit_workflow_nodes"][0]["type"] = "checkpoint"
+
+
+def _edit_model_node_without_key(catalog, workflows, edit_workflows, main_vars):
+    del catalog["image_edit_workflow_nodes"][0]["key"]
+
+
+def _edit_unknown_class_type(catalog, workflows, edit_workflows, main_vars):
+    edit_workflows["qwen-image-edit"]["10"]["class_type"] = "SomeCustomLoader"
+
+
+def _edit_key_not_accepted_by_class(catalog, workflows, edit_workflows, main_vars):
+    # ckpt_name is right for CheckpointLoaderSimple and wrong for UNETLoader.
+    # Node "10" exists, so the ID-based rule passes and the value is simply
+    # ignored at edit time.
+    catalog["image_edit_workflow_nodes"][0]["key"] = "ckpt_name"
+
+
+def _edit_empty_node_ids(catalog, workflows, edit_workflows, main_vars):
+    # The image mapping is present -- EDIT_REQUIRED_TYPES is happy -- but its
+    # node_ids is empty, so the value never reaches ComfyUI.
+    catalog["image_edit_workflow_nodes"][2]["node_ids"] = []
+
+
 # Each case is (name, mutation, substring that must appear in a failure).
 # A mutation takes (catalog, workflows, edit_workflows, main_vars) and breaks
 # exactly one rule in check_edit_config.
@@ -296,6 +337,21 @@ EDIT_VALIDATION_CASES = (
     ("mapped node absent from a non-selected edit workflow",
      _edit_node_id_absent_from_edit_workflow, "other"),
     ("empty image_edit_model", _edit_empty_model, "image_edit_model"),
+    ("image_edit_enabled disagrees with gpu_host_online", _edit_drift_enabled,
+     "gpu_host_online"),
+    ("edit workflow with no SaveImage/PreviewImage", _edit_drop_output_node,
+     "SaveImage"),
+    ("editor-format edit workflow", _edit_editor_format, "editor format"),
+    ("image_edit_workflow names a missing file", _edit_missing_workflow_file,
+     "nonexistent"),
+    ("unrecognised edit node type", _edit_unknown_node_type, "checkpoint"),
+    ("edit model node without an explicit key", _edit_model_node_without_key,
+     "explicit key"),
+    ("edit workflow node of an unknown class", _edit_unknown_class_type,
+     "SomeCustomLoader"),
+    ("mapped key the edit node class does not accept",
+     _edit_key_not_accepted_by_class, "ckpt_name"),
+    ("empty node_ids on an edit mapping entry", _edit_empty_node_ids, "node_ids"),
 )
 
 
@@ -325,7 +381,8 @@ def validation_self_check() -> list[str]:
             )
 
     edit_baseline = check_edit_config(
-        good_edit_catalog(), {"qwen-image-edit": good_edit_workflow()})
+        good_edit_catalog(), {"qwen-image-edit": good_edit_workflow()},
+        good_main_vars())
     if edit_baseline:
         problems.append(
             f"the known-good EDIT configuration failed: {edit_baseline} — every "
@@ -339,7 +396,7 @@ def validation_self_check() -> list[str]:
         edit_workflows = {"qwen-image-edit": good_edit_workflow()}
         main_vars = good_main_vars()
         mutate(catalog, workflows, edit_workflows, main_vars)
-        failures = check_edit_config(catalog, edit_workflows)
+        failures = check_edit_config(catalog, edit_workflows, main_vars)
         if not any(expected in f for f in failures):
             problems.append(
                 f"edit case {name!r} did not produce a failure mentioning "
@@ -510,7 +567,8 @@ def check_config(catalog: dict, workflows: dict[str, dict],
     return failures
 
 
-def check_edit_config(catalog: dict, edit_workflows: dict[str, dict]) -> list[str]:
+def check_edit_config(catalog: dict, edit_workflows: dict[str, dict],
+                       main_vars: dict) -> list[str]:
     """Return human-readable failures for the EDIT mapping. Empty means sound."""
     failures: list[str] = []
 
@@ -519,6 +577,19 @@ def check_edit_config(catalog: dict, edit_workflows: dict[str, dict]) -> list[st
         failures.append(
             f"image_edit_workflow is {selected!r} but no such file exists in "
             f"inventory/comfyui-edit-workflows/ (have: {sorted(edit_workflows)})"
+        )
+
+    # Mirrors check_config's image_generation_enabled vs gpu_host_online
+    # check. image_edit_enabled DUPLICATES gpu_host_online for the same
+    # reason (design §1 / images.yml comment): the push retired the
+    # environment gate, so this catalog field is the only thing left that
+    # can still turn the edit feature off.
+    if bool(catalog.get("image_edit_enabled")) != bool(
+            main_vars.get("gpu_host_online")):
+        failures.append(
+            "image_edit_enabled disagrees with gpu_host_online in "
+            "main.yml — since the push retired the environment gate, this "
+            "catalog is the only thing that still turns the edit feature off"
         )
 
     for name, workflow in sorted(edit_workflows.items()):
@@ -644,7 +715,7 @@ def main() -> int:
         print(f"no edit workflows found in {EDIT_WORKFLOW_DIR}", file=sys.stderr)
         return 1
     failures.extend(check_config(catalog, workflows, main_vars))
-    failures.extend(check_edit_config(catalog, edit_workflows))
+    failures.extend(check_edit_config(catalog, edit_workflows, main_vars))
 
     if failures:
         for failure in failures:
