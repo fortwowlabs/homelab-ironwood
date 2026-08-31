@@ -31,6 +31,7 @@ ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "inventory" / "group_vars" / "all" / "images.yml"
 MAIN_VARS_PATH = ROOT / "inventory" / "group_vars" / "all" / "main.yml"
 WORKFLOW_DIR = ROOT / "inventory" / "comfyui-workflows"
+EDIT_WORKFLOW_DIR = ROOT / "inventory" / "comfyui-edit-workflows"
 
 # Node types Open WebUI's _apply_workflow_nodes actually branches on. A type
 # outside this set falls through every branch and is skipped in silence.
@@ -45,6 +46,18 @@ NEEDS_EXPLICIT_KEY = {"model", "seed", "image"}
 
 # Mapping entries a generation config cannot work without.
 REQUIRED_TYPES = {"model", "prompt", "width", "height", "steps", "seed"}
+
+# Mapping entries an edit config cannot work without. Unlike generation,
+# width/height are not required (design §1 — ComfyUIEditImageForm forwards
+# them only if IMAGE_EDIT_SIZE is set, and this workflow derives size from
+# the input image instead).
+EDIT_REQUIRED_TYPES = {"model", "prompt", "image", "steps", "seed"}
+
+# negative_prompt has no field on ComfyUIEditImageForm at all (design §1) —
+# unlike generation, where it is merely optional-and-safe, here it is
+# actively wrong: _apply_workflow_nodes would raise AttributeError on
+# payload.negative_prompt, swallowed into a silent None by comfyui_edit_image.
+EDIT_FORBIDDEN_TYPES = {"negative_prompt"}
 
 # ComfyUI collects output images only from these two class_types
 # (_ws_get_images). A workflow ending in neither returns an empty image list:
@@ -66,6 +79,20 @@ CLASS_INPUTS = {
     "SaveImage": {"filename_prefix", "images"},
     "PreviewImage": {"images"},
     "ConditioningConcat": {"conditioning_to", "conditioning_from"},
+    "UNETLoader": {"unet_name", "weight_dtype"},
+    "CLIPLoader": {"clip_name", "type", "device"},
+    "VAELoader": {"vae_name"},
+    "LoadImage": {"image"},
+    "TextEncodeQwenImageEdit": {"clip", "vae", "image", "prompt"},
+    "ModelSamplingAuraFlow": {"model", "shift"},
+    "CFGNorm": {"model", "strength"},
+    # resolution_steps is a required input on the live host (Task 2's
+    # /object_info query), not just the three the design's provisional
+    # table assumed — omitted here it would reject any mapping entry that
+    # legitimately targets it.
+    "ImageScaleToTotalPixels": {"image", "upscale_method", "megapixels",
+                                 "resolution_steps"},
+    "VAEEncode": {"pixels", "vae"},
 }
 
 
@@ -107,6 +134,35 @@ def good_workflow() -> dict:
 
 def good_main_vars() -> dict:
     return {"gpu_host_ip": "192.168.1.40", "gpu_host_online": True}
+
+
+def good_edit_catalog() -> dict:
+    return {
+        "image_edit_workflow": "qwen-image-edit",
+        "image_edit_enabled": True,
+        "image_edit_model": "qwen_image_edit_fp8_e4m3fn.safetensors",
+        "image_edit_workflow_nodes": [
+            {"type": "model", "key": "unet_name", "node_ids": ["10"]},
+            {"type": "prompt", "key": "prompt", "node_ids": ["15"]},
+            {"type": "image", "key": "image", "node_ids": ["13"]},
+            {"type": "steps", "key": "steps", "node_ids": ["20"]},
+            {"type": "seed", "key": "seed", "node_ids": ["20"]},
+        ],
+    }
+
+
+def good_edit_workflow() -> dict:
+    return {
+        "10": {"class_type": "UNETLoader",
+               "inputs": {"unet_name": "qwen_image_edit_fp8_e4m3fn.safetensors"}},
+        "13": {"class_type": "LoadImage", "inputs": {"image": "example.png"}},
+        "15": {"class_type": "TextEncodeQwenImageEdit",
+               "inputs": {"clip": None, "vae": None, "image": None, "prompt": ""}},
+        "20": {"class_type": "KSampler",
+               "inputs": {"seed": 0, "steps": 50, "cfg": 4.0}},
+        "22": {"class_type": "SaveImage",
+               "inputs": {"filename_prefix": "x", "images": None}},
+    }
 
 
 def _drop_output_node(catalog, workflows, main_vars):
@@ -210,6 +266,39 @@ VALIDATION_CASES = (
 )
 
 
+def _edit_negative_prompt_forbidden(catalog, workflows, edit_workflows, main_vars):
+    catalog["image_edit_workflow_nodes"].append(
+        {"type": "negative_prompt", "key": "text", "node_ids": ["15"]})
+
+
+def _edit_missing_image_type(catalog, workflows, edit_workflows, main_vars):
+    catalog["image_edit_workflow_nodes"] = [
+        n for n in catalog["image_edit_workflow_nodes"] if n["type"] != "image"]
+
+
+def _edit_node_id_absent_from_edit_workflow(catalog, workflows, edit_workflows, main_vars):
+    other = good_edit_workflow()
+    del other["13"]
+    edit_workflows["other"] = other
+
+
+def _edit_empty_model(catalog, workflows, edit_workflows, main_vars):
+    catalog["image_edit_model"] = ""
+
+
+# Each case is (name, mutation, substring that must appear in a failure).
+# A mutation takes (catalog, workflows, edit_workflows, main_vars) and breaks
+# exactly one rule in check_edit_config.
+EDIT_VALIDATION_CASES = (
+    ("negative_prompt in edit mapping", _edit_negative_prompt_forbidden,
+     "no field on ComfyUIEditImageForm"),
+    ("edit mapping missing required image type", _edit_missing_image_type, "image"),
+    ("mapped node absent from a non-selected edit workflow",
+     _edit_node_id_absent_from_edit_workflow, "other"),
+    ("empty image_edit_model", _edit_empty_model, "image_edit_model"),
+)
+
+
 def validation_self_check() -> list[str]:
     """Prove each rule still fires. A gate against silent failure is not
     allowed to fail silently itself."""
@@ -233,6 +322,30 @@ def validation_self_check() -> list[str]:
                 f"case {name!r} did not produce a failure mentioning {expected!r} "
                 f"(got {failures}) — this rule is not enforced, so a config "
                 "breaking it would deploy and produce no image and no error"
+            )
+
+    edit_baseline = check_edit_config(
+        good_edit_catalog(), {"qwen-image-edit": good_edit_workflow()})
+    if edit_baseline:
+        problems.append(
+            f"the known-good EDIT configuration failed: {edit_baseline} — every "
+            "edit case below is measured against it, so the whole edit gate is "
+            "untrustworthy"
+        )
+
+    for name, mutate, expected in EDIT_VALIDATION_CASES:
+        catalog = good_edit_catalog()
+        workflows = {"sdxl": good_workflow()}
+        edit_workflows = {"qwen-image-edit": good_edit_workflow()}
+        main_vars = good_main_vars()
+        mutate(catalog, workflows, edit_workflows, main_vars)
+        failures = check_edit_config(catalog, edit_workflows)
+        if not any(expected in f for f in failures):
+            problems.append(
+                f"edit case {name!r} did not produce a failure mentioning "
+                f"{expected!r} (got {failures}) — this rule is not enforced, so "
+                "a config breaking it would deploy and produce no image and no "
+                "error"
             )
     return problems
 
@@ -397,7 +510,116 @@ def check_config(catalog: dict, workflows: dict[str, dict],
     return failures
 
 
-def load_all(root: Path) -> tuple[dict, dict[str, dict], dict]:
+def check_edit_config(catalog: dict, edit_workflows: dict[str, dict]) -> list[str]:
+    """Return human-readable failures for the EDIT mapping. Empty means sound."""
+    failures: list[str] = []
+
+    selected = catalog.get("image_edit_workflow")
+    if selected not in edit_workflows:
+        failures.append(
+            f"image_edit_workflow is {selected!r} but no such file exists in "
+            f"inventory/comfyui-edit-workflows/ (have: {sorted(edit_workflows)})"
+        )
+
+    for name, workflow in sorted(edit_workflows.items()):
+        if not isinstance(workflow, dict):
+            failures.append(f"edit workflow {name!r} is not a JSON object")
+            continue
+        if isinstance(workflow.get("nodes"), list):
+            failures.append(
+                f"edit workflow {name!r} looks like ComfyUI's editor format. "
+                "Open WebUI can only read the API format — re-export with "
+                "Workflow -> Export (API), or hand-flatten as this repo does"
+            )
+            continue
+        bad = [nid for nid, node in workflow.items()
+               if not isinstance(node, dict) or "class_type" not in node
+               or "inputs" not in node]
+        if bad:
+            failures.append(
+                f"edit workflow {name!r} nodes {sorted(bad)} lack "
+                "class_type/inputs — not valid API format"
+            )
+            continue
+        classes = {node["class_type"] for node in workflow.values()}
+        if not (classes & OUTPUT_CLASSES):
+            failures.append(
+                f"edit workflow {name!r} contains no SaveImage or "
+                "PreviewImage node — _ws_get_images would return no images"
+            )
+
+    nodes = catalog.get("image_edit_workflow_nodes") or []
+    if not isinstance(nodes, list):
+        failures.append("image_edit_workflow_nodes must be a list")
+        return failures
+
+    seen_types: set[str] = set()
+    for index, node in enumerate(nodes):
+        node_type = node.get("type")
+        where = f"image_edit_workflow_nodes[{index}] (type={node_type!r})"
+        seen_types.add(node_type)
+
+        if node_type is not None and node_type not in HANDLED_TYPES:
+            failures.append(
+                f"{where} is not a type Open WebUI handles"
+            )
+        if node_type in EDIT_FORBIDDEN_TYPES:
+            failures.append(
+                f"{where} has no field on ComfyUIEditImageForm. "
+                "_apply_workflow_nodes would raise AttributeError, swallowed "
+                "by comfyui_edit_image into a silent None — no image, no error"
+            )
+        if node_type in NEEDS_EXPLICIT_KEY and "key" not in node:
+            failures.append(f"{where} needs an explicit key")
+
+        node_ids = node.get("node_ids")
+        if (not isinstance(node_ids, list) or not node_ids
+                or not all(isinstance(nid, str) for nid in node_ids)):
+            failures.append(
+                f"{where} has node_ids {node_ids!r}; it must be a non-empty "
+                "list of strings"
+            )
+            continue
+
+        for node_id in node_ids:
+            for name, workflow in sorted(edit_workflows.items()):
+                if isinstance(workflow.get("nodes"), list):
+                    continue
+                if node_id not in workflow:
+                    failures.append(
+                        f"{where} maps node id {node_id!r}, absent from edit "
+                        f"workflow {name!r}. The mapping is shared across "
+                        "every committed EDIT workflow so switching "
+                        "image_edit_workflow can never discover a broken mapping"
+                    )
+                else:
+                    class_type = workflow[node_id]["class_type"]
+                    accepted = CLASS_INPUTS.get(class_type)
+                    key = node.get("key", "text")
+                    if accepted is None:
+                        failures.append(
+                            f"edit workflow {name!r} node {node_id!r} has "
+                            f"class_type {class_type!r}, not in CLASS_INPUTS"
+                        )
+                    elif key not in accepted:
+                        failures.append(
+                            f"{where} writes key {key!r} into edit workflow "
+                            f"{name!r} node {node_id!r} ({class_type}), which "
+                            f"accepts {sorted(accepted)}"
+                        )
+
+    for required in sorted(EDIT_REQUIRED_TYPES - seen_types):
+        failures.append(
+            f"image_edit_workflow_nodes has no {required!r} entry"
+        )
+
+    if not (catalog.get("image_edit_model") or "").strip():
+        failures.append("image_edit_model is empty")
+
+    return failures
+
+
+def load_all(root: Path) -> tuple[dict, dict[str, dict], dict[str, dict], dict]:
     catalog = yaml.safe_load((root / "inventory" / "group_vars" / "all"
                               / "images.yml").read_text())
     main_vars = yaml.safe_load((root / "inventory" / "group_vars" / "all"
@@ -405,23 +627,31 @@ def load_all(root: Path) -> tuple[dict, dict[str, dict], dict]:
     workflows = {}
     for path in sorted((root / "inventory" / "comfyui-workflows").glob("*.json")):
         workflows[path.stem] = json.loads(path.read_text())
-    return catalog, workflows, main_vars
+    edit_workflows = {}
+    for path in sorted((root / "inventory" / "comfyui-edit-workflows").glob("*.json")):
+        edit_workflows[path.stem] = json.loads(path.read_text())
+    return catalog, workflows, edit_workflows, main_vars
 
 
 def main() -> int:
     failures: list[str] = validation_self_check()
 
-    catalog, workflows, main_vars = load_all(ROOT)
+    catalog, workflows, edit_workflows, main_vars = load_all(ROOT)
     if not workflows:
         print(f"no workflows found in {WORKFLOW_DIR}", file=sys.stderr)
         return 1
+    if not edit_workflows:
+        print(f"no edit workflows found in {EDIT_WORKFLOW_DIR}", file=sys.stderr)
+        return 1
     failures.extend(check_config(catalog, workflows, main_vars))
+    failures.extend(check_edit_config(catalog, edit_workflows))
 
     if failures:
         for failure in failures:
             print(f"FAIL: {failure}", file=sys.stderr)
         return 1
-    print(f"Open WebUI image config: OK ({len(workflows)} workflow(s))")
+    print(f"Open WebUI image config: OK ({len(workflows)} generation "
+          f"workflow(s), {len(edit_workflows)} edit workflow(s))")
     return 0
 
 
