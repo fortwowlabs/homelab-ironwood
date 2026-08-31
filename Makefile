@@ -58,7 +58,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 	validate-ansible validate-yaml validate-shell validate-links \
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
 	check check-diff verify verify-disruptive scan image-digest image-check image-bump \
-	release-check release-report image-release roster-check drift reconcile access ping lint owui-image-config image-gen-check \
+	release-check release-report image-release roster-check drift reconcile access ping lint owui-image-config image-gen-check image-edit-check \
 	owui-personas owui-export \
 	vault-edit clean
 
@@ -207,6 +207,9 @@ owui-image-config: ## Push inventory/group_vars/all/images.yml into Open WebUI (
 
 image-gen-check: ## Generate one image end to end and assert it is a 1024x1024 PNG
 	$(PYTHON) scripts/image_generation_check.py $(ARGS)
+
+image-edit-check: ## Edit one image end to end and assert Open WebUI reached our checkpoint
+	$(PYTHON) scripts/image_edit_check.py $(ARGS)
 
 owui-personas: ## Seed inventory/group_vars/all/personas.yml into Open WebUI (needs OWUI_ADMIN_TOKEN)
 	$(PYTHON) scripts/owui_personas.py $(ARGS)
