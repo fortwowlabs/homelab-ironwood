@@ -1,4 +1,4 @@
-# Image editing (Qwen Image Edit) — deferred
+# Image editing (Qwen Image Edit)
 
 **Status: implemented 2026-08-31.** See
 [docs/superpowers/specs/2026-08-27-comfyui-image-editing-design.md](../superpowers/specs/2026-08-27-comfyui-image-editing-design.md)

@@ -12,14 +12,24 @@ After=network-online.target
 Type=oneshot
 User=%i
 WorkingDirectory=/opt/homelab-iac
+# ExecStartPre, NOT ConditionPathIsDirectory: systemd treats an unmet condition
+# as SUCCESS, so a missing venv would end nightly checking with every indicator
+# green. Same correction as homelab-verify@.service and homelab-scan@.service.
 ExecStartPre=/usr/bin/test -d /opt/homelab-iac/.venv
 ExecStart=/opt/homelab-iac/.venv/bin/python \
     /opt/homelab-iac/scripts/image_edit_check.py \
     --token-file /etc/homelab-owui-admin.token \
-    --metrics-dir /opt/homelab/appdata/node-exporter-textfile
+    --metrics-dir /opt/homelab/appdata/node-exporter-textfile \
+    --timeout 900
 # Editing loads a ~28 GB stack cold every night (it cannot stay resident
 # alongside a chat model, design §5) against a desktop that may be asleep.
 # Longer than image-gen's 900s for that reason.
 TimeoutStartSec=1200
 UMask=0077
+# Exit 2 is `inconclusive`: the GPU host was unreachable or asleep, which is
+# routine on a desktop that is off most nights, not a fault of this estate.
+# SuccessExitStatus=2 keeps systemd from marking the unit failed for that
+# case, so it does not page. Exit 1 (`broken` — reachable but no image, or
+# the wrong model) is a real defect and is deliberately left out of this
+# list, so it still fails the unit and still pages.
 SuccessExitStatus=2

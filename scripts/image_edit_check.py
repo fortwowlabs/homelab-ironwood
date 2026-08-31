@@ -72,10 +72,26 @@ def probe(base_url: str, token: str, catalog: dict,
 
     try:
         result = api_post(base_url, "/api/v1/images/edit", token, payload, timeout)
-    except urllib.error.HTTPError:
-        # No documented status code here means "the edit mapping is
-        # specifically broken" the way generation's 400 does, so default
-        # conservatively: any HTTP error is could-not-look, not "broken".
+    except urllib.error.HTTPError as error:
+        # Task 7's live testing found that a broken edit mapping DOES produce
+        # a specific, identifiable HTTP 400 from this endpoint -- but so does
+        # a transient ComfyUI OOM (this card peaks around 23.5/24.5 GB, and
+        # both failure modes come back as the same generic Open WebUI
+        # `{"detail":"Something went wrong :/"}` for an unhandled server-side
+        # exception, with nothing in the response to tell them apart). Paging
+        # on every routine OOM is exactly what SuccessExitStatus=2 exists to
+        # avoid, so this still classifies as could-not-look, not "broken".
+        # What changed is that a hand-rolled probe was needed to find this
+        # root cause last time because this check printed nothing -- so log
+        # the status and body here, so the next investigation starts here
+        # instead of with another hand-rolled probe.
+        body = ""
+        try:
+            body = error.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            pass
+        print(f"INCONCLUSIVE: POST /api/v1/images/edit returned HTTP "
+              f"{error.code}: {body}", file=sys.stderr)
         return "inconclusive", {}
     except (urllib.error.URLError, OSError, ValueError):
         return "inconclusive", {}

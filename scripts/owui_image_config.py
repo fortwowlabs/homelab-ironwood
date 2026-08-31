@@ -41,6 +41,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 CATALOG_PATH = ROOT / "inventory" / "group_vars" / "all" / "images.yml"
 WORKFLOW_DIR = ROOT / "inventory" / "comfyui-workflows"
+EDIT_WORKFLOW_DIR = ROOT / "inventory" / "comfyui-edit-workflows"
 
 # The GET response carries COMFYUI_API_KEY, IMAGES_OPENAI_API_KEY and both
 # Gemini keys. This tool holds the whole config in memory by construction, so
@@ -135,7 +136,7 @@ def main() -> int:
         workflow_path = WORKFLOW_DIR / f"{catalog['image_workflow']}.json"
         workflow = json.loads(workflow_path.read_text())
         workflow_json = json.dumps(workflow)
-        edit_workflow_path = (ROOT / "inventory" / "comfyui-edit-workflows"
+        edit_workflow_path = (EDIT_WORKFLOW_DIR
                               / f"{catalog['image_edit_workflow']}.json")
         edit_workflow = json.loads(edit_workflow_path.read_text())
         edit_workflow_json = json.dumps(edit_workflow)

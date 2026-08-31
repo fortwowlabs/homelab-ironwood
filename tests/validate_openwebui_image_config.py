@@ -59,6 +59,35 @@ EDIT_REQUIRED_TYPES = {"model", "prompt", "image", "seed"}
 # payload.negative_prompt, swallowed into a silent None by comfyui_edit_image.
 EDIT_FORBIDDEN_TYPES = {"negative_prompt"}
 
+# steps/width/height are a DIFFERENT failure mode than negative_prompt, and
+# reusing EDIT_FORBIDDEN_TYPES's message for them would be wrong, not just
+# imprecise: unlike negative_prompt, all three DO exist as Optional fields on
+# ComfyUIEditImageForm. Nothing raises. They simply resolve to None unless a
+# value is forwarded, and _apply_workflow_nodes writes that None straight
+# into the workflow with no exception -- ComfyUI is the thing that rejects
+# it (steps) or silently ignores it (width/height, legal only when
+# IMAGE_EDIT_SIZE is deliberately set, which this catalog does not do). This
+# was a real production bug (ffb4c6f): mapping `steps` always wrote null
+# into the sampler and ComfyUI answered HTTP 400.
+EDIT_UNMAPPABLE_TYPES = {
+    "steps": (
+        "steps is always None through Open WebUI's real edit API -- "
+        "ComfyUIEditImageForm has no steps field, and unlike seed there is "
+        "no random fallback in _apply_workflow_nodes, so mapping it writes "
+        "null into ComfyUI's sampler, which ComfyUI rejects"
+    ),
+    "width": (
+        "width is legal only if IMAGE_EDIT_SIZE is deliberately set -- this "
+        "catalog does not set it, so mapping width here writes None into "
+        "ComfyUI's workflow the same way steps does"
+    ),
+    "height": (
+        "height is legal only if IMAGE_EDIT_SIZE is deliberately set -- "
+        "this catalog does not set it, so mapping height here writes None "
+        "into ComfyUI's workflow the same way steps does"
+    ),
+}
+
 # ComfyUI collects output images only from these two class_types
 # (_ws_get_images). A workflow ending in neither returns an empty image list:
 # generation succeeds, no image, no error.
@@ -270,6 +299,25 @@ def _edit_negative_prompt_forbidden(catalog, workflows, edit_workflows, main_var
         {"type": "negative_prompt", "key": "text", "node_ids": ["15"]})
 
 
+def _edit_steps_unmappable(catalog, workflows, edit_workflows, main_vars):
+    # This is the reviewer's own proof-of-concept, reproduced as a case: the
+    # exact mutation that shipped as a real bug in ffb4c6f and that a bare
+    # EDIT_FORBIDDEN_TYPES entry would not have caught, since steps DOES
+    # exist on ComfyUIEditImageForm (it just resolves to None).
+    catalog["image_edit_workflow_nodes"].append(
+        {"type": "steps", "key": "steps", "node_ids": ["20"]})
+
+
+def _edit_width_unmappable(catalog, workflows, edit_workflows, main_vars):
+    catalog["image_edit_workflow_nodes"].append(
+        {"type": "width", "key": "width", "node_ids": ["13"]})
+
+
+def _edit_height_unmappable(catalog, workflows, edit_workflows, main_vars):
+    catalog["image_edit_workflow_nodes"].append(
+        {"type": "height", "key": "height", "node_ids": ["13"]})
+
+
 def _edit_missing_image_type(catalog, workflows, edit_workflows, main_vars):
     catalog["image_edit_workflow_nodes"] = [
         n for n in catalog["image_edit_workflow_nodes"] if n["type"] != "image"]
@@ -332,7 +380,14 @@ def _edit_empty_node_ids(catalog, workflows, edit_workflows, main_vars):
 EDIT_VALIDATION_CASES = (
     ("negative_prompt in edit mapping", _edit_negative_prompt_forbidden,
      "no field on ComfyUIEditImageForm"),
-    ("edit mapping missing required image type", _edit_missing_image_type, "image"),
+    ("steps in edit mapping", _edit_steps_unmappable,
+     "steps is always None"),
+    ("width in edit mapping", _edit_width_unmappable,
+     "width is legal only if IMAGE_EDIT_SIZE"),
+    ("height in edit mapping", _edit_height_unmappable,
+     "height is legal only if IMAGE_EDIT_SIZE"),
+    ("edit mapping missing required image type", _edit_missing_image_type,
+     "no 'image' entry"),
     ("mapped node absent from a non-selected edit workflow",
      _edit_node_id_absent_from_edit_workflow, "other"),
     ("empty image_edit_model", _edit_empty_model, "image_edit_model"),
@@ -639,6 +694,8 @@ def check_edit_config(catalog: dict, edit_workflows: dict[str, dict],
                 "_apply_workflow_nodes would raise AttributeError, swallowed "
                 "by comfyui_edit_image into a silent None — no image, no error"
             )
+        if node_type in EDIT_UNMAPPABLE_TYPES:
+            failures.append(f"{where} {EDIT_UNMAPPABLE_TYPES[node_type]}")
         if node_type in NEEDS_EXPLICIT_KEY and "key" not in node:
             failures.append(f"{where} needs an explicit key")
 
