@@ -1,0 +1,25 @@
+# Nightly end-to-end proof that in-chat image EDITING still works.
+# Same reasoning as homelab-image-gen@.service, kept separate from it: a red
+# edit check and a red generation check are different failures (different
+# checkpoint, different code path in Open WebUI), and collapsing them would
+# make it unclear which one broke from the alert alone.
+[Unit]
+Description=homelab-iac in-chat image editing check for %i
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=%i
+WorkingDirectory=/opt/homelab-iac
+ExecStartPre=/usr/bin/test -d /opt/homelab-iac/.venv
+ExecStart=/opt/homelab-iac/.venv/bin/python \
+    /opt/homelab-iac/scripts/image_edit_check.py \
+    --token-file /etc/homelab-owui-admin.token \
+    --metrics-dir /opt/homelab/appdata/node-exporter-textfile
+# Editing loads a ~28 GB stack cold every night (it cannot stay resident
+# alongside a chat model, design §5) against a desktop that may be asleep.
+# Longer than image-gen's 900s for that reason.
+TimeoutStartSec=1200
+UMask=0077
+SuccessExitStatus=2

@@ -365,3 +365,26 @@
     enabled: true
     state: started
     daemon_reload: "{{ image_gen_runner_units is changed }}"
+
+# ----------------------------------------------- nightly image editing ---
+# Same shape as the image-generation block above, one file over: proves
+# Open WebUI's edit path reaches Qwen Image Edit specifically, not just that
+# generation still works.
+- name: Install the nightly image editing check units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - homelab-image-edit@.service
+    - homelab-image-edit@.timer
+  register: image_edit_runner_units
+
+- name: Arm the nightly image editing check timer
+  ansible.builtin.systemd:
+    name: "homelab-image-edit@{{ verify_runner_user }}.timer"
+    enabled: true
+    state: started
+    daemon_reload: "{{ image_edit_runner_units is changed }}"
