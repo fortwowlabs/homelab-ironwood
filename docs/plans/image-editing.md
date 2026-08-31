@@ -1,6 +1,25 @@
 # Image editing (Qwen Image Edit) — deferred
 
-**Status: not implemented.** Split out of
+**Status: implemented 2026-08-31.** See
+[docs/superpowers/specs/2026-08-27-comfyui-image-editing-design.md](../superpowers/specs/2026-08-27-comfyui-image-editing-design.md)
+for the design and
+[docs/superpowers/plans/2026-08-27-comfyui-image-editing.md](../superpowers/plans/2026-08-27-comfyui-image-editing.md)
+for the implementation. Verified working by `make image-edit-check`.
+
+**One defect only a live end-to-end check caught.** The catalog originally
+mapped `type: steps` in `image_edit_workflow_nodes`, but Open WebUI's public
+edit API (`EditImageForm`) has no `steps` field at all — `payload.steps` was
+always `None`, and unlike `seed` (which has a random fallback in
+`_apply_workflow_nodes`), `steps` has none, so it wrote `null` into
+ComfyUI's KSampler and ComfyUI rejected the request with a 400. Fixed
+(`ffb4c6f`) by removing the mapping entirely and letting the workflow's own
+hardcoded `steps: 50` stand — the same treatment already applied to
+`width`/`height`/`negative_prompt`. The direct-to-ComfyUI proof run earlier in
+implementation never exercised `_apply_workflow_nodes`/`payload.steps` at all,
+so it could not have caught this; only the later check that goes through Open
+WebUI's real API did.
+
+Split out of
 `docs/plans/uncensored-image-generation.md` on 2026-08-27, where it had been
 filed alongside MiniMax H3 video generation under one "requested but
 deferred" heading since 2026-08-12. The two are unrelated in size and
@@ -45,30 +64,7 @@ Concretely, this should mean reusing, not rebuilding:
   `image_edit_check.py` — submit a source image, assert a changed image of
   the expected size comes back.
 
-## Not investigated — this is genuinely the starting point
-
-Nobody has yet:
-
-- Read `IMAGES_EDIT_COMFYUI_*` in Open WebUI's `config.py` /
-  `utils/images/comfyui.py` the way the generation path was read line by
-  line before it was trusted. The claim above is inference from the
-  generation design, not a verified reading of the edit code path.
-- Sourced a "Qwen Image Edit" checkpoint — confirmed it exists as a public,
-  ungated, ComfyUI-loadable file, the way Pony and Chroma were verified
-  (repo, filename, license, checksum) before this repo trusted them. Nothing
-  in this repo has downloaded or hashed anything for this yet.
-- Measured its VRAM footprint against the card. Same discipline as
-  `docs/gpu-capacity.md` and the generation design: idle baseline first,
-  then measured, never estimated from a model card.
-- Checked whether it can share ComfyUI's single-workflow constraint with
-  Pony (the same one that stopped Pony and Chroma coexisting in-chat) or
-  needs its own selection story.
-
-## Suggested first step
-
-Read the `IMAGES_EDIT_COMFYUI_*` code path and confirm the claim above before
-sourcing any checkpoint — if editing turns out to need its own mechanism
-after all, that changes the cost estimate for this work. (Video generation
-shipped 2026-08-27 — see
-`docs/superpowers/specs/2026-08-27-video-generation-design.md` — so it is no
-longer the comparison point for sequencing this.)
+Everything the "Not investigated" section here once listed as outstanding —
+reading the `IMAGES_EDIT_COMFYUI_*` code path, sourcing the checkpoint,
+measuring VRAM, and the single-workflow question — is now answered by the
+design doc and implementation plan linked at the top of this page.

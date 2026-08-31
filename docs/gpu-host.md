@@ -621,6 +621,45 @@ of error as the R2V queue-delay above: a measurement taken in a convenient
 order rather than a clean one. Restart between models, or do not publish the
 number.
 
+#### Qwen Image Edit: the editing checkpoint
+
+Added 2026-08-31. Sourced from `Comfy-Org/Qwen-Image-Edit_ComfyUI` (diffusion
+model) and `Comfy-Org/Qwen-Image_ComfyUI` (text encoder, VAE) on Hugging Face —
+first-party Comfy-Org repackaging, Apache-2.0, ungated, the same provenance bar
+as the models above. Every hash below was verified twice independently against
+the downloaded bytes, once during implementation and once by re-computing all
+three from scratch.
+
+| File | Destination | Bytes |
+|---|---|---|
+| `qwen_image_edit_fp8_e4m3fn.safetensors` | `diffusion_models` | 20430635136 |
+| `qwen_2.5_vl_7b_fp8_scaled.safetensors` | `text_encoders` | 9384670680 |
+| `qwen_image_vae.safetensors` | `vae` | 253806246 |
+
+```
+393c6743d1de2e9031b5197027b36116f2096958ccc0223526d34e1860266021  qwen_image_edit_fp8_e4m3fn.safetensors
+cb5636d852a0ea6a9075ab1bef496c0db7aef13c02350571e388aea959c5c0b4  qwen_2.5_vl_7b_fp8_scaled.safetensors
+a70580f0213e67967ee9c95f05bb400e8fb08307e017a924bf3441223e023d1f  qwen_image_vae.safetensors
+```
+
+##### Measured 2026-08-31: it fits, and it is tight the same way Flux is
+
+Card total is 24564 MiB. Idle baseline (ComfyUI not loaded, desktop apps only)
+measured ~3812–4187 MiB across two samples with slightly different desktop
+state each time. Peak during a real 50-step Qwen Image Edit generation was
+~23536–23545 MiB, stable across two separate runs — leaving ~1019–1028 MiB of
+headroom, about 4% of the card. No OOM across three total generation runs (two
+direct-to-ComfyUI, one through the full Open WebUI API), but there is little
+margin. Execution time for a real generation ran ~157–196 s, depending on
+input image size and what else was competing for the GPU.
+
+**This fits, but only just — the same conclusion as Flux, for the same
+reason.** The design doc predicted this by analogy to Flux's ~28 GB on-disk
+stack before anything was measured, and the measurement landed almost exactly
+where predicted. **It cannot coexist with a resident chat model**, unlike
+Pony/SDXL (see "Sharing the card with image generation" below) — it belongs in
+the same bucket as Flux, Chroma, and H3.
+
 ### 4. Open the firewall, narrowly
 
 Windows Defender Firewall blocks both ports inbound by default. Add rules for
