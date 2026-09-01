@@ -289,6 +289,29 @@ Then confirm `http://192.168.1.40:8188` loads from another machine — and that
 `/system_stats` reports `cuda:0`, since a CPU fallback also loads fine and
 merely takes twenty minutes per image.
 
+**A ComfyUI relaunched by a Claude Code subagent does not survive that
+subagent's own task ending — even though the session driving the work keeps
+going.** Measured 2026-08-29 → 2026-08-31: a subagent restarted ComfyUI as a
+backgrounded Bash child process while proving the Qwen Image Edit workflow,
+and once that subagent's task concluded, ComfyUI went down with it — not a
+Windows crash or reboot (no crash, unexpected-shutdown, or sleep/wake event
+appears anywhere in the Application or System event logs for the whole
+window), just gone. It stayed down through two consecutive nightly
+`homelab-image-gen@svcops` runs, both failing with `verdict=broken`, until
+someone checked the host directly and relaunched it by hand. The control
+case makes the mechanism clear: a ComfyUI relaunched from the *main*,
+long-running session survived 6+ hours and dozens of further tool calls with
+no issue — it is specifically a subagent's own termination that reaps its
+background children, not merely a turn ending.
+
+**The practical rule: never rely on a subagent-launched ComfyUI to still be
+running once that subagent's task is done.** If a task needs ComfyUI
+running afterward — for a later step in the same plan, or for the nightly
+checks — restart it from the `shell:startup` shortcut (a reboot, or logging
+out and back in) rather than trusting whatever a subagent left resident, or
+relaunch it directly from the main session rather than delegating the
+relaunch to a subagent.
+
 #### MiniMax H3: video generation, driven directly from ComfyUI
 
 Unlike Pony above, **H3 is not reachable through Open WebUI at all** — there
