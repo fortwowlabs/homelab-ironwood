@@ -53,36 +53,49 @@ still has to be explained before merging. Do not paper over a genuine diff by
 running the deploy twice and quoting the second number — check *which* tasks
 changed.
 
-### On TERRA the steps above run in two different places
+### TERRA: one clone, in WSL
 
-TERRA, the usual workstation, has **two independent clones**:
-`C:\Users\tv\dev\homelab-ironwood` for editing and `~/dev/homelab-ironwood`
-inside WSL for deploying. They are separate git repositories and they drift —
-check `git log -1` in whichever one you are about to use.
+TERRA, the usual workstation, used to carry **two independent clones** —
+`C:\Users\tv\dev\homelab-ironwood` for editing, `~/dev/homelab-ironwood`
+inside WSL for deploying — because Ansible cannot run on native Windows at
+all (it needs POSIX `fcntl`/`pwd`), and a deploy pointed at the Windows path
+via `/mnt/c` silently discards `ansible.cfg`: DrvFs mounts the drive
+world-writable, and Ansible refuses to trust config from a world-writable
+directory, printing one easy-to-miss `[WARNING]` and continuing with
+`config file = None` and collections resolved from `~/.ansible` instead of
+the repo. The second clone worked around that.
 
-- **Steps 2 and 5** (`make validate`, `git status`) run in either. Validate
-  passes on the Windows clone now that `.gitattributes` pins the working tree
-  to LF; before that it could not pass there at all, because yamllint's
-  `new-lines` rule rejected every YAML file no matter what the change was.
-- **Steps 3 and 6** (`make dl` / `make media` / `make infra`, `make verify`)
-  run **only in the WSL clone**, with `USE_VAULT_FILE=1`. Being inside WSL is
-  not sufficient: Ansible pointed at `/mnt/c` silently ignores `ansible.cfg`,
-  because DrvFs mounts the drive world-writable. It prints one `[WARNING]`,
-  then continues with `config file = None` and collections resolved from
-  `~/.ansible` instead of the repo — a deploy that does not fail but does
-  something other than intended.
+**Nothing ever kept the two clones in sync, and on 2026-08-31 that caused a
+real incident.** A feature was implemented and live-tested against ComfyUI
+across two sessions entirely inside the WSL clone, committed and pushed
+there. A large model stack was left resident on the GPU from that testing,
+which broke the nightly `homelab-image-gen` check and cascaded into
+`homelab-verify` failing on all three service VMs — and a session that
+happened to start later in the Windows clone had no way to discover any of
+this, because the Windows clone's `git log` still showed the old HEAD; the
+missing context was committed to a repository it never looked at. The
+Windows clone was retired the same day for exactly this reason: two
+checkouts of one repo is a sync problem with no enforcement mechanism, and
+removing the second checkout removes the failure mode instead of managing
+it.
 
-`vault.yml` and `.vault_pass` live in the WSL clone, which is the concrete
-form of the vault caveat above.
+There is now **one clone**, `~/dev/homelab-ironwood` inside WSL, used for
+every step above — editing and deploying both. `vault.yml` and
+`.vault_pass` live there, same as before. Edit it via VS Code's
+"Remote - WSL" extension, or by running Claude Code from inside a WSL shell.
+A native-Windows editor or Claude Code session pointed at a Windows path has
+nothing to act on — there is no repo there anymore.
 
-**Read `docs/deployment.md` → "Deploying from TERRA, via WSL" before running
-anything there.** It also carries the trap that costs the most time: driving
-WSL from Git Bash with `wsl.exe -- bash -c '...'` lets Git Bash expand `$(...)`
-and `$VAR` *before* the string reaches WSL, even inside single quotes, so a
-command that looks like it reports WSL reports the **Windows** checkout
-instead. That has now produced a confidently wrong reading in two separate
-sessions. Put the commands in a script file and run
-`wsl.exe -d Ubuntu-24.04 -- bash /mnt/c/path/to/script.sh`.
+**Still worth knowing when driving WSL commands from a Windows-side shell**
+(Git Bash, PowerShell, or a Windows-native Claude Code session shelling out
+to `wsl.exe` for a one-off check — legitimate for read-only investigation,
+just not for editing this repo): `wsl.exe -- bash -c '...'` lets Git Bash
+expand `$(...)` and `$VAR` *before* the string reaches WSL, even inside
+single quotes, so a command that looks like it reports WSL state can
+silently report the invoking Windows shell's own state instead. That has now
+produced a confidently wrong reading in more than one session. Put the
+commands in a script file and run `wsl.exe -d Ubuntu-24.04 -- bash
+/path/to/script.sh` instead.
 
 ### Step 8 was skipped for the repo's first 75 commits
 

@@ -91,11 +91,12 @@ make validate
 vault or contact the homelab. It covers syntax, Ansible/YAML/shell lint, links,
 catalog consistency, and secret scanning.
 
-### Deploying from TERRA, via WSL
+### Deploying from TERRA
 
 TERRA is the Windows GPU host and also a workstation. **Ansible cannot run on
-native Windows** — it needs POSIX (`fcntl`, `pwd`) — so deploys go through WSL,
-which has its own clone and its own `.venv`:
+native Windows** — it needs POSIX (`fcntl`, `pwd`) — so both editing and
+deploying happen inside WSL, at the single clone `~/dev/homelab-ironwood`
+with its own `.venv`:
 
 ```bash
 wsl -d Ubuntu-24.04
@@ -107,45 +108,47 @@ USE_VAULT_FILE=1 make infra
 `USE_VAULT_FILE=1` selects `--vault-password-file .vault_pass` instead of
 prompting, which a non-interactive session cannot answer.
 
-**That clone is separate from the Windows one at `C:\Users\tv\dev`, and the two
-drift.** Check `git log -1` inside WSL before deploying — it is not necessarily
-on the branch you just committed to on the Windows side.
-
-**Deploy from the WSL clone, never from `/mnt/c` — being inside WSL is not
-enough.** It is tempting to skip the second clone by running WSL's `ansible`
-against the Windows checkout, since WSL can see it at
-`/mnt/c/Users/tv/dev/homelab-ironwood`. That runs, and it is wrong. DrvFs
-mounts the drive `drwxrwxrwx`, and Ansible refuses to read `ansible.cfg` from a
-world-writable directory — it says so in a `[WARNING]`, then continues. Measured
-2026-08-27, from the two clones on this host:
+**There used to be a second clone at `C:\Users\tv\dev\homelab-ironwood`,
+retired 2026-09-01.** It existed because deploying from `/mnt/c` "worked" in
+the sense that it ran without error rather than failing loudly. DrvFs mounts
+the drive `drwxrwxrwx`, and Ansible refuses to read `ansible.cfg` from a
+world-writable directory — it says so in a `[WARNING]`, then continues.
+Measured 2026-08-27, from the two clones on this host:
 
 | Run from | `ansible --version` reports |
 |---|---|
 | `/home/tv/dev/homelab-ironwood` | `config file = …/ansible.cfg`, collections from `collections/` |
 | `/mnt/c/Users/tv/dev/homelab-ironwood` | **`config file = None`**, collections from `~/.ansible/collections` |
 
-So a deploy from `/mnt/c` silently discards every setting this repo pins in
-`ansible.cfg` and resolves collections somewhere else entirely. It does not
-fail; it does something different. The warning is one line in a stream of
-Ansible output and is easy to miss.
+So a deploy from `/mnt/c` silently discarded every setting this repo pins in
+`ansible.cfg` and resolved collections somewhere else entirely — it did not
+fail, it did something different, and the warning was one line in a stream of
+Ansible output, easy to miss. Keeping a second, Windows-side clone worked
+around that. But nothing kept the two clones in sync, and on 2026-08-31 that
+caused a real incident: a feature was implemented and live-tested against
+ComfyUI across two sessions entirely inside the WSL clone, which left a large
+model resident on the GPU and broke the nightly `homelab-image-gen` check —
+and a session that started later in the Windows clone had no way to discover
+any of this, because that clone's own `git log` still showed the old HEAD.
+One clone removes the failure mode instead of managing it.
 
-The Windows clone is for editing and for `make validate`, which is unaffected
-by this and passes there since `.gitattributes` pinned the working tree to LF.
-Deploys belong to the WSL clone, which also holds `vault.yml` and
-`.vault_pass` — the Windows clone need not have them at all.
+Edit this repo via VS Code's "Remote - WSL" extension, or by running Claude
+Code from inside a WSL shell. A native-Windows editor or session pointed at
+`C:\Users\tv\dev\homelab-ironwood` has nothing to act on.
 
-**The trap that makes this worse than it sounds:** driving WSL from Git Bash
-with `wsl.exe -- bash -c '...'` lets Git Bash expand `$(...)` and `$VAR`
-*before* the string reaches WSL, even inside single quotes. So
-`echo "branch: $(git branch --show-current)"` reports the **Windows** checkout
-while appearing to report WSL. On 2026-08-22 that produced a confident,
-completely wrong reading, and a `make infra` run against `main` believing it was
-a feature branch. It also hung a command for half an hour: `$f` expanded to
+**Still worth knowing when driving WSL commands from a Windows-side shell**
+(Git Bash, PowerShell, or a Windows-native Claude Code session shelling out
+to `wsl.exe` for a one-off read-only check): `wsl.exe -- bash -c '...'` lets
+Git Bash expand `$(...)` and `$VAR` *before* the string reaches WSL, even
+inside single quotes. So `echo "branch: $(git branch --show-current)"`
+reports the **invoking Windows shell's own state**, not WSL's, while
+appearing to report WSL. On 2026-08-22 that produced a confident, completely
+wrong reading and a `make infra` run against `main` believing it was a
+feature branch. It also hung a command for half an hour: `$f` expanded to
 empty, so `grep pattern` ran with no filename and blocked reading stdin.
 
 Put the commands in a script file and run `wsl.exe -d Ubuntu-24.04 -- bash
-/mnt/c/path/to/script.sh` instead. Add `MSYS_NO_PATHCONV=1` or Git Bash rewrites
-the `/mnt/c/...` argument into a Windows path.
+/path/to/script.sh` instead.
 
 ### `gh` on TERRA
 
