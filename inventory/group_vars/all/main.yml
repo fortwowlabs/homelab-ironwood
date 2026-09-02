@@ -707,9 +707,19 @@ caddy_services:
   #    direct http://{{ gpu_host_ip }}:8188 remains open on the LAN either
   #    way — Caddy gates the hostname, never the port (docs/services.md).
   # 2. TERRA is a desktop that gets rebooted, gamed on and switched off, so
-  #    this vhost 502s whenever it is away. That is not a fault to chase; it
-  #    is what publishing a workstation looks like. `make verify` smoke-tests
-  #    Caddy backends, so expect this one to be the flaky line.
+  #    this vhost 502s in a browser whenever it is away. That is not a fault
+  #    to chase; it is what publishing a workstation looks like.
+  #
+  #    `make verify` will NOT surface that, and an earlier version of this
+  #    comment claiming it would ("expect this one to be the flaky line") was
+  #    wrong. The smoke test curls each vhost unauthenticated, and because
+  #    `comfyui` is in sso_protected_services Caddy runs forward_auth ahead of
+  #    reverse_proxy — Authelia answers 302 to the portal and the backend is
+  #    never dialled. That is precisely the shape
+  #    roles/svc_media/tasks/verify.yml demands of a protected service, so
+  #    this line passes identically whether TERRA is on or off. Nothing in
+  #    `make verify` reaches port 8188. Use the direct IP:port to tell the
+  #    two apart — the same comparison the WebSocket note below relies on.
   # 3. It is reachable today by all 8 tailnet peers, unauthenticated — an
   #    OPEN finding in docs/gpu-host.md whose attempted fix was measured not
   #    to work on 2026-08-13. This vhost does not widen that (Caddy adds a
