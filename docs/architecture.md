@@ -60,7 +60,7 @@ Firewalld scopes host ports to the configured LAN.
 Self-hosted applications run rootless as the service account, driven by the
 `infra_apps` and `infra_secret_apps` catalogs plus bespoke Quadlets for the
 multi-container services. It also carries Authelia (the SSO portal fronting
-thirteen vhosts), Prometheus and Grafana, and the two scheduled runners: nightly
+fourteen vhosts), Prometheus and Grafana, and the two scheduled runners: nightly
 verification at 04:00 and the report-only security scan at 05:30. It has no
 Caddy or dnsmasq — the access layer stays on `svc-media`, which proxies here by
 LAN address.

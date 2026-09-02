@@ -259,7 +259,7 @@ Each of these was found, understood and deliberately left alone. They are here
 so that "we decided" does not decay into "nobody noticed". None is a live
 compromise; all are things that make a future mistake more expensive.
 
-- **Direct `IP:port` bypasses SSO.** The thirteen protected services are still
+- **Direct `IP:port` bypasses SSO.** The fourteen protected services are still
   reachable unauthenticated from the whole flat LAN and the tailnet, because
   firewalld and the nftables backstop open every catalog `ui_port` to
   `lan_cidr`. Kept as the recovery path if Authelia breaks. Closing it means

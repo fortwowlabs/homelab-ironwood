@@ -25,20 +25,27 @@ domain is `fortwow.dev`; derive the current service VM addresses from
 | `shelfmark` | `svc-download` | Interactive book/audiobook search and requests inside the VPN jail |
 | `searxng` | `svc-download` | Metasearch inside the VPN jail; Open WebUI's search provider |
 | `cockpit-dl` | `svc-download` | Download VM host administration |
-| `auth` | `svc-infra` | Authelia SSO portal; fronts thirteen services (see below) |
+| `auth` | `svc-infra` | Authelia SSO portal; fronts fourteen services (see below) |
 | `chat` | `svc-infra` | Open WebUI; chat and image generation against the GPU host |
 | `scan` | `svc-infra` | Nightly security scan report (errata, image CVEs, benchmark, exposure) |
+| `comfyui` | GPU host | ComfyUI on TERRA — the only vhost whose backend is not a service VM; 502s whenever the desktop is away |
 
 Download UIs reach their jailed containers through generated systemd socket
 proxies. Do not publish a download container directly on the host network.
 
 ### Single sign-on
 
-`auth` on `svc-infra` is the Authelia login portal. Thirteen services sit
+`auth` on `svc-infra` is the Authelia login portal. Fourteen services sit
 behind it via Caddy `forward_auth`: the eight download apps above (including
 `searxng`, whose browser-facing vhost this gates — Open WebUI's own use of it
 dials svc-download's `IP:port` directly and is unaffected), plus
-`code-server`, `webtop`, `syncthing`, `prometheus` and `scan`.
+`code-server`, `webtop`, `syncthing`, `prometheus`, `scan` and `comfyui`.
+
+`comfyui` is the odd one out: its backend is the GPU host rather than a
+service VM, and it has no login of its own, so the forward-auth gate is the
+only thing in front of an interface that loads arbitrary workflow graphs and
+writes files. The direct `http://<gpu_host_ip>:8188` stays open on the LAN
+either way — Caddy gates the hostname, never the port.
 
 The protected set is `sso_protected_services` in
 `inventory/group_vars/all/main.yml` — one list, consumed by both vhost loops in
