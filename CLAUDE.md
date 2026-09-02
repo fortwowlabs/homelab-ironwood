@@ -79,12 +79,30 @@ checkouts of one repo is a sync problem with no enforcement mechanism, and
 removing the second checkout removes the failure mode instead of managing
 it.
 
-There is now **one clone**, `~/dev/homelab-ironwood` inside WSL, used for
-every step above — editing and deploying both. `vault.yml` and
+There is now **one working clone**, `~/dev/homelab-ironwood` inside WSL, used
+for every step above — editing and deploying both. `vault.yml` and
 `.vault_pass` live there, same as before. Edit it via VS Code's
 "Remote - WSL" extension, or by running Claude Code from inside a WSL shell.
-A native-Windows editor or Claude Code session pointed at a Windows path has
-nothing to act on — there is no repo there anymore.
+
+**Be precise about what "retired" means, because the first version of this
+section was not.** It said there was "no repo there anymore" and that a
+Windows-side session "has nothing to act on". That was the intent, never the
+state. As of 2026-09-03 `C:\Users\tv\dev\homelab-ironwood` is still a
+complete checkout — on `main`, clean, level with `origin/main`, and still
+holding its own `vault.yml` and `.vault_pass`, byte-identical to the WSL pair
+by hash (the Windows copies merely sit world-readable where WSL's are
+`0600`). Retirement was a decision about which clone gets used; nothing
+enforced it on disk, and a session that believed the doc would have been
+wrong about its own surroundings.
+
+So treat this as a rule, not a fact about the filesystem: **do not edit,
+commit or deploy from the Windows path.** It will happily let you, and the
+2026-08-31 incident above is what that costs. A Windows-side session that
+must touch this repo should drive the WSL clone instead — edit through
+`\\wsl.localhost\Ubuntu-24.04\home\tv\dev\homelab-ironwood`, run `git` and
+`make` inside WSL — or hand the work to a session started in WSL. If the
+Windows checkout is ever genuinely removed, delete these two paragraphs
+along with it.
 
 **Still worth knowing when driving WSL commands from a Windows-side shell**
 (Git Bash, PowerShell, or a Windows-native Claude Code session shelling out

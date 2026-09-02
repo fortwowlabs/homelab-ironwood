@@ -9,10 +9,17 @@ name: Validate
 # `push` to main is what makes it real. It runs AFTER the merge rather than
 # before, so it cannot block a bad change from landing — local `make validate`
 # is still the gate that fires first and most often. What it adds is a second
-# opinion from a machine that is not the author's workstation, and one thing
-# the workstation physically cannot do: `systemd-analyze verify` against the
-# unit files. tests/validate_systemd_units.py downgrades itself to static
-# checks on macOS, so until now no systemd had ever parsed a unit in this repo.
+# opinion from a machine that is not the author's workstation.
+#
+# It used to add one check the workstation physically could not perform:
+# `systemd-analyze verify` against the unit files, which
+# tests/validate_systemd_units.py downgrades to static text matching when
+# systemd-analyze is absent. That was written on macOS, where it always is.
+# It is no longer true on TERRA — measured 2026-08-27, WSL carries systemd 255
+# and the local gate reports `OK + systemd-analyze`, so unit parsing now
+# happens before the merge as well as after it. CI's remaining value is the
+# independent machine, not a check only it can run; do not reach for it to
+# cover unit syntax local validate already parsed.
 #
 # The `pull_request` trigger stays for the day this repo starts using them.
 on:
