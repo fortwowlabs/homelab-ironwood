@@ -74,6 +74,24 @@ Live, against chat.fortwow.dev with the vault's admin token: the persona
 dry-run reports both `present` and exits 0, and the export is idempotent
 (a second run reports `unchanged`).
 
+**What that does NOT cover, stated plainly: the create path has never run.**
+Both personas already existed, so every live run took the `present` branch and
+returned before reaching `POST /api/v1/models/create`. `desired_form()` — in
+particular `base_model_id` and the `access_grants` payload with
+`principal_id: "*"` — and the create-then-readback loop after it have been
+read against Open WebUI's source and exercised offline, but never executed.
+That is a materially weaker claim than the rest of this section, and "three
+bugs only a live run could find" should not be read as covering it: all three
+were found in the listing and export paths, which are the paths that ran.
+
+Treat the next persona added to `personas.yml` as the first real test of that
+code, and watch the readback verification specifically — a create that returns
+200 and stores something different is the failure this repo keeps re-learning,
+and it is the exact case the readback exists for. Exercising it deliberately
+beforehand means creating a throwaway persona against production and deleting
+it afterwards, which is a live write to a live service; worth doing, worth
+doing on purpose rather than as a side effect of a real change.
+
 ## Gotchas that will cost you time
 
 **The drift gate is live now, but only because an export is committed.** With
@@ -95,6 +113,17 @@ the gate if something else deserves it.
 Accepted; this tracks settings, not secrets. If a key you care about shows as
 `<redacted>`, add its prefix to `SAFE_PREFIXES` in the exporter — the drift
 gate already fails loudly if an *enforced* key is redacted.
+
+**The committed export currently lags the redaction rules by one key.**
+`SAFE_PREFIXES` carried a bare `auth.` prefix, which showed `auth.admin.email`
+as a side effect of prefix width rather than as a decision to track it; it is
+now the two explicit keys `auth.admin.show` and `auth.jwt_expiry`. Narrowing
+the rules cannot retroactively redact a file that was generated under the old
+ones, and regenerating needs the live instance, so `auth.admin.email: null`
+still appears in `openwebui-config.yml` until someone runs `make owui-export`.
+Nothing is disclosed — the value is `null` — and
+`tests/validate_owui_redaction.py` says exactly this as a `note`. It would
+have *failed* had the value been real, which is the distinction that matters.
 
 **Two gate groups fail under Git Bash on Windows** -- `shell` (a Windows temp
 path used as a regex/exec path) and `secrets` (wants `.venv/bin/ansible-playbook`).

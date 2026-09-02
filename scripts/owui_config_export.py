@@ -31,7 +31,8 @@ Exit codes:
     0  exported; the file was written (or was already identical)
     1  bad arguments, Open WebUI unreachable, or the request was refused --
        COULD NOT LOOK, the previous file is left in place
-    2  the response was not a config object this tool understands
+    2  the response was not a config object this tool understands -- either
+       not JSON at all, or JSON that is not a populated mapping
 """
 
 from __future__ import annotations
@@ -62,7 +63,14 @@ SAFE_PREFIXES = (
     "task.",
     "web.search.engine",
     "web.search.enable",
-    "auth.",
+    # Deliberately the two exact keys rather than a bare "auth." prefix. The
+    # broad form also showed auth.admin.email, which is a real address as soon
+    # as one is set -- an info-disclosure surface in a git-tracked file
+    # acquired as a side effect of prefix width, not as a decision to track
+    # that key. Everything else under auth.* is either a credential (caught by
+    # SECRET_MARKERS anyway) or not worth recording.
+    "auth.admin.show",
+    "auth.jwt_expiry",
 )
 
 # Belt and braces: never show a value whose key looks like a credential, even
@@ -70,6 +78,19 @@ SAFE_PREFIXES = (
 SECRET_MARKERS = ("key", "secret", "token", "password", "credential")
 
 REDACTED = "<redacted>"
+
+
+class NotJSON(Exception):
+    """Reached Open WebUI, but it answered with something that is not JSON.
+
+    The same fault scripts/owui_personas.py carries its own NotJSON for: a
+    path that serves the web UI answers HTTP 200 with the SPA's HTML shell
+    rather than 404, so a wrong URL, a maintenance page or an auth redirect
+    all look like a healthy server right up until the parse. Folding that
+    into the generic "could not reach" arm is what sent the sibling script's
+    first live run looking at the network instead of at the URL. It gets its
+    own type here rather than waiting to make the same mistake twice.
+    """
 
 
 class IndentedDumper(yaml.SafeDumper):
@@ -130,11 +151,24 @@ def main() -> int:
         headers={"Authorization": f"Bearer {token}"})
     try:
         with urllib.request.urlopen(request, timeout=args.timeout) as response:
-            live = json.loads(response.read())
+            body = response.read()
+            try:
+                live = json.loads(body)
+            except json.JSONDecodeError as exc:
+                head = body[:80].decode("utf-8", "replace").replace("\n", " ")
+                raise NotJSON(
+                    f"the export endpoint returned HTTP {response.status} but "
+                    f"not JSON (starts {head!r}). A path that serves the web UI "
+                    "answers 200 with HTML rather than 404, so check the URL "
+                    "before checking the network."
+                ) from exc
     except urllib.error.HTTPError as exc:
         print(f"export refused: HTTP {exc.code}. The previous file is left in "
               "place rather than being replaced with a guess.", file=sys.stderr)
         return 1
+    except NotJSON as exc:
+        print(f"{exc} The previous file is left in place.", file=sys.stderr)
+        return 2
     except Exception as exc:
         print(f"could not reach {args.base_url}: {exc}. The previous file is "
               "left in place.", file=sys.stderr)
