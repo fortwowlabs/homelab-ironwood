@@ -26,6 +26,91 @@
     - /opt/homelab/appdata/ntfy/cache
     - /opt/homelab/appdata/ntfy/etc
 
+# Stale-unit reconciliation, mirroring roles/svc_infra/tasks/files.yml and
+# roles/svc_download/tasks/files.yml. svc-media was the one service VM without
+# it, and roles/svc_media/tasks/migrations.yml is what that cost: 44 lines of
+# hand-written Jellyseerr teardown doing by name what this does generically.
+#
+# Every expected list below is a single bare `{{ }}` expression (never
+# {% set %}/{% for %}), so difference() operates on a real list rather than a
+# string repr of one — the exact gotcha documented in
+# roles/svc_download/tasks/files.yml.
+- name: Calculate the rootless media unit files that should exist
+  ansible.builtin.set_fact:
+    # beszel-agent is force-included even when disabled so a previously
+    # rendered agent is never treated as stale by a token/key being cleared —
+    # its own `when: beszel_agent_enabled` render + WARN already handle that.
+    media_expected_container_paths: >-
+      {{ ((media_quadlet_catalog | map(attribute='name') | list)
+          + (minecraft_servers.keys() | list))
+         | union(['beszel-agent'])
+         | map('regex_replace', '^(.*)$',
+                '/opt/homelab/.config/containers/systemd/\1.container') | list }}
+    media_expected_network_paths: >-
+      {{ ['romm']
+         | map('regex_replace', '^(.*)$',
+                '/opt/homelab/.config/containers/systemd/\1.network') | list }}
+  changed_when: false
+
+- name: Discover Ansible-managed rootless media container Quadlets
+  ansible.builtin.find:
+    paths: /opt/homelab/.config/containers/systemd
+    patterns: "*.container"
+    file_type: file
+    contains: 'Ansible managed'
+  register: media_managed_containers
+  check_mode: false
+
+# The `contains:` filter matters more here than on the container find above,
+# because this list feeds `state: absent` while that one only feeds a `stop`.
+# Without it the sweep would delete every .network file it did not expect,
+# including one placed by hand — a destructive action against files it had
+# never established it owned. romm.network is `copy:`d verbatim rather than
+# templated, so it carries the marker as a literal comment line; deleting that
+# line makes this find skip it and the next converge delete the deployed copy.
+- name: Discover Ansible-managed rootless media network Quadlets
+  ansible.builtin.find:
+    paths: /opt/homelab/.config/containers/systemd
+    patterns: "*.network"
+    file_type: file
+    contains: 'Ansible managed'
+  register: media_managed_networks
+  check_mode: false
+
+- name: Calculate stale rootless media unit paths
+  ansible.builtin.set_fact:
+    media_stale_container_paths: >-
+      {{ media_managed_containers.files | map(attribute='path') | list
+         | difference(media_expected_container_paths) }}
+    media_stale_network_paths: >-
+      {{ media_managed_networks.files | map(attribute='path') | list
+         | difference(media_expected_network_paths) }}
+  changed_when: false
+
+# Tolerating a failure here is the correct behaviour, not laziness. A stale
+# .container file whose generated unit systemd never loaded — the file was
+# added and the daemon never reloaded, or the unit was already stopped and
+# reset — makes `systemctl stop` exit non-zero, which without this would abort
+# the deploy inside the very block whose job is to reconcile units that should
+# not exist. Nothing downstream depends on the stop succeeding: the
+# `state: absent` task below removes the file, and the reload is what actually
+# retires the unit. Failing to stop something that is not running is not a
+# failure.
+- name: Stop stale rootless media services
+  ansible.builtin.command: >-
+    systemctl --user -M homelab@ stop
+    {{ item | basename | regex_replace('\.container$', '.service') }}
+  loop: "{{ media_stale_container_paths }}"
+  changed_when: true
+  failed_when: false
+
+- name: Remove stale rootless media unit files
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: absent
+  loop: "{{ media_stale_container_paths + media_stale_network_paths }}"
+  notify: media configuration changed
+
 # Do not enforce host ownership after initial creation. MariaDB owns this mount
 # as uid/gid 999 inside the container namespace, which maps to subuids on the
 # host. Resetting it to homelab on every converge leaves the running server able
