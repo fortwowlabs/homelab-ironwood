@@ -44,6 +44,47 @@ Avoid these common disclosure paths:
 Use `make preflight`, which authenticates without serializing decrypted
 inventory. Edit vault data with `make vault-edit`.
 
+### Blast radius, and why it is shaped this way
+
+The section above says where secrets live. This says how much one compromise
+costs, because that was true before it was written down anywhere, which made it
+read as an unexamined default rather than a trade that was considered.
+
+One `vault.yml` holds every secret in the estate, under one password. There is
+no per-host vault and no per-secret key. A compromise of that password is a
+compromise of everything: the Proxmox API token, the Mullvad configuration, the
+Authelia hashes, every database password, every service admin account.
+
+Two copies of the password exist. One is `.vault_pass` on the workstation. The
+other is `/opt/homelab-iac/.vault_pass` on svc-infra, which the nightly
+verification runner needs in order to decrypt the inventory. **svc-infra can
+therefore decrypt every secret in the estate**, which makes it the
+highest-value host here by some distance — worth knowing before deciding what
+else to run on it.
+
+This is a decision, not an oversight:
+
+- **Per-host vaults would not help much.** The runner on svc-infra verifies all
+  three VMs, so it would need all three vaults. The split moves the boundary
+  without shrinking what the interesting host can read.
+- **SOPS or age with per-secret recipients would help**, and costs a key
+  management story, a second tool in the validation chain, and a rebuild path
+  that no longer works from a bare clone plus one passphrase. For three VMs and
+  one operator that is the worse trade.
+- **The mitigation actually in place** is that Ansible never installs the
+  runner's copy. `roles/svc_infra/tasks/verify-runner.yml` renders every other
+  part of the runner and deliberately not that file; it is placed by hand, once,
+  per [Operations](operations.md). `verify_runner_secret_file` appears in the
+  role only as something read by the run scripts and asserted on by
+  `roles/svc_infra/tasks/verify.yml` — it is never the destination of a `copy`
+  or `template` task, so no deploy path can write a vault password to a VM.
+  Verification fails loudly when the file is missing, so the gap cannot go
+  unnoticed.
+
+Revisit this if a second operator appears, if a host outside the LAN ever needs
+to decrypt anything, or if svc-infra starts running something with a wider
+attack surface than the current catalog.
+
 ## Credential exposure response
 
 A repository review command serialized decrypted host variables into an
