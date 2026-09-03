@@ -1,0 +1,8 @@
+TASK [svc_infra : Build a tracked-files archive of the committed tree] *********
+changed: [svc-infra -> localhost]
+
+TASK [svc_infra : Record the deployed revision] ********************************
+changed: [svc-infra]
+
+PLAY RECAP *********************************************************************
+svc-infra                  : ok=201  changed=2    unreachable=0    failed=0    skipped=24   rescued=0    ignored=0

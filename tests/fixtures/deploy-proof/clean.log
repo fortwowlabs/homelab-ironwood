@@ -1,0 +1,9 @@
+TASK [svc_media : Render rootless media Quadlets] ******************************
+ok: [svc-media]
+
+TASK [svc_media : Verify all rootless media services are active] ***************
+ok: [svc-media]
+
+PLAY RECAP *********************************************************************
+svc-media                  : ok=142  changed=0    unreachable=0    failed=0    skipped=18   rescued=0    ignored=0
+svc-infra                  : ok=201  changed=0    unreachable=0    failed=0    skipped=24   rescued=0    ignored=0

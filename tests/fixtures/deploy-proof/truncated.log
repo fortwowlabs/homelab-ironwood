@@ -1,0 +1,4 @@
+TASK [svc_infra : Render the Authelia configuration] ***************************
+changed: [svc-infra]
+
+ERROR! The task includes an option with an undefined variable.
