@@ -2,6 +2,30 @@
 - name: Apply changed rootless service configuration
   ansible.builtin.meta: flush_handlers
 
+# Unconditional, and deliberately not a handler. The `media configuration
+# changed` handler only reloads when a Quadlet render reports `changed`, which
+# makes the converge unable to heal itself: if a deploy renders a NEW .container
+# file and then dies before handlers flush — an unreachable host, an interrupted
+# run — the next converge sees the file as unchanged, never reloads, and the
+# generated unit therefore never comes into existence. Every subsequent run then
+# fails on "Unit <name>.service not found" while the Quadlet sits on disk
+# looking correct.
+#
+# Observed exactly that way on svc-infra on 2026-07-30 (see the same task in
+# roles/svc_infra/tasks/apps.yml): adding a catalog entry reloaded firewalld,
+# which dropped the deploy's own SSH connection mid-play, and that host stayed
+# wedged across three further converges until the reload was run by hand.
+# svc-media's exposure is identical; it simply had not happened here yet.
+#
+# A reload costs ~40ms and is idempotent, so paying it every run is far cheaper
+# than a state only a human can notice and clear. changed_when: false because
+# reloading is not a configuration change — reporting `changed` every run would
+# make changed=0, the proof that deployed state matches the commit, impossible
+# on this host.
+- name: Reload the rootless user manager so new Quadlets are generated
+  ansible.builtin.command: systemctl --user -M homelab@ daemon-reload
+  changed_when: false
+
 - name: Read rootless media service state
   ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item }}.service"
   loop: >-
