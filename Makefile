@@ -58,7 +58,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 .PHONY: help deps deps-dev validate validate-tools validate-syntax \
 	validate-ansible validate-yaml validate-shell validate-python validate-links \
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
-	check check-diff verify verify-disruptive scan image-digest image-check image-bump \
+	check check-diff verify verify-disruptive deploy-proof scan image-digest image-check image-bump \
 	release-check release-report image-release roster-check drift reconcile access ping lint owui-image-config image-gen-check image-edit-check \
 	owui-personas owui-export \
 	vault-edit clean
@@ -182,6 +182,12 @@ access: ## Re-run the media VM's DNS, Caddy, and Homepage access layer
 
 verify: ## Run the non-disruptive verification playbook
 	$(ANSIBLE) $(VERIFY_PLAYBOOK) $(VAULT) $(ARGS)
+
+TARGET ?= deploy
+
+deploy-proof: ## Run TARGET=<deploy|dl|media|infra> and assert changed=0 mechanically
+	@$(PYTHON) scripts/deploy_proof.py -- $(MAKE) $(TARGET) \
+	  $(if $(USE_VAULT_FILE),USE_VAULT_FILE=$(USE_VAULT_FILE),) ARGS="$(ARGS)"
 
 image-check: ## Report which pinned images their tag has moved past
 	@scripts/image-check.sh

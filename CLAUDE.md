@@ -47,11 +47,18 @@ after a commit that file still names the previous revision, so the sync block
 rebuilds the archive, unpacks it and records the new revision — three changed
 tasks, every time. Run `make infra` again and it settles to `changed=0`.
 
-So step 6 in practice is: deploy, and if svc-infra reports exactly those three,
-deploy once more and require `changed=0` from the second run. Anything else
-still has to be explained before merging. Do not paper over a genuine diff by
-running the deploy twice and quoting the second number — check *which* tasks
-changed.
+So step 6 in practice is `make deploy-proof TARGET=infra`, which does the
+checking. It parses which *tasks* changed rather than how many, allowlists
+exactly the three sync tasks above on svc-infra only, and exits non-zero on
+anything else — including the case a count-based check would wave through,
+where the sync trio and a real change land in the same run. A partial trio
+fails too: that block is gated on one condition and runs whole or not at all,
+so two of three is not less drift, it is a state nobody has reasoned about. A
+deploy that never reached `PLAY RECAP` exits 2 rather than 0, because a run
+that died has proved nothing.
+
+It deliberately does not re-run the deploy for you. When it reports the
+sync-only state, run it again yourself and require a fully clean second run.
 
 ### TERRA: one clone, in WSL
 
