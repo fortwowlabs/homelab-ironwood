@@ -11,7 +11,6 @@ from pathlib import Path
 
 import yaml
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, UndefinedError
-
 from validate_generated_catalog import as_attr, comment, dict2items, split_url
 
 # Which `make validate-*` target runs this gate. Discovered by

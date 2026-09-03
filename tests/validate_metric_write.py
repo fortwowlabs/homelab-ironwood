@@ -25,7 +25,6 @@ path.
 
 from __future__ import annotations
 
-import os
 import subprocess
 import sys
 import tempfile
@@ -74,7 +73,7 @@ def test_publishes_valid_input() -> None:
         check("no success timestamp without --success",
               "homelab_scan_last_success_timestamp_seconds" not in body)
         check("no HELP/TYPE emitted",
-              not any(l.startswith("#") for l in body.splitlines()), body)
+              not any(line.startswith("#") for line in body.splitlines()), body)
         check("mode is 0644", oct(out.stat().st_mode & 0o777) == "0o644")
         check("no tmp file left", not list(Path(tmp).glob("*.tmp")))
 
@@ -107,11 +106,11 @@ def test_carries_last_success_forward_without_flag() -> None:
         run(tmp, ["--file", "scan", "--prefix", "homelab_scan", "--success"], SAMPLE_IN)
         first = Path(tmp, "scan.prom").read_text(encoding="utf-8")
         first_success = next(
-            l for l in first.splitlines()
-            if l.startswith("homelab_scan_last_success_timestamp_seconds"))
+            line for line in first.splitlines()
+            if line.startswith("homelab_scan_last_success_timestamp_seconds"))
         first_run = next(
-            l for l in first.splitlines()
-            if l.startswith("homelab_scan_run_timestamp_seconds"))
+            line for line in first.splitlines()
+            if line.startswith("homelab_scan_run_timestamp_seconds"))
 
         time.sleep(1.1)  # force the integer run timestamp to actually advance
 
@@ -119,11 +118,11 @@ def test_carries_last_success_forward_without_flag() -> None:
         second = Path(tmp, "scan.prom").read_text(encoding="utf-8")
         second_lines = second.splitlines()
         success_lines = [
-            l for l in second_lines
-            if l.startswith("homelab_scan_last_success_timestamp_seconds")]
+            line for line in second_lines
+            if line.startswith("homelab_scan_last_success_timestamp_seconds")]
         second_run = next(
-            l for l in second_lines
-            if l.startswith("homelab_scan_run_timestamp_seconds"))
+            line for line in second_lines
+            if line.startswith("homelab_scan_run_timestamp_seconds"))
 
         check("no --success still exits 0", proc.returncode == 0, proc.stderr)
         check("exactly one last_success line survives", len(success_lines) == 1,
@@ -140,8 +139,8 @@ def test_success_overwrites_existing_last_success() -> None:
         run(tmp, ["--file", "scan", "--prefix", "homelab_scan", "--success"], SAMPLE_IN)
         first = Path(tmp, "scan.prom").read_text(encoding="utf-8")
         first_success = next(
-            l for l in first.splitlines()
-            if l.startswith("homelab_scan_last_success_timestamp_seconds"))
+            line for line in first.splitlines()
+            if line.startswith("homelab_scan_last_success_timestamp_seconds"))
 
         time.sleep(1.1)
 
@@ -149,8 +148,8 @@ def test_success_overwrites_existing_last_success() -> None:
         second = Path(tmp, "scan.prom").read_text(encoding="utf-8")
         second_lines = second.splitlines()
         success_lines = [
-            l for l in second_lines
-            if l.startswith("homelab_scan_last_success_timestamp_seconds")]
+            line for line in second_lines
+            if line.startswith("homelab_scan_last_success_timestamp_seconds")]
 
         check("exactly one last_success line after two --success runs",
               len(success_lines) == 1, second)

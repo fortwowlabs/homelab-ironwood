@@ -8,7 +8,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[1]
 MAX_BLOB_BYTES = 10_000_000
 NON_SECRET_VAULT_KEYS = {
@@ -80,7 +79,13 @@ def reachable_blobs() -> list[tuple[str, str]]:
 
 def assignment_is_placeholder(key: str, value: str) -> bool:
     normalized_key = key.lower()
-    normalized_value = value.strip().lstrip(r"\`\"'")
+    # A character SET, deliberately — not a prefix. A value may arrive wrapped
+    # in any combination of backslash, backtick and quote characters, and all
+    # of them are stripped from the left regardless of order. (Note the raw
+    # string also puts a literal backslash in the set, because r"\"" retains
+    # the backslash it needs to avoid terminating the literal. Harmless here:
+    # a leading backslash is noise for this comparison either way.)
+    normalized_value = value.strip().lstrip(r"\`\"'")  # noqa: B005
     return (
         normalized_key in NON_SECRET_VAULT_KEYS
         or not normalized_value

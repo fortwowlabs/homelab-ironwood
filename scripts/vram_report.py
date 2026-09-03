@@ -143,7 +143,11 @@ def render(passes: list[dict]) -> str:
             used = row["card_used_mib"]
             cells = [f"{row['verdict']} ({used} MiB)" if used is not None else row["verdict"]]
             used_adjusted = _adjusted(used, base_baseline)
-        for entry, rows in zip(others, other_rows):
+        # strict=True documents an invariant rather than guarding a risk:
+        # other_rows is a comprehension over others (above), so the lengths
+        # cannot differ unless that construction changes. If it ever does,
+        # raising beats silently dropping the tail of a comparison table.
+        for entry, rows in zip(others, other_rows, strict=True):
             match = rows.get(key)
             if match is None:
                 cells.append("not measured")

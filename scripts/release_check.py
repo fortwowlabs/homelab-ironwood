@@ -653,7 +653,7 @@ def print_coverage(images, summary) -> None:
     print(f"{len(images)} distinct pinned image(s).\n")
     for record in sorted(images, key=lambda r: r["name"]):
         usable = record["verdict"] == "comparable"
-        print("%s %-30s %-26s %-40s %s" % (
+        print("{} {:<30} {:<26} {:<40} {}".format(
             "+" if usable else " ",
             record["name"][:30],
             (record["version"] or "-")[:26],
