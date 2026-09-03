@@ -26,6 +26,16 @@ exclude_paths:
 #   risky-octal             — 0644 written as 644, silently meaning something else
 #   risky-shell-pipe        — a pipeline whose failure is swallowed without pipefail
 #   latest / package-latest — unpinned versions, against this repo's digest-pin rule
+#   jinja                   — a template expression that does not parse
+#   no-free-form            — `command: foo=bar` parsed as a module arg, not a word
+#   empty-string-compare    — `when: x == ""`, which is not the emptiness test it
+#                             looks like under Ansible's type coercion
+#   deprecated-module       — a module scheduled for removal from a pinned collection
+#
+# The last four were added 2026-09-03 and measured first against all 65 files:
+# zero findings. They are a free ratchet — they cost nothing today and fail the
+# build the first time one of these mistakes is written. That is the opposite
+# trade from `--profile safety`, whose 353 findings are 352 style.
 enable_list:
   - no-log-password
   - risky-file-permissions
@@ -33,3 +43,7 @@ enable_list:
   - risky-shell-pipe
   - latest
   - package-latest
+  - jinja
+  - no-free-form
+  - empty-string-compare
+  - deprecated-module
