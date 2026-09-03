@@ -38,7 +38,17 @@
     paths: /opt/homelab/.config/containers/systemd
     patterns: "*.container"
     file_type: file
-    contains: 'Ansible managed'
+    # `contains` matches with re.match — the BEGINNING of each line — unless
+    # read_whole_file is set, when it uses re.search instead. The marker lands
+    # on a line reading "# Ansible managed", so the bare string could never
+    # match: the line starts with '#'. This find returned zero files on every
+    # run, which made the sweep below inert while looking correct, and an inert
+    # sweep is indistinguishable from an estate with nothing stale on it.
+    # Measured 2026-09-03: 0 of 30 managed quadlets matched on svc-infra.
+    # (roles/svc_download/tasks/files.yml escaped this by anchoring its own
+    # pattern at '^#'.)
+    contains: '(?m)^#\s*Ansible managed\s*$'
+    read_whole_file: true
   register: infra_managed_containers
   check_mode: false
 
@@ -55,7 +65,10 @@
     paths: /opt/homelab/.config/containers/systemd
     patterns: "*.network"
     file_type: file
-    contains: 'Ansible managed'
+    # Same regex and read_whole_file as the container find above; see the
+    # comment there for why the bare string could never match.
+    contains: '(?m)^#\s*Ansible managed\s*$'
+    read_whole_file: true
   register: infra_managed_networks
   check_mode: false
 
