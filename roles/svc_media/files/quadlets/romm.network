@@ -1,3 +1,12 @@
+# Ansible managed
+#
+# That marker is load-bearing, not decoration. The stale-Quadlet sweep in
+# roles/svc_media/tasks/files.yml discovers *.network files by it and deletes
+# the ones its expected list no longer names; a file without it is invisible
+# to the sweep, so retiring this network would leave the unit behind on the
+# host. Templated Quadlets inherit the string from {{ ansible_managed }} —
+# this one is copy:'d verbatim, so it carries the marker literally.
+#
 # ~homelab/.config/containers/systemd/romm.network
 # Private bridge for the RomM app<->DB pair (current upstream stack:
 # app w/ internal Valkey + MariaDB — verify against docs.romm.app before
