@@ -26,6 +26,7 @@ ANSIBLE_LINT := $(BIN)ansible-lint
 YAMLLINT := $(BIN)yamllint
 SHELLCHECK ?= shellcheck
 GITLEAKS ?= gitleaks
+RUFF := $(BIN)ruff
 
 # Keep Ansible's controller-side scratch data inside the checkout. This makes
 # validation work in restricted runners and `clean` removes it predictably.
@@ -55,7 +56,7 @@ SHELL_FILES := $(foreach file,$(REPOSITORY_SHELL),$(if $(wildcard $(file)),$(fil
 .DEFAULT_GOAL := help
 
 .PHONY: help deps deps-dev validate validate-tools validate-syntax \
-	validate-ansible validate-yaml validate-shell validate-links \
+	validate-ansible validate-yaml validate-shell validate-python validate-links \
 	validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci preflight deploy dl media infra pve \
 	check check-diff verify verify-disruptive scan image-digest image-check image-bump \
 	release-check release-report image-release roster-check drift reconcile access ping lint owui-image-config image-gen-check image-edit-check \
@@ -74,7 +75,7 @@ deps: ## Create .venv and install the pinned runtime and Ansible collections
 deps-dev: deps ## Install pinned validation dependencies as well
 	$(VENV)/bin/python -m pip install --requirement requirements-dev.txt
 
-validate: validate-tools validate-syntax validate-ansible validate-yaml validate-shell validate-links validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci ## Run every offline validation gate
+validate: validate-tools validate-syntax validate-ansible validate-yaml validate-shell validate-python validate-links validate-catalog validate-provisioning validate-systemd validate-secrets validate-ci ## Run every offline validation gate
 
 validate-tools:
 	@mkdir -p .ansible/tmp .ansible/cache
@@ -83,6 +84,7 @@ validate-tools:
 	@test -x "$(YAMLLINT)" || { echo "missing $(YAMLLINT); run 'make deps-dev'" >&2; exit 127; }
 	@command -v "$(SHELLCHECK)" >/dev/null || { echo "missing ShellCheck (install it with your OS package manager)" >&2; exit 127; }
 	@command -v "$(GITLEAKS)" >/dev/null || { echo "missing gitleaks (install it with your OS package manager)" >&2; exit 127; }
+	@test -x "$(RUFF)" || { echo "missing $(RUFF); run 'make deps-dev'" >&2; exit 127; }
 
 validate-syntax:
 	ANSIBLE_INVENTORY=$(FIXTURE_INVENTORY) $(ANSIBLE) --inventory $(FIXTURE_INVENTORY) --syntax-check $(PLAYBOOK)
@@ -110,6 +112,14 @@ validate-shell:
 # no group — a gate nobody invokes used to be indistinguishable from a passing
 # estate, and remembering to add a line here was the only thing preventing it.
 	$(PYTHON) tests/run_gates.py shell
+
+validate-python:
+# Invoked directly rather than through tests/run_gates.py, the same way
+# ShellCheck and gitleaks are. run_gates.py exists so that ADDING a gate is a
+# new file rather than a new Makefile line; ruff is not a gate, it is a tool
+# that lints the gates, and routing it through the runner it lints would invert
+# that dependency for nothing.
+	$(RUFF) check --no-cache tests scripts
 
 validate-links:
 	$(PYTHON) tests/run_gates.py links

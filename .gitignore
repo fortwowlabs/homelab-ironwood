@@ -27,6 +27,11 @@ docs/transcripts/
 # a .venv at the worktree root that gate cannot run at all.
 .venv
 __pycache__/
+
+# ruff writes this into the repo root on every run. The change workflow
+# requires `git status --porcelain` to print nothing, so an un-ignored cache
+# would fail the clean-tree check for a reason that is not a change.
+.ruff_cache/
 *.py[cod]
 
 # Ansible cruft

@@ -1,0 +1,51 @@
+# Python lint configuration.
+#
+# WHY THIS EXISTS AT ALL
+#
+# Shell in this repo goes through ShellCheck; the ~7,000 lines of Python in
+# tests/ and scripts/ went through nothing. That is the wrong asymmetry,
+# because the files in tests/ are the gates every other claim in this repo
+# rests on — an unchecked bug there does not fail loudly, it passes quietly.
+#
+# WHY THE SELECTION IS EXPLICIT
+#
+# ruff's built-in default select has changed between releases. Relying on it
+# would mean a version bump could silently widen the gate (a wall of new
+# findings at the worst moment) or narrow it (rules stop being enforced with no
+# diff to show it). Name the rules; the pin in requirements-dev.txt and this
+# list then fully describe what runs.
+#
+# Measured 2026-09-03 against the whole tree: 15 findings, all fixed in the
+# branch that added this file. Two of the fifteen were correctness rather than
+# style — a zip() with no strict= and a .strip() given a multi-character
+# argument, which strips a character SET rather than the suffix its author
+# meant.
+#
+# WHY py312 AND NOT py313
+#
+# This is the FLOOR, not the local interpreter. The WSL workstation runs
+# 3.12.3; .github/workflows/validate.yml pins 3.13. Targeting the lower of the
+# two keeps every UP suggestion valid in both places — target py313 and ruff
+# would propose syntax that fails locally. Raise this only when the
+# workstation's floor actually moves.
+target-version = "py312"
+
+[lint]
+select = [
+    "E4",   # pycodestyle: imports
+    "E7",   # pycodestyle: statement issues, incl. E741 ambiguous names
+    "E9",   # pycodestyle: syntax and IO errors
+    "F",    # pyflakes: undefined names, unused imports and variables
+    "B",    # flake8-bugbear: likely bugs, incl. B905 zip-without-strict
+    "UP",   # pyupgrade: constructs superseded by the pinned Python
+    "I",    # isort: import ordering
+]
+
+# Deliberately NOT selected, with reasons, so the next person does not have to
+# re-derive them:
+#   S (bandit)   — subprocess and shell use is the entire job of these scripts;
+#                  it would report the design, not a defect.
+#   ANN / D      — annotations and docstrings. The gates are already unusually
+#                  well documented in prose; enforcing shape adds noise.
+#   E501         — line length. Comments here carry incident history and the
+#                  reflow would cost more than the consistency buys.
