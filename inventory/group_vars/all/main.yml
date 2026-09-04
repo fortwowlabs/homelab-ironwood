@@ -139,7 +139,8 @@ mullvad_dns: "10.64.0.1"
 # WARNING instead of failing the deploy (matching the ntfy_url pattern).
 # Bumping this follows the BUMP PROCEDURE at the top of apps.yml.
 # tag: latest
-beszel_agent_image: "docker.io/henrygd/beszel-agent@sha256:8874e2c53f9de5e063a6a80d6b617e20fa593ac5dc4eb4c6ce1f912f510f38f8"
+# was 2026-09-04: sha256:8874e2c53f9de5e063a6a80d6b617e20fa593ac5dc4eb4c6ce1f912f510f38f8
+beszel_agent_image: "docker.io/henrygd/beszel-agent@sha256:00c88600e7d120128f623b2deb5257603d464e841fd68f88cc791dcc075f9e46"
 beszel_agent_enabled: >-
   {{ (vault_beszel_token | default('')) | length > 0
      and (vault_beszel_key | default('')) | length > 0 }}
