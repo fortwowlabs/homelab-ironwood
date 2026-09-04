@@ -12,6 +12,7 @@ So the interesting cases are exercised here, offline, against recorded output:
   infra-sync    only the three known .deployed-rev sync tasks       -> 0
   drift         the sync trio PLUS a real change                    -> 1
   partial-sync  two of the three sync tasks and nothing else        -> 1
+  loop-items    one task changing several loop items                -> 1
   truncated     the deploy never reached PLAY RECAP                 -> 2
 
 `drift` is the one that earns this file. CLAUDE.md warns against papering over
@@ -24,6 +25,14 @@ tasks is not "less drift" — the block is gated on one condition and either run
 whole or not at all, so a subset means something happened that nobody has
 reasoned about. It must fail rather than be treated as a smaller version of a
 known-good state.
+
+`loop-items` is about legibility rather than the verdict. Ansible prints one
+`changed:` line per ITEM of a looping task, so a task that changed three items
+appeared in the report three times while PLAY RECAP counted it once. The
+operator has to explain each listed line before merging, and three copies of
+one line reads as three things to explain. The count that matters is tasks, so
+the report names each task once — which is why the expected occurrence count
+below is part of every case rather than a note attached to this one.
 
 `truncated` is the third: a deploy that died has proved nothing, and must not
 be reported as the same thing as a deploy that changed nothing.
@@ -47,13 +56,18 @@ ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests/fixtures/deploy-proof"
 INFRA_HOST = "svc-infra"
 
-# fixture -> (expected exit code, a fragment the message must mention)
+# fixture -> (expected exit code, a fragment, how many times it must appear)
+#
+# The occurrence count is checked exactly, not as a minimum. A fragment that
+# turns up twice is the loop-item duplication this gate exists to pin down, and
+# `>= 1` would report that as a pass.
 CASES = (
-    ("clean.log", 0, "clean"),
-    ("infra-sync.log", 0, "runner checkout"),
-    ("drift.log", 1, "Authelia"),
-    ("partial-sync.log", 1, "Record the deployed revision"),
-    ("truncated.log", 2, "PLAY RECAP"),
+    ("clean.log", 0, "clean", 1),
+    ("infra-sync.log", 0, "runner checkout", 1),
+    ("drift.log", 1, "Authelia", 1),
+    ("partial-sync.log", 1, "Record the deployed revision", 1),
+    ("loop-items.log", 1, "Render rootless media Quadlets", 1),
+    ("truncated.log", 2, "PLAY RECAP", 1),
 )
 
 
@@ -64,7 +78,7 @@ def main() -> int:
     # returning a clean result it had not earned; an empty fixture directory
     # would make this gate report OK having exercised nothing.
     present = sorted(path.name for path in FIXTURES.glob("*.log"))
-    expected = sorted(name for name, _, _ in CASES)
+    expected = sorted(name for name, _, _, _ in CASES)
     if present != expected:
         print(
             f"fixture mismatch: {FIXTURES.relative_to(ROOT)} holds {present}, "
@@ -74,7 +88,7 @@ def main() -> int:
         )
         return 1
 
-    for name, expected_code, expected_fragment in CASES:
+    for name, expected_code, expected_fragment, expected_count in CASES:
         text = (FIXTURES / name).read_text(encoding="utf-8")
         try:
             changed = parse_changed(text)
@@ -83,14 +97,16 @@ def main() -> int:
         else:
             code, message = verdict(changed, INFRA_HOST)
 
+        seen = message.lower().count(expected_fragment.lower())
         if code != expected_code:
             problems.append(
                 f"{name}: expected exit {expected_code}, got {code} — {message}"
             )
-        elif expected_fragment.lower() not in message.lower():
+        elif seen != expected_count:
             problems.append(
-                f"{name}: exit {code} was right but the message did not mention "
-                f"{expected_fragment!r}: {message}"
+                f"{name}: exit {code} was right but the message mentioned "
+                f"{expected_fragment!r} {seen} time(s), expected "
+                f"{expected_count}: {message}"
             )
 
     if problems:
@@ -99,7 +115,7 @@ def main() -> int:
             print(f"  {problem}", file=sys.stderr)
         return 1
 
-    failing = sum(1 for _, code, _ in CASES if code != 0)
+    failing = sum(1 for _, code, _, _ in CASES if code != 0)
     print(f"deploy_proof: OK ({len(CASES)} cases, {failing} of them must fail)")
     return 0
 

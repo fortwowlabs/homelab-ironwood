@@ -1,0 +1,14 @@
+TASK [svc_media : Render rootless media Quadlets] ******************************
+changed: [svc-media] => (item=jellyfin)
+changed: [svc-media] => (item=homepage)
+
+TASK [svc_media : Install the RomM private network Quadlet] ********************
+changed: [svc-media]
+
+TASK [svc_media : Apply changed rootless service configuration] ****************
+changed: [svc-media] => (item=jellyfin)
+changed: [svc-media] => (item=homepage)
+changed: [svc-media] => (item=romm)
+
+PLAY RECAP *********************************************************************
+svc-media                  : ok=142  changed=3    unreachable=0    failed=0    skipped=18   rescued=0    ignored=0

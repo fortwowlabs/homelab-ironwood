@@ -65,7 +65,19 @@ class NoRecapError(Exception):
 
 
 def parse_changed(text: str) -> dict[str, list[str]]:
-    """Map each host to the task names that reported `changed` for it."""
+    """Map each host to the task names that reported `changed` for it.
+
+    Each name appears once, in the order it was first seen. Ansible prints one
+    `changed:` line per ITEM of a looping task, so a task whose loop changed
+    three items emits three lines while PLAY RECAP counts it once; listing it
+    three times would ask the operator to explain three things where there is
+    one. Ordering is preserved rather than sorted so the report reads in the
+    order the deploy ran.
+
+    Nothing downstream counts these — the sync-trio allowlist compares sets —
+    so collapsing duplicates loses no signal. How MANY items a task touched is
+    still in the deploy output above the verdict, which is streamed in full.
+    """
     if not RECAP_RE.search(text):
         raise NoRecapError(
             "no PLAY RECAP in the deploy output — the run did not finish, so "
@@ -83,7 +95,9 @@ def parse_changed(text: str) -> dict[str, list[str]]:
         changed_match = CHANGED_RE.match(line)
         if changed_match:
             host = changed_match.group(1)
-            changed.setdefault(host, []).append(current_task)
+            tasks = changed.setdefault(host, [])
+            if current_task not in tasks:
+                tasks.append(current_task)
     return changed
 
 
