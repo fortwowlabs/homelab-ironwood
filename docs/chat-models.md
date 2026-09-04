@@ -6,7 +6,8 @@ specific.
 
 The models themselves live on the GPU host and are installed by hand — see
 [gpu-host.md](gpu-host.md) for how, including the one that cannot be pulled the
-normal way.
+normal way. For a "which model do I actually want" index across chat, vision,
+image and video, see [inference-toolkit.md](inference-toolkit.md).
 
 ## The roster
 

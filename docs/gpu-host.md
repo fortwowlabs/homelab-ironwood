@@ -15,6 +15,10 @@ repo's only knowledge of it is two variables in
 | `gpu_host_ip` | Its reserved LAN address — `192.168.1.40` |
 | `gpu_host_online` | Whether Open WebUI should try to talk to it at all |
 
+For a practical "which model do I actually want" index across chat, vision,
+image and video — rather than the setup history below — see
+[inference-toolkit.md](inference-toolkit.md).
+
 ## TERRA's addresses
 
 The machine answers on **two** addresses, and only one of them is configured

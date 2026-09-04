@@ -161,7 +161,9 @@ admin-settings session.
 
 The GPU host itself is a hand-managed Windows workstation, not infrastructure.
 Its setup, the firewall scoping, the Continue for VSCode config, and the
-go-live step are all in [The GPU host](gpu-host.md). Until
+go-live step are all in [The GPU host](gpu-host.md). For which model or
+workflow to actually reach for — chat, vision, image, video — see
+[the inference toolkit](inference-toolkit.md). Until
 `gpu_host_online: true`, Open WebUI deploys with its Ollama and
 image-generation backends switched off on purpose — web search still works,
 because it does not depend on the PC.
