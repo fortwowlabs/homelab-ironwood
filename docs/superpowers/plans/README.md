@@ -33,9 +33,9 @@ title. The column is only worth having for the rows that are not "Shipped".
 | [2026-08-27-video-generation](2026-08-27-video-generation.md) | Shipped — GPU host only, no repo code by design; evidence is [gpu-host.md](../../gpu-host.md) "MiniMax H3" |
 | [2026-09-03-shell-gate-discovery](2026-09-03-shell-gate-discovery.md) | Shipped |
 | [2026-09-03-python-lint-gate](2026-09-03-python-lint-gate.md) | Shipped |
-| [2026-09-03-deploy-proof](2026-09-03-deploy-proof.md) | Shipped — one live check outstanding, see the plan's verification section |
+| [2026-09-03-deploy-proof](2026-09-03-deploy-proof.md) | Shipped — including the live run its verification section left open; the regexes were confirmed against real callback output on 2026-09-03 and again on 2026-09-04 |
 | [2026-09-03-repo-hygiene](2026-09-03-repo-hygiene.md) | Shipped |
-| [2026-09-03-media-converge-parity](2026-09-03-media-converge-parity.md) | In progress |
+| [2026-09-03-media-converge-parity](2026-09-03-media-converge-parity.md) | Shipped |
 | [2026-09-03-secret-guard-loop](2026-09-03-secret-guard-loop.md) | Deferred — the plan leads with the argument against itself; read that before starting |
 
 Three of the eighteen are **handoff notes** rather than implementation plans:
