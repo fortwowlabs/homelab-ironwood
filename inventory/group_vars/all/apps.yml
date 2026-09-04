@@ -199,7 +199,8 @@ download_apps:
   # write the host-owned /config and /output binds.
   jdownloader:
     # tag: latest
-    image: "docker.io/jlesage/jdownloader-2@sha256:47ee6c64917ca5326516ebe868714709c6bdd2e08ca0e33f6e80a943ef2019d2"
+    # was 2026-09-04: sha256:47ee6c64917ca5326516ebe868714709c6bdd2e08ca0e33f6e80a943ef2019d2
+    image: "docker.io/jlesage/jdownloader-2@sha256:f16d47986bf6a5db6d67484e3b7e76404bce74f6f212809127a79eb76aa1c641"
     ui_port: 5800
     volumes:
       - /srv/appdata/jdownloader:/config:Z
