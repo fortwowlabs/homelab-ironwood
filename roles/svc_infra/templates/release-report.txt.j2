@@ -72,6 +72,24 @@ errors      {{ release_counts.error | default(0) }}
 {% if release.summary.quota_remaining is defined and release.summary.quota_remaining is not none %}
 GitHub API quota left: {{ release.summary.quota_remaining }}/{{ release.summary.quota_limit }}{{ '' if release.summary.authenticated | default(false) else '  (unauthenticated)' }}
 {% endif %}
+{% if release.tooling | default([]) | length > 0 %}
+
+TOOLING PINS ({{ release.tooling | length }})
+{{ '=' * 60 }}
+{% for t in release.tooling | sort(attribute='name') %}
+{% if t.verdict == 'current' %}
+  {{ "%-24s %-14s current" | format(t.name, t.version) }}
+{% elif t.verdict == 'error' %}
+  {{ "%-24s %-14s could not check: %s" | format(t.name, t.version, t.detail) }}
+{% else %}
+  {{ "%-24s %-14s -> %s" | format(t.name, t.version, t.latest) }}
+{% endif %}
+{% endfor %}
+
+    requirements.txt, requirements-dev.txt and requirements.yml — this repo's
+    own Ansible/Python toolchain, checked against PyPI and Galaxy the same way
+    the images above are checked against GitHub.
+{% endif %}
 
 WHAT TO DO WITH THIS
 {{ '=' * 60 }}

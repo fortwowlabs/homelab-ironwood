@@ -126,6 +126,28 @@
 </p>
 {% endif %}
 
+{% if release.tooling | default([]) | length > 0 %}
+<h2>Tooling pins ({{ release.tooling | length }})</h2>
+<div class="scroll">
+<table>
+  <tr><th>pin</th><th>pinned</th><th>upstream</th></tr>
+  {% for t in release.tooling | sort(attribute='name') %}
+  <tr>
+    <td>{{ t.name }}</td>
+    <td>{{ t.version }}</td>
+    <td>{% if t.verdict == 'current' %}current{% elif t.verdict == 'error' %}could not check: {{ t.detail }}{% else %}{{ t.latest }}{% endif %}</td>
+  </tr>
+  {% endfor %}
+</table>
+</div>
+<p class="note">
+  <code>requirements.txt</code>, <code>requirements-dev.txt</code> and
+  <code>requirements.yml</code> &mdash; this repo's own Ansible/Python
+  toolchain, checked against PyPI and Galaxy the same way the images above are
+  checked against GitHub.
+</p>
+{% endif %}
+
 <h2>What to do with this</h2>
 <p class="note">
   Nothing automatically. This report deliberately prints no bump command: for

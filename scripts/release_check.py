@@ -129,6 +129,75 @@ def read_pins(root: Path) -> list[tuple[str, str]]:
     return pins
 
 
+TOOLING_PYTHON_FILES = ("requirements.txt", "requirements-dev.txt")
+TOOLING_COLLECTIONS_FILE = "requirements.yml"
+
+# `name==version`, the only pin shape these files use. Skips `-r other.txt`
+# and blank/comment lines the same way the files themselves read.
+TOOLING_PIN_RE = re.compile(r"^([A-Za-z0-9][A-Za-z0-9._-]*)==([A-Za-z0-9][A-Za-z0-9._+-]*)$")
+
+# requirements.yml is small, flat and hand-maintained — a regex over it reads
+# it the same deliberate way read_overrides() reads main.yml's override block,
+# rather than adding a PyYAML dependency to a script this repo runs with plain
+# system python3 on the nightly runner.
+TOOLING_COLLECTION_NAME_RE = re.compile(r'^-\s*name:\s*"?([A-Za-z0-9._-]+)"?\s*$')
+TOOLING_COLLECTION_VERSION_RE = re.compile(r'^version:\s*"?([^"\s]+)"?\s*$')
+
+
+def read_tooling_pins(root: Path) -> list[tuple[str, str, str]]:
+    """(name, source, pinned version) for every Ansible/Python tooling pin.
+
+    docs/security.md says "Dependency versions are committed" as though that
+    were a control — until now nothing ever compared what is committed against
+    what PyPI or Galaxy actually publish, the same gap the rest of this script
+    closes for container images.
+    """
+    pins: list[tuple[str, str, str]] = []
+    for relative in TOOLING_PYTHON_FILES:
+        path = root / relative
+        if not path.exists():
+            continue
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith(("#", "-r", "-c")):
+                continue
+            match = TOOLING_PIN_RE.match(stripped)
+            if match:
+                pins.append((match.group(1), "pypi", match.group(2)))
+
+    path = root / TOOLING_COLLECTIONS_FILE
+    if path.exists():
+        pending_name = None
+        for line in path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            name_match = TOOLING_COLLECTION_NAME_RE.match(stripped)
+            if name_match:
+                pending_name = name_match.group(1)
+                continue
+            version_match = TOOLING_COLLECTION_VERSION_RE.match(stripped)
+            if version_match and pending_name:
+                pins.append((pending_name, "galaxy", version_match.group(1)))
+                pending_name = None
+    return pins
+
+
+def examine_tooling(root: Path, *, timeout: int) -> list[dict]:
+    """Same current/behind/error verdicts as examine(), for the repo's own
+    Ansible/Python pins instead of the container catalog."""
+    records: list[dict] = []
+    for name, source, version in read_tooling_pins(root):
+        record = {"name": name, "source": source, "version": version,
+                  "latest": "", "verdict": "", "detail": ""}
+        latest = pypi_latest(name, timeout) if source == "pypi" else galaxy_latest(name, timeout)
+        if isinstance(latest, RuntimeError):
+            record["verdict"], record["detail"] = ERROR, str(latest)
+        else:
+            record["latest"] = latest
+            record["verdict"] = compare(version, latest)
+        records.append(record)
+    return records
+
+
 def read_overrides(root: Path) -> dict[str, str]:
     """The hand-maintained image -> upstream repository map from main.yml.
 
@@ -355,6 +424,36 @@ def comparable(version: str) -> bool:
     return (bool(cleaned)
             and cleaned.lower() not in NON_VERSIONS
             and bool(VERSION_SHAPE_RE.match(cleaned)))
+
+
+def fetch_latest(url: str, path: tuple[str, ...], timeout: int) -> str | RuntimeError:
+    """GET url, walk `path` through the JSON body, return the string found.
+
+    Shared by the PyPI and Galaxy lookups below — both are "one JSON GET,
+    pull one field" and disagree only on the URL and where the version sits.
+    """
+    try:
+        raw = fetch(url, {"Accept": "application/json"}, timeout)
+        value: object = json.loads(raw)
+        for key in path:
+            value = value[key]  # type: ignore[index]
+        return str(value)
+    except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError) as error:
+        return RuntimeError(f"{type(error).__name__}: {error}")
+    except (json.JSONDecodeError, KeyError, TypeError) as error:
+        return RuntimeError(f"unparseable response: {error}")
+
+
+def pypi_latest(name: str, timeout: int) -> str | RuntimeError:
+    url = f"https://pypi.org/pypi/{urllib.parse.quote(name)}/json"
+    return fetch_latest(url, ("info", "version"), timeout)
+
+
+def galaxy_latest(name: str, timeout: int) -> str | RuntimeError:
+    namespace, _, collection = name.partition(".")
+    url = ("https://galaxy.ansible.com/api/v3/plugin/ansible/content/published/"
+           f"collections/index/{namespace}/{collection}/")
+    return fetch_latest(url, ("highest_version", "version"), timeout)
 
 
 def compare(local: str, upstream: str) -> str:
@@ -589,6 +688,25 @@ def state_from(images, previous: dict) -> dict:
 # output
 # --------------------------------------------------------------------------
 
+def print_tooling(tooling: list[dict]) -> None:
+    """This repo's own Ansible/Python pins, same current/behind/error verdicts
+    as the container catalog above but never folded into its totals — a
+    different supply chain, checked the same way."""
+    if not tooling:
+        return
+    print(f"TOOLING PINS ({len(tooling)})")
+    print("=" * 60)
+    for record in sorted(tooling, key=lambda r: r["name"]):
+        if record["verdict"] == CURRENT:
+            print(f"  {record['name']:<24} {record['version']:<14} current")
+        elif record["verdict"] == ERROR:
+            print(f"  {record['name']:<24} {record['version']:<14} "
+                  f"could not check: {record['detail']}")
+        else:
+            print(f"  {record['name']:<24} {record['version']:<14} -> {record['latest']}")
+    print()
+
+
 def print_report(result) -> None:
     images = result["images"]
     summary = result["summary"]
@@ -640,6 +758,8 @@ def print_report(result) -> None:
             # symptom then is a page of `error` verdicts with no obvious cause.
             print("  A full run costs ~45 requests. Another within the hour "
                   "will not complete.")
+    print()
+    print_tooling(result.get("tooling") or [])
     if result["seeded"]:
         print()
         print("This run had no previous state, so nothing is reported as NEW — the")
@@ -766,8 +886,13 @@ def main() -> int:
     if seeded:
         still_behind, new = still_behind + new, []
 
+    # Skipped for --image: that flag is a fast, narrow check of one container,
+    # and querying PyPI/Galaxy for the repo's own tooling pins is unrelated
+    # work it did not ask for.
+    tooling = [] if arguments.image else examine_tooling(root, timeout=arguments.timeout)
+
     result = {"images": images, "summary": summary, "new": new,
-              "still_behind": still_behind, "seeded": seeded}
+              "still_behind": still_behind, "seeded": seeded, "tooling": tooling}
 
     if arguments.state_out:
         Path(arguments.state_out).write_text(
