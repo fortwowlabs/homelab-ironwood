@@ -71,6 +71,13 @@ ALERT_TEMPLATES = (
     "roles/mon/templates/failed-units-watch.sh.j2",
     "roles/pve_mon/templates/diskguard.sh.j2",
     "roles/pve_mon/templates/nfsguard.sh.j2",
+    # Publishes at `default` only — a weekly PVE/kernel/ZFS version summary,
+    # deliberately routine (see the long comment beside it) and posted to
+    # NTFY_TOPIC (homelab-deploy) on purpose, not NTFY_ALERT_TOPIC. Listed so
+    # the discovery sweep does not flag it as an unregistered alerter; the
+    # severity scan itself passes it through without complaint because
+    # `default` is a routine literal.
+    "roles/pve_mon/templates/pve-health.sh.j2",
     "roles/pve_mon/templates/smartd-ntfy.sh.j2",
     "roles/pve_mon/templates/zed-ntfy.sh.j2",
     "roles/service_vm/templates/notify-failure.sh.j2",

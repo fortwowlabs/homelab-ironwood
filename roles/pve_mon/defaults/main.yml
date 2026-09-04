@@ -16,6 +16,11 @@ pve_disk_critical_threshold: 90
 # so 45 days means a scrub has been skipped entirely rather than merely run
 # late.
 pve_scrub_max_age_days: 45
+# ISO weekday (1=Monday..7=Sunday) the daily health check also posts a
+# PVE/kernel/ZFS version summary to the muted homelab-deploy ntfy topic. Weekly
+# rather than nightly: this is routine information for a human to compare
+# against the Proxmox roadmap by hand, not an alert.
+pve_version_report_weekday: 1
 # The NAME of the vault variable carrying this host's healthchecks.io ping
 # UUID, as a string. Held here rather than written literally into verify.yml
 # because tests/validate_secret_tasks.py treats any `vault_` token in a task as

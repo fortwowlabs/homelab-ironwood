@@ -26,9 +26,16 @@ SCRUB_MAX_DAYS={{ pve_scrub_max_age_days | default(45) }}
 # Overridable the same way diskguard's THRESH is, so the capacity branch can be
 # exercised on a healthy host instead of being trusted on first use.
 CRIT_THRESH="${CRIT_THRESH:-{{ pve_disk_critical_threshold | default(90) }}}"
+# ISO weekday (1=Monday..7=Sunday) the version report goes to ntfy on.
+VERSION_REPORT_DAY="{{ pve_version_report_weekday | default(1) }}"
 
 # shellcheck source=/dev/null
 [[ -r /etc/homelab-healthchecks.env ]] && . /etc/homelab-healthchecks.env
+# EnvironmentFile= already injects this for the systemd-invoked run; sourced
+# again here so a manual invocation (an operator running the script by hand)
+# still has NTFY_URL/NTFY_TOKEN/NTFY_TOPIC for the weekly version report below.
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-notify.env ]] && . /etc/homelab-notify.env
 
 problems=""
 
@@ -151,6 +158,50 @@ if command -v apt-get >/dev/null 2>&1; then
         | grep -c '^Inst .*security' || true)
     if [[ "${security_updates:-0}" -gt 0 ]]; then
         echo "PVE has ${security_updates} pending security update(s) — reporting only, nothing was applied"
+    fi
+fi
+
+# Software versions. Nothing anywhere in this repo previously recorded what PVE
+# itself is running — every other layer (VM OS errata, container images) gets a
+# nightly or weekly number, and the hypervisor got none, which is exactly the
+# "unmeasured, not up to date" gap docs/security.md calls out for untracked
+# container images. There is no reliable feed to diff this against the way
+# release_check.py diffs a container against GitHub — Proxmox publishes no such
+# API — so this reports the running versions for a human to compare against
+# https://pve.proxmox.com/wiki/Roadmap by hand, on the same cadence a person
+# would actually look.
+#
+# Posted weekly, not nightly: this is routine information, not an alert, and it
+# belongs on the muted homelab-deploy topic alongside deploy/verify
+# confirmations. A number that cannot change between two consecutive days does
+# not need to be repeated seven times before someone reads it.
+#
+# Never fails the health check, for the same reason the security-update count
+# above does not: running behind on PVE is a standing condition here, not an
+# incident.
+pve_version=$(pveversion 2>/dev/null | head -1)
+kernel_version=$(uname -r)
+zfs_version=$(zfs version 2>/dev/null | head -1)
+echo "PVE versions: ${pve_version:-unknown} | kernel ${kernel_version} | ${zfs_version:-zfs unknown} | ${security_updates:-0} pending security update(s)"
+
+if [[ "$(date +%u)" == "$VERSION_REPORT_DAY" ]]; then
+    if [[ -n "${NTFY_URL:-}" ]]; then
+        AUTH=()
+        [[ -n "${NTFY_TOKEN:-}" ]] && AUTH=(-H "Authorization: Bearer ${NTFY_TOKEN}")
+        topic="${NTFY_TOPIC:-homelab-deploy}"
+        curl -fsS --max-time 15 --retry 3 --retry-delay 5 -X POST \
+            "${AUTH[@]}" \
+            -H "Title: PVE versions on $(hostname -s)" \
+            -H "Priority: default" \
+            -H "Tags: information_source" \
+            -d "${pve_version:-unknown}
+kernel ${kernel_version}
+${zfs_version:-zfs unknown}
+${security_updates:-0} pending security update(s) — see docs/operations.md before acting" \
+            "${NTFY_URL}/${topic}" >/dev/null 2>&1 \
+            || logger -p daemon.warning -t pve-health "ntfy push FAILED for weekly version report"
+    else
+        logger -p daemon.warning -t pve-health "NTFY_URL unset in /etc/homelab-notify.env; weekly version report not sent"
     fi
 fi
 
