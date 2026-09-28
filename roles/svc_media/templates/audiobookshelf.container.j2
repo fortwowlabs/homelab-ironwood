@@ -18,6 +18,10 @@ Volume=%h/appdata/audiobookshelf/config:/config:Z
 Volume=%h/appdata/audiobookshelf/metadata:/metadata:Z
 Volume=/srv/media/audiobooks:/audiobooks
 Volume=/srv/media/ebooks:/ebooks:ro
+# The Calibre-Web Automated library, so Audiobookshelf can serve its ebooks
+# (the household guide's default reader). Read-only: Calibre owns this tree
+# and its metadata.db, and Audiobookshelf keeps its own metadata in appdata.
+Volume=/srv/media/books:/books:ro
 Volume=/srv/backups/audiobookshelf:/config/backups
 Environment=TZ={{ timezone }}
 
