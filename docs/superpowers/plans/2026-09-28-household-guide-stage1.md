@@ -246,7 +246,7 @@ BAD_PAGES = {
     "no title": "Hello.\n\n_Last checked: not yet._\n",
     "no last-checked": "# T\n\nHello.\n",
     "vault name": "# T\n\nUse vault_jellyfin_password.\n\n_Last checked: not yet._\n",
-    "credential": "# T\n\nPassword: hunter2\n\n_Last checked: not yet._\n",
+    "credential": "# T\n\nPassword: example-fixture\n\n_Last checked: not yet._\n",
     "jargon": "# T\n\nThe container restarts.\n\n_Last checked: not yet._\n",
     "signature": "# T\n\nghp_" + "A" * 36 + "\n\n_Last checked: not yet._\n",
     "placeholder": "# T\n\nYour name is <her-username>.\n\n_Last checked: not yet._\n",
@@ -1339,7 +1339,9 @@ never as an admin.
   disagreed with. Add a screenshot only where a step was genuinely ambiguous
   (candidates: Tailscale's switch, Seerr's *Request* button, ebook vs
   audiobook in Shelfmark), saved as `docs/household/img/<page>-<what>.png`,
-  cropped, under 300 KB, referenced as `![What it shows](img/<file>.png)`.
+  cropped, under 300 KB, and referenced with standard Markdown image syntax
+  whose alt text says what it shows and whose target is `img/` plus the file
+  name.
 - [ ] **Step 7: Last-checked lines** — replace each `_Last checked: not yet._`
   with `_Last checked: YYYY-MM-DD on <devices actually used>._`, e.g.
   `_Last checked: 2026-10-03 on iPhone 15, Pixel 8, Google TV Streamer._`

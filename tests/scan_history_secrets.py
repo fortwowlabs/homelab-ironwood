@@ -29,6 +29,20 @@ NON_SECRET_VAULT_KEYS = {
     # blob committed under the old name stays reachable from this branch.
     "vault_expression_re",
 }
+# Individual findings in already-pushed blobs that are known not to be secrets,
+# keyed by (FULL blob id, line number). Narrower than NON_SECRET_VAULT_KEYS on
+# purpose: it excuses one line of one exact blob, so any edit produces a new
+# blob id and is scanned normally, and every other line of the same blob still
+# is. Only for a blob already on a pushed main, where the alternative is
+# rewriting history. An entry that no longer matches a finding fails the scan,
+# so the list cannot quietly outlive what it excuses.
+KNOWN_FALSE_POSITIVES = {
+    # 5e4e3c6, the household guide plan: a gate fixture holding a deliberately
+    # fake "Password: hunter2" that tests/validate_household_guide.py must
+    # reject. Pushed with `make validate` failing; the file now uses
+    # "example-fixture", which PLACEHOLDER_RE already recognises.
+    ("75a6549f840a42c8ad423fdf9e6747aa2b5128cf", 268): "household guide gate fixture",
+}
 SECRET_KEY_PATTERN = (
     r"(?:vault_[a-z0-9_]+|[a-z0-9_.-]*(?:password|passwd|token_secret|"
     r"api_key|auth_secret|secret_key|client_secret|private_key)[a-z0-9_.-]*)"
@@ -98,6 +112,7 @@ def assignment_is_placeholder(key: str, value: str) -> bool:
 
 def main() -> int:
     findings: list[str] = []
+    excused: set[tuple[str, int]] = set()
     scanned = 0
     for object_id, path in reachable_blobs():
         content = run_git("cat-file", "-p", object_id)
@@ -120,9 +135,18 @@ def main() -> int:
                     value = match.group("value")
                     if assignment_is_placeholder(key, value):
                         continue
+                    if (object_id, line_number) in KNOWN_FALSE_POSITIVES:
+                        excused.add((object_id, line_number))
+                        continue
                     findings.append(
                         f"{object_id[:12]} {path}:{line_number}: populated {key.lower()}"
                     )
+
+    for object_id, line_number in sorted(set(KNOWN_FALSE_POSITIVES) - excused):
+        findings.append(
+            f"{object_id[:12]} line {line_number}: stale KNOWN_FALSE_POSITIVES entry "
+            "(no longer matches a finding; remove it)"
+        )
 
     findings = sorted(set(findings))
     if findings:
