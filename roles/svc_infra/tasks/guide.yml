@@ -1,0 +1,91 @@
+---
+# The household guide (docs/household/ -> https://guide.<domain>).
+#
+# Rendered on the CONTROLLER by scripts/render_household_guide.py — the same
+# renderer tests/validate_household_guide.py runs — then copied here and served
+# read-only by the `guide` infra_apps entry. static-web-server reads files per
+# request, so new content needs no restart.
+#
+# Idempotence is the point of the shape below. The scratch directory and the
+# render are controller-side and report changed_when: false; the copy compares
+# checksums; stale-file removal only fires when a page was deleted from git.
+# An unchanged guide therefore contributes nothing to `make deploy-proof`.
+# This is not the metrics-file trap in CLAUDE.md: the content changes only
+# when a commit changes it.
+- name: Render and publish the household guide
+  block:
+    - name: Create a controller scratch directory for the household guide
+      ansible.builtin.tempfile:
+        state: directory
+        suffix: -household-guide
+      delegate_to: localhost
+      become: false
+      run_once: true
+      check_mode: false
+      changed_when: false
+      register: household_guide_build
+
+    - name: Render the household guide on the controller
+      ansible.builtin.command:
+        argv:
+          - "{{ ansible_playbook_python }}"
+          - "{{ playbook_dir }}/scripts/render_household_guide.py"
+          - --src
+          - "{{ playbook_dir }}/docs/household"
+          - --out
+          - "{{ household_guide_build.path }}"
+      delegate_to: localhost
+      become: false
+      run_once: true
+      check_mode: false
+      changed_when: false
+
+    - name: List the rendered household guide files
+      ansible.builtin.find:
+        paths: "{{ household_guide_build.path }}"
+        recurse: true
+      delegate_to: localhost
+      become: false
+      run_once: true
+      check_mode: false
+      register: household_guide_rendered
+
+    - name: Copy the household guide to its served directory
+      ansible.builtin.copy:
+        src: "{{ household_guide_build.path }}/"
+        dest: "{{ household_guide_dir }}/"
+        owner: "{{ svc_uid }}"
+        group: "{{ svc_gid }}"
+        mode: "0644"
+        directory_mode: "0755"
+
+    - name: List the household guide files currently served
+      ansible.builtin.find:
+        paths: "{{ household_guide_dir }}"
+        recurse: true
+      register: household_guide_served
+
+    # A page deleted from git must stop being served; `copy` only ever adds.
+    - name: Remove household guide files that are no longer in the source
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop: >-
+        {{ household_guide_served.files | map(attribute='path')
+           | reject('in', household_guide_rendered.files | map(attribute='path')
+                    | map('regex_replace',
+                          '^' ~ (household_guide_build.path | regex_escape),
+                          household_guide_dir)
+                    | list)
+           | list }}
+  always:
+    - name: Remove the controller scratch directory
+      ansible.builtin.file:
+        path: "{{ household_guide_build.path }}"
+        state: absent
+      delegate_to: localhost
+      become: false
+      run_once: true
+      check_mode: false
+      changed_when: false
+      when: household_guide_build.path is defined

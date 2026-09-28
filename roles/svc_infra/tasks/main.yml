@@ -3,6 +3,10 @@
   ansible.builtin.import_tasks: files.yml
   tags: [files]
 
+- name: Publish the household guide
+  ansible.builtin.import_tasks: guide.yml
+  tags: [files, guide]
+
 # Pull images BEFORE apps.yml flushes handlers and restarts anything: a bad
 # digest must abort the deploy, not take a service down mid-restart.
 - name: Pre-pull immutable images

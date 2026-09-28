@@ -273,6 +273,25 @@ infra_apps:
     # scan, and the run-to-run baseline is deliberately disposable.
     backup_paths: []
 
+  # The household guide — docs/household/ rendered to static HTML at deploy
+  # time by roles/svc_infra/tasks/guide.yml. Same static-web-server digest as
+  # scan-reports on purpose: one static file server, two directories, and a
+  # bump that moved one without the other would be a decision nobody made.
+  # Directory listing off: the guide has a front page. Nothing to back up —
+  # every file is regenerated from git on each deploy.
+  guide:
+    image: "ghcr.io/static-web-server/static-web-server@sha256:2c1a7c3e0feaea5859307403b74e1c575f3ec1499094fc077344173d11abaae2"
+    ui_port: 8086
+    container_port: 8080
+    user: "0"
+    volumes:
+      - /opt/homelab/appdata/guide:/public:ro
+    env:
+      SERVER_ROOT: /public
+      SERVER_PORT: "8080"
+      SERVER_DIRECTORY_LISTING: "false"
+    backup_paths: []
+
 # Secret-bearing single-container services. Structurally identical to
 # infra_apps (same fields, same infra-app.container.j2 template, same
 # firewalld/service-name/backup wiring) with two differences handled in

@@ -329,6 +329,10 @@ healthchecks_base_url: "https://hc-ping.com"
 # roles/svc_infra/defaults/main.yml because scan.yml's reporting play does not
 # apply that role, and role defaults are only in scope for a play that does.
 scan_report_dir: /opt/homelab/appdata/scan-reports
+# The household guide's served files (docs/household/, rendered by
+# scripts/render_household_guide.py in roles/svc_infra/tasks/guide.yml).
+# Must match the `guide` volume source in infra-apps.yml.
+household_guide_dir: /opt/homelab/appdata/guide
 # Last run's totals. Escalation is on the DELTA against this file rather than on
 # an absolute count, because this estate deliberately runs behind on patches and
 # a nightly alert on a permanently non-zero number is how a channel becomes
@@ -693,6 +697,11 @@ caddy_services:
   # Nightly security scan output. See the exposure note on the scan-reports
   # catalog entry: forward-auth gates this hostname, not the port behind it.
   scan:        { backend: "{{ hostvars[infra_host].ansible_host }}:8085", group: Infra, icon: security }
+  # The household guide. Deliberately open (not in sso_protected_services):
+  # the family accounts cannot pass the admins-only rule, and the guide holds
+  # no secrets — tests/validate_household_guide.py fails the build if a page
+  # looks like it does.
+  guide:       { backend: "{{ hostvars[infra_host].ansible_host }}:8086", group: Household, icon: bookstack }
   # Open WebUI. Deliberately NOT in sso_protected_services: it has its own
   # account system and its own first-visit admin setup, and fronting that with
   # Authelia would mean two logins for one service. Its native apps and the
@@ -775,7 +784,8 @@ caddy_services:
 # jellyfin, immich, nextcloud, abs, ntfy, vaultwarden, home-assistant (the HA
 # companion app is exactly this case). Also left open: home (the landing
 # page), it-tools, glances (its /mcp/sse endpoint has no cookie jar),
-# bambuddy, the cockpit-* vhosts (own PAM auth), and shelfmark.
+# bambuddy, the cockpit-* vhosts (own PAM auth), shelfmark, and guide (the
+# household guide, which must be readable by accounts outside admins).
 #
 # calibre-web is excluded for a different reason and it is not a good one: it
 # is loopback-only on svc-media, so unlike every name below it has no direct
