@@ -3,3 +3,4 @@ ansible==14.2.0
 ansible-core==2.21.2
 proxmoxer==2.3.0
 requests==2.34.2
+markdown==3.11
