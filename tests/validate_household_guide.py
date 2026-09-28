@@ -57,7 +57,7 @@ JARGON_RE = re.compile(
 # An unfilled `<her-username>`-style placeholder. Markdown passes it through as
 # a raw HTML tag, so the browser silently hides it and the sentence around it
 # just reads wrong. Pages use no raw HTML or autolinks, so any <word...> is one.
-PLACEHOLDER_RE = re.compile(r"<[a-z][^<>]*>")
+PLACEHOLDER_RE = re.compile(r"<[a-z][^<>]*>", re.IGNORECASE)
 REF_RE = re.compile(r'(?:href|src)="([^"]+)"')
 EXTERNAL_RE = re.compile(r"^(?:[a-z][a-z0-9+.-]*:|#|/)", re.IGNORECASE)
 
@@ -66,11 +66,13 @@ GOOD_PAGE = "# Fine\n\nHello.\n\n_Last checked: not yet._\n"
 BAD_PAGES = {
     "no title": "Hello.\n\n_Last checked: not yet._\n",
     "no last-checked": "# T\n\nHello.\n",
+    "last-checked not last": "# T\n\n_Last checked: not yet._\n\nMore text.\n",
     "vault name": "# T\n\nUse vault_jellyfin_password.\n\n_Last checked: not yet._\n",
     "credential": "# T\n\nPassword: example-fixture\n\n_Last checked: not yet._\n",
     "jargon": "# T\n\nThe container restarts.\n\n_Last checked: not yet._\n",
     "signature": "# T\n\nghp_" + "A" * 36 + "\n\n_Last checked: not yet._\n",
     "placeholder": "# T\n\nYour name is <her-username>.\n\n_Last checked: not yet._\n",
+    "capitalised placeholder": "# T\n\nYour name is <Her-Username>.\n\n_Last checked: not yet._\n",
 }
 
 
@@ -80,6 +82,9 @@ def source_problems(name: str, text: str) -> list[str]:
         problems.append(f"{name}: no '# ' title line")
     if len(LAST_CHECKED_RE.findall(text)) != 1:
         problems.append(f"{name}: needs exactly one '_Last checked: ..._' line")
+    non_blank = [line for line in text.splitlines() if line.strip()]
+    if not non_blank or LAST_CHECKED_RE.fullmatch(non_blank[-1].rstrip()) is None:
+        problems.append(f"{name}: '_Last checked: ..._' line must be the last line")
     for label, pattern in (
         ("vault variable name", VAULT_RE),
         ("credential-style assignment", CREDENTIAL_RE),
