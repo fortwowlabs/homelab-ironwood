@@ -62,6 +62,11 @@ RestartSec=10
 # First boot downloads the Paper jar and generates a world — give it more
 # grace than the generic infra apps before podman gives up.
 TimeoutStartSec=180
+{% if item.value.enabled | default(true) %}
 
 [Install]
 WantedBy=default.target
+{% else %}
+# Parked (enabled: false in minecraft.yml): no [Install], so it does not start
+# at boot. The unit still exists for a manual `systemctl --user start`.
+{% endif %}

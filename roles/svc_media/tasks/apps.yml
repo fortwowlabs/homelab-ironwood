@@ -32,7 +32,7 @@
     {{
       (media_quadlet_catalog | map(attribute='name') | list)
       + (['beszel-agent'] if beszel_agent_enabled | bool else [])
-      + (minecraft_servers.keys() | list)
+      + (minecraft_enabled_servers.keys() | list)
     }}
   loop_control:
     label: "{{ item }}"
@@ -44,6 +44,25 @@
 - name: Start inactive rootless media services
   ansible.builtin.command: "systemctl --user -M homelab@ start {{ item.item }}.service"
   loop: "{{ media_service_states.results | selectattr('rc', 'ne', 0) | list }}"
+  loop_control:
+    label: "{{ item.item }}"
+  changed_when: true
+
+# Parked Minecraft servers (enabled: false in minecraft.yml) are stopped here
+# rather than removed: their Quadlet, world and image stay so one flag brings
+# them back. Reading state first keeps a stopped server a no-op, so this
+# reports `changed` only on the run that actually stops one.
+- name: Read parked Minecraft server state
+  ansible.builtin.command: "systemctl --user -M homelab@ is-active {{ item }}.service"
+  loop: "{{ minecraft_servers.keys() | difference(minecraft_enabled_servers.keys()) }}"
+  register: media_minecraft_parked_states
+  failed_when: false
+  changed_when: false
+  check_mode: false
+
+- name: Stop parked Minecraft servers
+  ansible.builtin.command: "systemctl --user -M homelab@ stop {{ item.item }}.service"
+  loop: "{{ media_minecraft_parked_states.results | selectattr('rc', 'eq', 0) | list }}"
   loop_control:
     label: "{{ item.item }}"
   changed_when: true

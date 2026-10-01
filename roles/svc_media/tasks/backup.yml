@@ -14,7 +14,7 @@
       -name {{ item.pattern | quote }} -print -quit
   args:
     executable: /bin/bash
-  loop: "{{ media_backup_artifacts }}"
+  loop: "{{ media_backup_artifacts_active }}"
   loop_control:
     label: "{{ item.name }}"
   register: media_backup_artifacts_before
