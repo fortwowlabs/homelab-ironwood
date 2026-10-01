@@ -18,9 +18,15 @@
     # media_images is a flat name -> image map rather than a catalog of dicts,
     # unlike download_apps and infra_apps — the media Quadlets are bespoke
     # templates and take their image from this map directly.
+    #
+    # Minecraft's image only while a server is ENABLED. A parked server has no
+    # container, so the reclaim task below deletes its image as unreferenced;
+    # requiring it anyway re-pulled it every deploy and reclaimed it again,
+    # and the deploy-proof never reached changed=0. Re-enabling a server
+    # pulls the image once, on that `make media`.
     media_required_images: >-
       {{ ((media_images | default({})).values() | list)
-         + ([minecraft_image] if (minecraft_servers | default({})) | length > 0 else [])
+         + ([minecraft_image] if (minecraft_enabled_servers | default({})) | length > 0 else [])
          + [node_exporter_image]
          + ([beszel_agent_image] if beszel_agent_enabled | bool else [])
          | unique | sort }}
