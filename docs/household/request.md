@@ -26,7 +26,8 @@ Save Seerr to your home screen so it's one tap away —
   movies and shows. Scroll, and tap anything that looks good.
 
 If we already have something, or someone has already asked for it, Seerr
-shows that on the title. No need to ask twice — open Jellyfin instead.
+shows that on the title. No need to ask twice — open [Jellyfin](https://jellyfin.fortwow.dev)
+instead.
 
 ## Asking for it
 

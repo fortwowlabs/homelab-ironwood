@@ -18,7 +18,7 @@
 | Jellyfin won't load on the TV at your place | Open **Tailscale** on that TV and check it's connected. |
 | Nothing loads, at Brandon's | Check you're on his Wi-Fi, not mobile data. |
 | It says wrong password, or I'm not signed in | Type the username as **valerie**, all lower case — phones like to add a capital V. Passwords care about capitals too. Readest uses your book-library password, not your Jellyfin one. |
-| A video buffers a lot on my phone, away from home | Most of what we have is in 4K, which is heavy for a phone away from home. Try a lower quality in the player's settings, or wait until you're on Wi-Fi. |
+| A video buffers a lot on my phone, away from Brandon's | Most of what we have is in 4K, which is heavy for a phone away from Brandon's. Try a lower quality in the player's settings, or wait until you're on Wi-Fi. |
 | A show stutters badly with subtitles on | Turn subtitles off and tell Brandon. |
 | A movie or show I asked for isn't there yet | Downloading takes an hour to several hours, then 15–30 minutes to appear in Jellyfin. Check its status in [Seerr](https://seerr.fortwow.dev) ([what the statuses mean](request.md)). Stuck on *Processing* for more than a day? Tell Brandon the title. |
 | Seerr says *Available* but I can't find it | Search for it by name in Jellyfin. Still not there? Tell Brandon. |

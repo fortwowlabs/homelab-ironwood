@@ -88,10 +88,10 @@ on a laptop.
 **If a show stutters with subtitles on, turn subtitles off and tell
 Brandon.** It's a known problem with some 4K shows.
 
-## Away from home and offline
+## Away from Brandon's, and offline
 
 Most of what we have is in 4K. It plays great on the TVs, but on a phone
-away from home it may buffer — see
+away from Brandon's it may buffer — see
 [Something's not working](help.md).
 
 Some phone apps can **download** a movie or episode to watch with no

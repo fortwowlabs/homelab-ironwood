@@ -11,15 +11,24 @@
 - Audiobooks are new here and haven't been fully tried yet. If something
   doesn't work as described, tell Brandon.
 
-## Getting started
+## iPhone or iPad
 
 If you've already set up the app for reading, skip to step 3.
 
-1. Install **Still: for Audiobookshelf** (iPhone, App Store) or
-   **Audiobookshelf** (Android, Play Store).
+1. Install **Still: for Audiobookshelf** from the App Store.
 2. Enter the server address `https://abs.fortwow.dev`, then your username
    (**valerie**) and password.
 3. Open the **Audiobooks** library.
+4. Tap a book, then **Play**.
+
+## Android
+
+If you've already set up the app for reading, skip to step 3.
+
+1. Install **Audiobookshelf** from the Play Store.
+2. Enter the server address `https://abs.fortwow.dev`, then your username
+   (**valerie**) and password.
+3. Switch to the **Audiobooks** library.
 4. Tap a book, then **Play**.
 
 The library may still be empty — [find an audiobook with
@@ -38,7 +47,8 @@ Look for these in the player. The icons differ a little between apps.
   time.
 
 Audiobookshelf is made to remember your place and carry it between your
-devices.
+devices. That's how it's meant to work — we haven't tested it with
+audiobooks yet; if your place doesn't follow you, tell Brandon.
 
 ## Listening without internet
 

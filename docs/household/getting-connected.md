@@ -61,7 +61,7 @@ Search for these names in the App Store (iPhone) or Play Store
 
 | For | iPhone | Android | TV |
 | --- | --- | --- | --- |
-| Away from home | Tailscale | Tailscale | Tailscale (TV at your place) |
+| Away from Brandon's | Tailscale | Tailscale | Tailscale (TV at your place) |
 | Movies and TV | Swiftfin | Jellyfin | Jellyfin for Android TV |
 | Books and audiobooks | Still: for Audiobookshelf | Audiobookshelf | — |
 | Reading (optional) | Readest | Readest | — |
@@ -73,7 +73,8 @@ Each app asks for a **server address** the first time. Type it exactly:
 | Swiftfin or Jellyfin | `https://jellyfin.fortwow.dev` |
 | Still or Audiobookshelf | `https://abs.fortwow.dev` |
 
-In Jellyfin and Swiftfin the server then shows up by name, **Fort Wow**,
+In [Jellyfin](https://jellyfin.fortwow.dev) and Swiftfin the server then
+shows up by name, **Fort Wow**,
 instead of the address.
 
 Asking for movies ([Seerr](https://seerr.fortwow.dev)) and finding books
