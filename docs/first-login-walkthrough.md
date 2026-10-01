@@ -312,7 +312,7 @@ thing to notice — most of these are genuinely open, Prometheus is not.
 `inventory/group_vars/all/minecraft.yml`). They had never been used, and their
 2 GB heaps helped exhaust svc-media when 4K transcodes overlapped. Parked means
 stopped, no boot start, LAN port closed, no backups or verification, but the
-worlds, Quadlets and image stay in place. To bring one back, set its
+worlds and Quadlets stay in place (the image is re-pulled on enable). To bring one back, set its
 `enabled: true` and run `make media`.
 
 Once enabled, they are not web services — connect from the Minecraft client:

@@ -34,14 +34,12 @@ minecraft_image: "docker.io/itzg/minecraft-server@sha256:9e09d64e8cab977f0152e1c
 #                    kept modest to bound CPU/RAM alongside a 2G heap.
 #   online_mode      true = authenticate players against Mojang's session
 #                    servers (blocks username spoofing). Keep true.
-#   enabled          false = parked: the world, appdata, Quadlet and image all
-#                    stay, but the server is stopped, does not start at boot,
+#   enabled          false = parked: the world, appdata and Quadlet all
+#                    stay (the image is reclaimed and re-pulled on enable),
+#                    but the server is stopped, does not start at boot,
 #                    has no LAN firewall opening, is not backed up or
 #                    verified, and leaves scan_expected_ports. Flip to true
 #                    and `make media` to bring it back. Omitted = true.
-#                    For a one-off session without a deploy:
-#                    `systemctl --user -M homelab@ start <name>.service` on
-#                    svc-media (LAN port stays closed until enabled: true).
 #   whitelist_enabled  server.properties white-list. Default false: the LAN
 #                    firewall scope (access.yml) plus online_mode are this
 #                    server's primary access controls, and an empty
