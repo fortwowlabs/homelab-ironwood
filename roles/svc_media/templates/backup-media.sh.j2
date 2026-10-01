@@ -87,7 +87,9 @@ tar_tolerant romm \
 #    no flags are needed here. Best-effort: if a server is mid-restart and
 #    RCON isn't up yet, the save-off/save-all calls just no-op (|| true) and
 #    tar_tolerant's own exit-1 tolerance covers the resulting live-write risk.
-{% for name in minecraft_servers.keys() %}
+{#   Parked servers (enabled: false) are skipped: stopped, their world does not
+     change, and RCON is not there to flush it. #}
+{% for name, server in minecraft_servers.items() if server.enabled | default(true) %}
 podman exec {{ name | quote }} rcon-cli save-off >/dev/null 2>&1 || true
 podman exec {{ name | quote }} rcon-cli save-all >/dev/null 2>&1 || true
 tar_tolerant minecraft/{{ name }} \

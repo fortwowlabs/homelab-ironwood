@@ -34,6 +34,14 @@ minecraft_image: "docker.io/itzg/minecraft-server@sha256:9e09d64e8cab977f0152e1c
 #                    kept modest to bound CPU/RAM alongside a 2G heap.
 #   online_mode      true = authenticate players against Mojang's session
 #                    servers (blocks username spoofing). Keep true.
+#   enabled          false = parked: the world, appdata, Quadlet and image all
+#                    stay, but the server is stopped, does not start at boot,
+#                    has no LAN firewall opening, is not backed up or
+#                    verified, and leaves scan_expected_ports. Flip to true
+#                    and `make media` to bring it back. Omitted = true.
+#                    For a one-off session without a deploy:
+#                    `systemctl --user -M homelab@ start <name>.service` on
+#                    svc-media (LAN port stays closed until enabled: true).
 #   whitelist_enabled  server.properties white-list. Default false: the LAN
 #                    firewall scope (access.yml) plus online_mode are this
 #                    server's primary access controls, and an empty
@@ -45,8 +53,13 @@ minecraft_image: "docker.io/itzg/minecraft-server@sha256:9e09d64e8cab977f0152e1c
 # Both servers share a 2G JVM heap — sized to fit comfortably alongside
 # Jellyfin/RomM/etc. on svc-media's ~7.5G available RAM (host_vars/
 # svc-media.yml sets vm_memory: 10240 for the whole VM).
+#
+# Both parked 2026-09-30: never used, and their 2 GB heaps (~4.2 GB resident
+# together) helped exhaust svc-media when 4K transcodes overlapped — load
+# average 128, RomM crashed, and both servers restarted.
 minecraft_servers:
   minecraft:
+    enabled: false
     port: 25565
     memory: 2G
     type: PAPER
@@ -58,6 +71,7 @@ minecraft_servers:
     whitelist_enabled: false
 
   minecraft2:
+    enabled: false
     port: 25566
     memory: 2G
     type: PAPER
@@ -67,6 +81,14 @@ minecraft_servers:
     view_distance: 10
     online_mode: true
     whitelist_enabled: false
+
+# The servers that should actually run. Every consumer that starts, opens,
+# backs up, verifies or expects a port uses this; only the appdata dirs, the
+# Quadlet render and the image pull use the full catalog, so a parked server
+# comes back with one flag. Absent `enabled` counts as true.
+minecraft_enabled_servers: >-
+  {{ minecraft_servers | dict2items
+     | rejectattr('value.enabled', 'sameas', false) | items2dict }}
 
 # Generic mechanism for LAN services with no Caddy vhost (a raw, non-HTTP
 # protocol — Caddy only speaks HTTP(S)) that still want a name in the

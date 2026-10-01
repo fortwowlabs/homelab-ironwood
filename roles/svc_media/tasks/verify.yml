@@ -5,7 +5,7 @@
     {{
       (media_quadlet_catalog | map(attribute='name') | list)
       + (['beszel-agent'] if beszel_agent_enabled | bool else [])
-      + (minecraft_servers.keys() | list)
+      + (minecraft_enabled_servers.keys() | list)
     }}
   changed_when: false
 
@@ -49,7 +49,7 @@
     host: "{{ ansible_host }}"
     port: "{{ item.value.port }}"
     timeout: 30
-  loop: "{{ minecraft_servers | dict2items }}"
+  loop: "{{ minecraft_enabled_servers | dict2items }}"
   loop_control:
     label: "{{ item.key }}"
 
@@ -93,7 +93,7 @@
       - "{{ item.pattern }}"
       - -print
       - -quit
-  loop: "{{ media_backup_artifacts }}"
+  loop: "{{ media_backup_artifacts_active }}"
   loop_control:
     label: "{{ item.name }}"
   register: media_backup_artifact_gates

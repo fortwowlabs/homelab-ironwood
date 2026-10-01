@@ -552,13 +552,14 @@ scan_expected_ports:
   # svc-media: the access layer rather than a catalog. 53 dnsmasq, 443 Caddy,
   # 8096 Jellyfin (published on the LAN IP, not loopback, so Caddy on this same
   # host is not the only reader), 8080 ntfy (every alert in the estate is
-  # published to it), and the Minecraft servers.
+  # published to it), and the ENABLED Minecraft servers (a parked one has its
+  # firewall rule removed, so its port is expected closed).
   #
   # Port 80 is deliberately absent and its absence is checked: Caddy serves
   # HTTPS only here, and a plaintext listener appearing would be a real change.
   media: >-
     {{ [53, 443, 8080, 8096]
-       + ((minecraft_servers | default({})).values() | map(attribute='port') | list)
+       + ((minecraft_enabled_servers | default({})).values() | map(attribute='port') | list)
        + scan_common_ports + [scan_prometheus_scrape_port] | unique | sort }}
   # svc-infra: both catalogs' ui_ports, their TCP extra_ports, and the four
   # bespoke multi-container services whose ports live in their own Quadlet

@@ -308,7 +308,14 @@ thing to notice — most of these are genuinely open, Prometheus is not.
 
 ## Phase 7 — Minecraft 🎮
 
-Not web services — connect from the Minecraft client:
+**Both servers are parked as of 2026-09-30** (`enabled: false` in
+`inventory/group_vars/all/minecraft.yml`). They had never been used, and their
+2 GB heaps helped exhaust svc-media when 4K transcodes overlapped. Parked means
+stopped, no boot start, LAN port closed, no backups or verification, but the
+worlds, Quadlets and image stay in place. To bring one back, set its
+`enabled: true` and run `make media`.
+
+Once enabled, they are not web services — connect from the Minecraft client:
 
 - `minecraft.fortwow.dev:25565`
 - `minecraft2.fortwow.dev:25566`

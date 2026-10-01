@@ -354,6 +354,7 @@
               media_minecraft_templates.results
               | selectattr('changed')
               | map(attribute='item.key')
+              | select('in', minecraft_enabled_servers.keys() | list)
               | list
             )
         ) | unique | list

@@ -32,15 +32,18 @@
 # Minecraft: one rule per catalog entry's LAN-facing game port. RCON
 # (25575, see minecraft.container.j2) is deliberately NEVER opened here —
 # it isn't published on the host at all, only reachable via `podman exec`.
-- name: Open LAN-scoped Minecraft server ports
+# A parked server (enabled: false) has its rule removed, not just left unused.
+- name: Open LAN-scoped ports for enabled Minecraft servers, close parked ones
   ansible.posix.firewalld:
     rich_rule: >-
       rule family=ipv4 source address={{ lan_cidr }} port
-      port={{ item }} protocol=tcp accept
+      port={{ item.value.port }} protocol=tcp accept
     permanent: true
     immediate: true
-    state: enabled
-  loop: "{{ minecraft_servers.values() | map(attribute='port') | list }}"
+    state: "{{ 'enabled' if item.key in minecraft_enabled_servers else 'disabled' }}"
+  loop: "{{ minecraft_servers | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"
 
 # node_exporter is a scrape target, not a user-facing UI: open :9100 ONLY to
 # Prometheus's host (svc-infra), a single source address, not the whole LAN.
