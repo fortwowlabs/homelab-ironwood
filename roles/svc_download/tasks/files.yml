@@ -227,14 +227,6 @@
   loop_control:
     label: "{{ item.key }}"
 
-- name: Create SABnzbd local incomplete-download directory
-  ansible.builtin.file:
-    path: /var/lib/sabnzbd-incomplete
-    state: directory
-    owner: "{{ svc_uid }}"
-    group: "{{ svc_gid }}"
-    mode: "0755"
-
 # SABnzbd has its own anti-DNS-rebinding allowlist and returns
 # "403 Access denied - Hostname verification failed" for any Host header it does
 # not recognise. Left alone it whitelists only the container's own hostname —

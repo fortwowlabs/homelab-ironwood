@@ -106,7 +106,13 @@ download_apps:
     ui_port: 8080
     volumes:
       - /srv/appdata/sabnzbd:/config:Z
-      - /var/lib/sabnzbd-incomplete:/incomplete-downloads:Z
+      # In-progress downloads live on the NAS, not the VM's 160 GB system
+      # disk. With 4K as the request default, one season pack can exceed the
+      # whole disk (a 184.5 GB pack stalled at 89% on 2026-09-30 and SABnzbd
+      # paused the queue); this folder on local disk was also what filled
+      # rpool on 2026-07-20. No :Z — NFS cannot be relabelled, same as
+      # /srv/media:/data below. Created by tasks/nfs.yml as the service UID.
+      - /srv/media/downloads/incomplete:/incomplete-downloads
       - /srv/media:/data
     media_mount: true
     backup_paths: [sabnzbd]
