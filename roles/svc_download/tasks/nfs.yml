@@ -6,3 +6,13 @@
       mkdir -p /srv/media/{{ item }}
     creates: "/srv/media/{{ item }}"
   loop: [books, ebooks, audiobooks]
+
+# SABnzbd's in-progress folder (see the sabnzbd volume in apps.yml). On the
+# NAS rather than the VM's system disk, so a 4K season pack cannot fill /.
+# setpriv for the same reason as above: the export squashes root.
+- name: Create SABnzbd's in-progress download directory as the service UID
+  ansible.builtin.command:
+    cmd: >-
+      setpriv --reuid={{ svc_uid }} --regid={{ svc_gid }} --clear-groups --
+      mkdir -p /srv/media/downloads/incomplete
+    creates: /srv/media/downloads/incomplete
