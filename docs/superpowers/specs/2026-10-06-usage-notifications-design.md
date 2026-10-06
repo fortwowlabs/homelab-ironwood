@@ -237,15 +237,22 @@ the counters came from. It publishes the text in two places:
 Week of Sep 28 – Oct 4
 Valerie   9 plays · 7.2h · The Bear (6), Dune: Part Two
 Erin      4 plays · 3.1h · Severance (4)
-Michael   —
 Requests  3 (Valerie 2, Erin 1) · 2 fulfilled, 1 pending
 Library   +14 episodes, +2 movies · 1 failed import
 Streams   62% direct play, 38% transcode
+Read      61 events · 2 active accounts
 ```
 
-**A person with no activity is listed with a dash, not omitted.** An omitted
-line cannot be told apart from a digest that failed to read that person's
-rows.
+**Accounts with no activity that week are left out.** Leaving them out means
+a missing name could also be a digest that failed to read that person's rows.
+The closing `Read` line rules that out: it reports how many rows the digest
+actually read and how many accounts had activity.
+
+A week with no activity at all still sends a digest, with the line
+`No activity` followed by `Read 0 events · 0 active accounts`. If no digest
+arrives, the timer did not run; that is not the same as a quiet week. A
+query error makes `usage-relay digest` exit non-zero without publishing. A
+digest built from a failed read would look like a quiet week.
 
 ## Runtime
 
@@ -295,13 +302,13 @@ as the Beszel agents.** A disabled collector is not reported as healthy. The
 verify step names it as `disabled`, so it cannot read as "looked and found
 nothing".
 
-### Prerequisite: Seerr must be initialized
+### Seerr is ready
 
 The household-guide audit of 2026-09-27 found Seerr reporting
-`"initialized": false`. The Seerr collector cannot work until Stage 1 of the
-household guide finishes Seerr setup. Until then, deploy with the Seerr key
-unset; the collector is disabled under the rule above. Check
-`/api/v1/settings/public` before the plan assumes otherwise.
+`"initialized": false`. That has since been fixed. Re-checked on
+2026-10-06, `/api/v1/settings/public` returns `"initialized": true` with
+`mediaServerType: 2` (Jellyfin). So the Seerr collector has no prerequisite
+beyond its API key.
 
 ## Behaviour on first run
 
@@ -363,7 +370,11 @@ Offline, under `make validate`:
   - the first-run high-water mark pushes nothing,
   - expiry of stale playback pushes after an ntfy outage,
   - requester attribution with and without a matching request,
-  - digest rendering, including the dash for an inactive person.
+  - digest rendering:
+    - inactive accounts are omitted,
+    - the `Read` line counts match the rows queried,
+    - an empty week renders `No activity`,
+    - a query error exits non-zero without publishing.
 - **Jellyfin session diffing:** start, stop, item change within the same
   session, and a baseline poll.
 - **A validate gate** checking that every collector named in the config has a
