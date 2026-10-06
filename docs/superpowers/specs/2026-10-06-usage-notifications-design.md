@@ -132,7 +132,7 @@ counted.
 | `user` | Household user, or null where the source has none. |
 | `title` | Display title, e.g. `The Bear S02E03`. |
 | `detail` | JSON: device, play method, quality, failure reason, external ids. |
-| `pushed` | Push state: `pending`, `sent`, `suppressed`, `expired`. |
+| `pushed` | Push state: `pending`, `sent`, `suppressed`, `expired`, or `none` for kinds that are recorded but never pushed. |
 
 **Kinds:**
 
@@ -191,8 +191,11 @@ relay's own health (see Failure handling), which does go there.
 
 ## Metrics
 
-The relay is long-running, so it serves `/metrics` itself on a LAN-scoped
-port. Prometheus on the same host scrapes it. The textfile collector is for
+The relay is long-running, so it serves `/metrics` itself on port 9470
+(`usage_relay_port`). firewalld opens that port to svc-infra's own address
+only. Prometheus on the same host scrapes it through
+`host.containers.internal`, the same way it reaches svc-infra's
+node_exporter. The textfile collector is for
 one-shot jobs and is not used here.
 
 | Series | Type | Notes |
@@ -256,23 +259,36 @@ digest built from a failed read would look like a quiet week.
 
 ## Runtime
 
-- **Code.** Stdlib-only Python 3 (`urllib`, `sqlite3`, `http.server`,
-  `threading`). It ships as a static file in `roles/svc_infra/files/`, which
-  keeps the `changed=0` proof intact. There is no container image to pin or
-  bump.
+- **Code.** Stdlib-only Python 3.12, the version Rocky 10 ships, using
+  `urllib`, `sqlite3`, `http.server` and `threading`.
+  - It ships as a flat package of static files in
+    `roles/svc_infra/files/usage_relay/`, which keeps the `changed=0` proof
+    intact.
+  - It is installed to `/opt/usage-relay/usage_relay/` and run with
+    `python3 -m usage_relay`.
+  - There is no container image to pin or bump.
 - **Service.** `usage-relay.service`, a host systemd unit on svc-infra. This
   follows the release and scan runners, which also run repo-owned code on the
   host. It also sidesteps rootless-podman UID mapping entirely.
-  - It runs as a dedicated system user `usage-relay`.
-  - Hardening: `ProtectSystem=strict`, `ProtectHome=yes`,
-    `NoNewPrivileges=yes`, and `ReadWritePaths=` limited to its state
-    directory.
-- **State.** The state lives in `/opt/homelab/appdata/usage-relay/`:
-  - `usage.db` is opened in WAL mode.
-  - Once a night the relay writes `usage.snapshot.db` via `VACUUM INTO`.
-    This snapshot is what the backup tars. A live WAL database copied
-    mid-write is not a backup.
+  - It runs as the existing `homelab` service user (uid 10001).
+  - A dedicated user was the first design. It was dropped because the
+    nightly backup tars appdata as `homelab` through `podman unshare`, and a
+    snapshot owned by anyone else would need group-permission plumbing to
+    stay readable.
+  - Hardening: `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`,
+    `NoNewPrivileges=yes`. Writable paths are its `StateDirectory=` plus the
+    snapshot directory.
+- **State.**
+  - The live database is `/var/lib/usage-relay/usage.db`
+    (`StateDirectory=usage-relay`), opened in WAL mode.
+  - Once a night, at 02:30 and before the 03:xx backups, the relay writes
+    `/opt/homelab/appdata/usage-relay/usage.snapshot.db` via `VACUUM INTO`.
+    It also writes one at startup if none exists.
+  - The snapshot is the only file in that directory, so the backup can only
+    ever tar a consistent copy. A live WAL database copied mid-write is not a
+    backup.
   - `usage-relay` is added to `infra_extra_backup_paths`.
+  - To restore, stop the relay and copy the snapshot over `usage.db`.
 - **Retention.** Rows older than `usage_retention_days` (default 365) are
   deleted nightly. This is household viewing history, and it is bounded on
   purpose.
@@ -333,8 +349,10 @@ records the sessions already in progress as a baseline without pushing them.
 `make verify`, and therefore the nightly 04:00 run, adds two checks to
 svc-infra's verify tasks.
 
-1. **End-to-end positive control.** `usage-relay selftest`:
-   - inserts an event with `kind=selftest` and a unique id,
+1. **End-to-end positive control.** `python3 -m usage_relay selftest`:
+   - asks the running relay to insert an event with `kind=selftest` and a
+     unique id, through `POST /selftest`, which only accepts loopback
+     callers,
    - waits for the push cycle,
    - asserts the event can be read back from `usage-selftest` via
      `/json?poll=1&since=5m`,
@@ -359,8 +377,10 @@ pass `notify_on_success=false` like the rest of the nightly run.
 
 Offline, under `make validate`:
 
-- **pytest for each collector's parser,** against recorded API responses
-  saved as fixtures. Fixture values use `example-*` names and keys, since
+- **Stdlib `unittest` tests for each collector's parser,** against recorded
+  API responses saved as fixtures. They are run by a new discovered gate,
+  `tests/validate_usage_relay.py`. The repo has no pytest dependency, and
+  one feature is not reason enough to add one. Fixture values use `example-*` names and keys, since
   realistic-looking fake credentials trip the history scan.
 - **Core logic:**
   - dedup on conflicting ids,
