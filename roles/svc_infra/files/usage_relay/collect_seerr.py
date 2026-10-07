@@ -3,7 +3,9 @@
 The request list is sorted by modification time, and anything modified since
 the mark is re-examined. Re-emitting an event already recorded is harmless (the
 store dedups on id); announcing an OLD request as new is not, so `created` is
-only emitted when the request itself is newer than the mark.
+only emitted when the request itself is newer than the mark. The title is
+cosmetic, so a failed title lookup degrades to a placeholder rather than
+failing the poll.
 """
 
 from __future__ import annotations
@@ -11,7 +13,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 
-from .fetch import Fetch, ShapeError, snippet
+from .fetch import Fetch, FetchError, ShapeError, snippet
 from .model import Event, from_epoch, norm_user, parse_ts, utc_iso
 
 REQUEST_APPROVED = 2
@@ -79,14 +81,27 @@ class SeerrCollector:
         key = (media_type, int(tmdb))
         if key not in self._titles:
             path, name_key = ("movie", "title") if media_type == "movie" else ("tv", "name")
-            data = self._fetch(f"{self._base}/api/v1/{path}/{int(tmdb)}", self._headers)
             try:
+                data = self._fetch(f"{self._base}/api/v1/{path}/{int(tmdb)}", self._headers)
                 self._titles[key] = str(data[name_key])
-            except (KeyError, TypeError):
-                raise ShapeError(f"seerr {path} {tmdb} has no {name_key}: {snippet(data)}") from None
+            except (FetchError, ShapeError, KeyError, TypeError):
+                return f"{media_type} tmdb:{int(tmdb)}"
         return self._titles[key]
 
     def _events_for(self, request: dict, mark: str) -> list[Event]:
+        # Determine which events will be generated first
+        event_specs: list[tuple[str, str, str]] = []
+        if request["created"] >= mark:
+            event_specs.append(("created", "request.created", request["created"]))
+        if request["status"] == REQUEST_APPROVED:
+            event_specs.append(("approved", "request.approved", request["updated"]))
+        if request["media_status"] == MEDIA_AVAILABLE:
+            event_specs.append(("available", "request.available", request["updated"]))
+
+        # If there are no events, return early without fetching title
+        if not event_specs:
+            return []
+
         title = self._title(request["type"], request["tmdb"])
         detail: dict = {"media_type": request["type"], "request_id": request["id"],
                         "seasons": request["seasons"]}
@@ -101,10 +116,6 @@ class SeerrCollector:
                          user=request["user"], title=title, detail=dict(detail))
 
         events = []
-        if request["created"] >= mark:
-            events.append(make("created", "request.created", request["created"]))
-        if request["status"] == REQUEST_APPROVED:
-            events.append(make("approved", "request.approved", request["updated"]))
-        if request["media_status"] == MEDIA_AVAILABLE:
-            events.append(make("available", "request.available", request["updated"]))
+        for suffix, kind, ts in event_specs:
+            events.append(make(suffix, kind, ts))
         return events

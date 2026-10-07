@@ -4,7 +4,7 @@ import unittest
 
 from helpers import FakeClock, FakeFetch, fixture
 from usage_relay.collect_seerr import SeerrCollector, parse_requests
-from usage_relay.fetch import ShapeError
+from usage_relay.fetch import FetchError, ShapeError
 
 REQUESTS = fixture("seerr_requests.json")
 BASE = "http://seerr.example"
@@ -66,3 +66,15 @@ class SeerrTests(unittest.TestCase):
             parse_requests({"pageInfo": {}})
         with self.assertRaises(ShapeError):
             parse_requests({"results": [{"id": 1}]})
+
+    def test_a_failed_title_lookup_degrades_to_a_placeholder(self):
+        self.fetch.routes[f"{BASE}/api/v1/movie/9001"] = FetchError("HTTP 404 from x")
+        events = {e.id: e for e in self.c.poll("2026-10-05T12:00:00Z")[0]}
+        self.assertEqual(events["seerr:request:11:created"].title, "movie tmdb:9001")
+        self.assertEqual(events["seerr:request:12:created"].title, "The Example Show")
+        self.assertEqual(len(events), 6)
+
+    def test_a_request_yielding_no_events_fetches_no_title(self):
+        self.c.poll("2026-10-05T12:12:30Z")
+        urls = [url for url, _ in self.fetch.calls]
+        self.assertNotIn(f"{BASE}/api/v1/tv/7001", urls)
