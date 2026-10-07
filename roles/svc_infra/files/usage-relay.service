@@ -1,0 +1,40 @@
+# homelab-iac managed — roles/svc_infra/files/usage-relay.service
+#
+# Household usage relay: polls Jellyfin, Seerr, Sonarr, Radarr and SABnzbd,
+# records to SQLite, pushes to ntfy, and serves /metrics on usage_relay_port.
+# Design: docs/superpowers/specs/2026-10-06-usage-notifications-design.md
+#
+# User=homelab rather than a dedicated account: the nightly backup tars the
+# snapshot directory as homelab through `podman unshare`, so the snapshot must
+# be homelab's to read.
+[Unit]
+Description=Household usage relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=homelab
+Group=homelab
+EnvironmentFile=/etc/homelab-notify.env
+EnvironmentFile=/etc/usage-relay/keys.env
+Environment=PYTHONPATH=/opt/usage-relay
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m usage_relay --config /etc/usage-relay/config.json run
+# A SQLite failure exits non-zero on purpose: a relay that pushed without
+# recording would break "emit the number the alert used". systemd brings it
+# back, and high-water marks plus dedup make the restart lossless.
+Restart=on-failure
+RestartSec=10
+# The live database. Its snapshot goes to appdata (ReadWritePaths below) for
+# the backup; the WAL file itself is never tarred.
+StateDirectory=usage-relay
+StateDirectoryMode=0750
+ReadWritePaths=/opt/homelab/appdata/usage-relay
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=multi-user.target

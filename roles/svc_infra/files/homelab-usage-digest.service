@@ -1,0 +1,27 @@
+# homelab-iac managed — roles/svc_infra/files/homelab-usage-digest.service
+[Unit]
+Description=Weekly household usage digest
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# See homelab-alert-canary.service: a oneshot wedged in `activating` is not
+# `failed`, so OnFailure= would never fire. One SQLite read and one ntfy POST.
+TimeoutStartSec=120
+User=homelab
+Group=homelab
+EnvironmentFile=/etc/homelab-notify.env
+Environment=PYTHONPATH=/opt/usage-relay
+Environment=PYTHONDONTWRITEBYTECODE=1
+ExecStart=/usr/bin/python3 -m usage_relay --config /etc/usage-relay/config.json digest
+# Reading a WAL database needs write access to its -shm file, so the digest
+# declares the relay's state directory too. scan-reports is scan_report_dir;
+# usage.txt is published next to releases.txt.
+StateDirectory=usage-relay
+StateDirectoryMode=0750
+ReadWritePaths=/opt/homelab/appdata/scan-reports
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes

@@ -29,6 +29,10 @@
   ansible.builtin.import_tasks: alert-canary.yml
   tags: [alertcanary]
 
+- name: Install the household usage relay
+  ansible.builtin.import_tasks: usage-relay.yml
+  tags: [usagerelay]
+
 # Last before verify.yml, and both halves of that placement matter. It is after
 # apps.yml because the container must exist before its cgroup can be matched.
 # It is after everything ELSE because its policy render validates with

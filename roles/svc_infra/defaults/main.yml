@@ -31,7 +31,7 @@ infra_extra_service_names: >-
 # unbacked-up, see nextcloud.container.j2 for why they are not on NFS and how
 # to move bulk data to the NAS via External Storage. immich-redis/
 # nextcloud-redis are disposable caches.
-infra_extra_backup_paths: [paperless, netbox, nextcloud]
+infra_extra_backup_paths: [paperless, netbox, nextcloud, usage-relay]
 
 # Bespoke Postgres databases captured by an application-consistent pg_dumpall
 # via `podman exec` in the nightly backup (mirrors backup-media.sh's romm-db
@@ -139,3 +139,42 @@ chat_egress_cgroup_path: >-
 # multi-user.target is reached ~1.5-2s before the rootless user manager has
 # created it. 120s is slack for a slow boot, not a measured requirement.
 chat_egress_wait_seconds: 120
+
+# ---------------------------------------------------------- usage relay ---
+# Household usage notifications. The reasoning behind every number here is in
+# docs/superpowers/specs/2026-10-06-usage-notifications-design.md.
+usage_relay_port: 9470
+usage_topics:
+  requests: usage-requests
+  library: usage-library
+  playback: usage-playback
+  failures: usage-failures
+  digest: usage-digest
+  selftest: usage-selftest
+usage_batch_window: 120           # seconds a season pack is held to become one push
+usage_resume_window: 1800         # re-starting the same item within this is a resume
+usage_playback_expiry: 600        # playback pushes older than this after an ntfy outage are dropped
+usage_collector_alert_after: 900  # a collector failing this long alerts homelab-alerts, once
+usage_retention_days: 365         # household viewing history is bounded on purpose
+# Jellyfin/Seerr usernames, lowercased. Their playback is recorded, never pushed.
+usage_push_ignore_users: [brandon, admin]
+# The relay's own CLI, run exactly as the unit runs it: same user, environment
+# and state directory. verify.yml appends `selftest` or `check`.
+usage_relay_cli:
+  - systemd-run
+  - --wait
+  - --pipe
+  - --quiet
+  - --collect
+  - --property=User=homelab
+  - --property=Group=homelab
+  - --property=EnvironmentFile=/etc/homelab-notify.env
+  - --property=StateDirectory=usage-relay
+  - --property=StateDirectoryMode=0750
+  - --setenv=PYTHONPATH=/opt/usage-relay
+  - --setenv=PYTHONDONTWRITEBYTECODE=1
+  - /usr/bin/python3
+  - -m
+  - usage_relay
+  - --config
+  - /etc/usage-relay/config.json

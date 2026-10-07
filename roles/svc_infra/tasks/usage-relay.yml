@@ -1,0 +1,123 @@
+---
+# The household usage relay: polls Jellyfin, Seerr, Sonarr, Radarr and SABnzbd
+# from svc-infra, records to SQLite, pushes to ntfy, serves /metrics.
+# Design: docs/superpowers/specs/2026-10-06-usage-notifications-design.md
+#
+# Keys are optional one by one: an empty key disables that collector, and the
+# relay and `make verify` report it as `disabled`, never as healthy.
+- name: Refuse usage-relay API keys still set to a placeholder
+  ansible.builtin.assert:
+    that:
+      - not ((vault_usage_jellyfin_api_key | default('')) is match('REPLACE_'))
+      - not ((vault_usage_seerr_api_key | default('')) is match('REPLACE_'))
+      - not ((vault_usage_sonarr_api_key | default('')) is match('REPLACE_'))
+      - not ((vault_usage_radarr_api_key | default('')) is match('REPLACE_'))
+      - not ((vault_usage_sabnzbd_api_key | default('')) is match('REPLACE_'))
+    fail_msg: >-
+      A vault_usage_*_api_key is still its all_vault.yml.example placeholder.
+      Set the real key, or "" to disable that collector.
+    quiet: true
+  no_log: true
+  diff: false
+
+- name: Create the usage-relay code and config directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  loop:
+    - /opt/usage-relay
+    - /opt/usage-relay/usage_relay
+    - /etc/usage-relay
+
+# The snapshot is the only file here, so the nightly backup (which tars this
+# directory as homelab) can only ever capture a consistent copy.
+- name: Create the usage-relay snapshot directory
+  ansible.builtin.file:
+    path: /opt/homelab/appdata/usage-relay
+    state: directory
+    owner: "{{ svc_uid }}"
+    group: "{{ svc_gid }}"
+    mode: "0750"
+
+- name: Install the usage-relay package
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/opt/usage-relay/usage_relay/{{ item | basename }}"
+    owner: root
+    group: root
+    mode: "0644"
+  with_fileglob: "usage_relay/*.py"
+  register: usage_relay_code
+
+- name: Render the usage-relay config
+  ansible.builtin.template:
+    src: usage-relay-config.json.j2
+    dest: /etc/usage-relay/config.json
+    owner: root
+    group: root
+    mode: "0644"
+  register: usage_relay_config
+
+- name: Render the usage-relay API keys
+  ansible.builtin.template:
+    src: usage-relay-keys.env.j2
+    dest: /etc/usage-relay/keys.env
+    owner: root
+    group: root
+    mode: "0600"
+  no_log: true
+  diff: false
+  register: usage_relay_keys
+
+- name: Install the usage-relay units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - usage-relay.service
+    - homelab-usage-digest.service
+    - homelab-usage-digest.timer
+  register: usage_relay_units
+
+# /metrics is a scrape target, not a UI: open it ONLY to Prometheus's host,
+# exactly like node_exporter's :9100 in files.yml.
+- name: Open the usage-relay metrics port to Prometheus only
+  ansible.posix.firewalld:
+    rich_rule: >-
+      rule family=ipv4 source address={{ hostvars[infra_host].ansible_host }}/32
+      port port={{ usage_relay_port }} protocol=tcp accept
+    permanent: true
+    immediate: true
+    state: enabled
+
+- name: Run the usage relay
+  ansible.builtin.systemd:
+    name: usage-relay.service
+    enabled: true
+    state: started
+    daemon_reload: "{{ usage_relay_units is changed }}"
+  when: not ansible_check_mode
+  register: usage_relay_started
+
+- name: Restart the usage relay when its code, config, keys or unit changed
+  ansible.builtin.systemd:
+    name: usage-relay.service
+    state: restarted
+  when:
+    - not ansible_check_mode
+    - usage_relay_started is not changed
+    - (usage_relay_code is changed) or (usage_relay_config is changed)
+      or (usage_relay_keys is changed) or (usage_relay_units is changed)
+
+- name: Arm the weekly usage digest
+  ansible.builtin.systemd:
+    name: homelab-usage-digest.timer
+    enabled: true
+    state: started
+  when: not ansible_check_mode

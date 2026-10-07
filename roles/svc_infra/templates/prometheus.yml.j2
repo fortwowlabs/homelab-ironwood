@@ -25,3 +25,11 @@ scrape_configs:
         labels:
           instance: {{ host }}
 {% endfor %}
+
+  # The household usage relay: a host service on svc-infra, not a container,
+  # reached the same way as svc-infra's own node_exporter above.
+  - job_name: usage-relay
+    static_configs:
+      - targets: ['host.containers.internal:{{ usage_relay_port }}']
+        labels:
+          instance: {{ infra_host }}

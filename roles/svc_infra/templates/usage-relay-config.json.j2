@@ -1,0 +1,32 @@
+{#- Rendered by roles/svc_infra/tasks/usage-relay.yml; read by usage_relay/config.py,
+    which rejects a missing key by name. Every value comes from inventory. -#}
+{%- set _dl = hostvars[download_host].ansible_host -%}
+{%- set config = {
+  "db_path": "/var/lib/usage-relay/usage.db",
+  "snapshot_path": "/opt/homelab/appdata/usage-relay/usage.snapshot.db",
+  "report_path": scan_report_dir ~ "/usage.txt",
+  "listen_host": "0.0.0.0",
+  "listen_port": usage_relay_port,
+  "push_interval": 10,
+  "maintenance_time": "02:30",
+  "topics": usage_topics,
+  "batch_window": usage_batch_window,
+  "resume_window": usage_resume_window,
+  "playback_expiry": usage_playback_expiry,
+  "collector_alert_after": usage_collector_alert_after,
+  "retention_days": usage_retention_days,
+  "push_ignore_users": usage_push_ignore_users,
+  "collectors": {
+    "jellyfin": {"base_url": "http://" ~ hostvars[media_host].ansible_host ~ ":8096",
+                 "interval": 30, "key_env": "USAGE_JELLYFIN_API_KEY"},
+    "seerr": {"base_url": "https://seerr." ~ service_domain,
+              "interval": 60, "key_env": "USAGE_SEERR_API_KEY"},
+    "sonarr": {"base_url": "http://" ~ _dl ~ ":" ~ download_apps.sonarr.ui_port,
+               "interval": 60, "key_env": "USAGE_SONARR_API_KEY"},
+    "radarr": {"base_url": "http://" ~ _dl ~ ":" ~ download_apps.radarr.ui_port,
+               "interval": 60, "key_env": "USAGE_RADARR_API_KEY"},
+    "sabnzbd": {"base_url": "http://" ~ _dl ~ ":" ~ download_apps.sabnzbd.ui_port,
+                "interval": 60, "key_env": "USAGE_SABNZBD_API_KEY"}
+  }
+} -%}
+{{ config | to_nice_json }}

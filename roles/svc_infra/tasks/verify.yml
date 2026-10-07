@@ -295,6 +295,24 @@
          if (infra_chat_trust_env.stdout | trim) == 'absent'
          else 'true' }}.
 
+# Usage relay, in two halves. selftest is the end-to-end positive control: a
+# synthetic event must come back out of ntfy, move the counter and exist in
+# SQLite (and is then removed). check is the "could not look" guard: every
+# collector with a key must have polled successfully within 5 minutes, and a
+# keyless one is printed as `disabled` rather than passed. Both run the relay's
+# own CLI through systemd-run, so user, environment and sandbox match the unit.
+- name: Prove the usage relay records, counts and pushes
+  ansible.builtin.command:
+    argv: "{{ usage_relay_cli + ['selftest'] }}"
+  register: usage_relay_selftest
+  changed_when: false
+
+- name: Prove every enabled usage collector has looked recently
+  ansible.builtin.command:
+    argv: "{{ usage_relay_cli + ['check', '--wait', '90'] }}"
+  register: usage_relay_check
+  changed_when: false
+
 - name: Mark svc-infra verification complete
   ansible.builtin.set_fact:
     svc_infra_verified: true

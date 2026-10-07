@@ -1,0 +1,14 @@
+# homelab-iac managed — roles/svc_infra/files/homelab-usage-digest.timer
+[Unit]
+Description=Publish the weekly household usage digest
+
+[Timer]
+# Sunday 18:00: the week is over and people are home to read it. Nothing else
+# in the estate's schedule runs near it (see homelab-alert-canary.timer).
+OnCalendar=Sun *-*-* 18:00:00
+# A host that was off at 18:00 publishes when it returns. A late digest says
+# "the host was down"; a missing one would read as "the timer is broken".
+Persistent=true
+
+[Install]
+WantedBy=timers.target

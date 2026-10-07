@@ -112,3 +112,10 @@ onfailure_units_extra:
   # SuccessExitStatus=2 deliberately keeps out of `failed`, for the same
   # "GPU host asleep is routine, don't page on it" reason.
   - homelab-image-edit@.service
+  # usage-relay.service is deliberately NOT listed: it is a long-running daemon
+  # (Restart=on-failure), not timer-triggered, and the base
+  # homelab-failedunits watcher already alerts on it once systemd gives up
+  # restarting it and it lands in `systemctl --failed`.
+  # The weekly digest. A failed run means no Sunday message, which would
+  # otherwise be indistinguishable from a quiet week.
+  - homelab-usage-digest.service
