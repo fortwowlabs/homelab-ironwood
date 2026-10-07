@@ -92,6 +92,7 @@ def cmd_run(settings: Settings, env: Mapping[str, str]) -> int:
                   metrics=metrics, collectors=collectors,
                   alert_topic=env.get("NTFY_ALERT_TOPIC") or env.get("NTFY_TOPIC") or "homelab-alerts",
                   alert_after=settings.collector_alert_after)
+    relay.seed_counters()
     server = RelayHTTPServer((settings.listen_host, settings.listen_port), relay, metrics)
     threading.Thread(target=server.serve_forever, name="http", daemon=True).start()
     stop = threading.Event()

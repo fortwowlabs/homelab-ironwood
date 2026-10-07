@@ -90,6 +90,23 @@ class StoreTests(unittest.TestCase):
         self.assertIsNone(self.store.get("old"))
         self.assertIsNotNone(self.store.get("new"))
 
+    def test_count_by_label_groups_by_service_kind_and_user(self):
+        self.store.insert(ev("a", "request.created", user="alice"), "none")
+        self.store.insert(ev("b", "request.created", user="alice"), "none")
+        self.store.insert(ev("c", "request.created", user="bob"), "none")
+        counts = {(service, kind, user): n for service, kind, user, n in self.store.count_by_label()}
+        self.assertEqual(counts[("test", "request.created", "alice")], 2)
+        self.assertEqual(counts[("test", "request.created", "bob")], 1)
+
+    def test_watched_by_user_sums_watched_seconds_from_stops_only(self):
+        self.store.insert(ev("s1", "playback.stopped", user="alice", watched_seconds=600), "none")
+        self.store.insert(ev("s2", "playback.stopped", user="alice", watched_seconds=300), "none")
+        self.store.insert(ev("s3", "playback.stopped", user="bob", watched_seconds=100), "none")
+        self.store.insert(ev("p1", "playback.started", user="alice"), "none")
+        watched = dict(self.store.watched_by_user())
+        self.assertEqual(watched["alice"], 900)
+        self.assertEqual(watched["bob"], 100)
+
     def test_snapshot_is_a_complete_readable_copy(self):
         self.store.insert(ev("a"), "none")
         dest = self.tmp / "snap.db"

@@ -89,6 +89,16 @@ class Relay:
                                  float(event.detail.get("watched_seconds", 0)))
         return inserted
 
+    def seed_counters(self) -> None:
+        """Set (not increment) the event and watch-seconds counters from
+        SQLite, so a restart does not reset a low-volume series to 1 and cost
+        it Prometheus's increase() ignoring a series' first sample."""
+        for service, kind, user, count in self.store.count_by_label():
+            self.metrics.set("homelab_usage_events_total",
+                             {"service": service, "kind": kind, "user": user}, count)
+        for user, seconds in self.store.watched_by_user():
+            self.metrics.set("homelab_usage_watch_seconds_total", {"user": user}, seconds)
+
     # -- collectors ----------------------------------------------------------
 
     def _failed(self, name: str, message: str) -> None:

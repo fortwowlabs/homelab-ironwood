@@ -137,6 +137,23 @@ class Store:
         )
         return [_event(row) for row in rows]
 
+    def count_by_label(self) -> list[tuple[str, str, str | None, int]]:
+        """One row per (service, kind, user) seen in the log, with its total
+        count -- how the relay re-seeds homelab_usage_events_total after a
+        restart, so a Prometheus increase() does not lose a series' first
+        sample every time the process restarts."""
+        return [tuple(row) for row in self._rows(
+            "SELECT service, kind, user, COUNT(*) FROM events GROUP BY service, kind, user"
+        )]
+
+    def watched_by_user(self) -> list[tuple[str | None, float]]:
+        """Total watched_seconds per user, from playback.stopped rows --
+        how the relay re-seeds homelab_usage_watch_seconds_total."""
+        return [tuple(row) for row in self._rows(
+            "SELECT user, COALESCE(SUM(json_extract(detail, '$.watched_seconds')), 0)"
+            " FROM events WHERE kind = 'playback.stopped' GROUP BY user"
+        )]
+
     def prune(self, before: str) -> int:
         return self._write("DELETE FROM events WHERE ts < ?", (before,))
 

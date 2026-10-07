@@ -172,6 +172,26 @@ class RelayTests(unittest.TestCase):
         self.assertIsNotNone(self.store.get("new"))
         self.assertTrue(snapshot.exists())
 
+    def test_seed_counters_restores_totals_from_sqlite_after_a_restart(self):
+        r = self.relay()
+        r.ingest([self.ev("p1", "request.created", "alice"),
+                  self.ev("p2", "request.created", "alice"),
+                  self.ev("s1", "playback.stopped", "bob", service="jellyfin", watched_seconds=600)])
+        # A fresh Metrics + Relay on the SAME store simulates a restart: the
+        # in-memory counters start at zero until seed_counters() reads them
+        # back out of SQLite.
+        new_metrics = Metrics()
+        new_relay = Relay(store=self.store, router=self.router, ntfy=self.ntfy, metrics=new_metrics,
+                          collectors={}, alert_topic="homelab-alerts", alert_after=900,
+                          clock=self.clock, log=lambda _message: None)
+        new_relay.seed_counters()
+        self.assertEqual(new_metrics.value(EVENTS, {"service": "seerr", "kind": "request.created",
+                                                     "user": "alice"}), 2)
+        self.assertEqual(new_metrics.value("homelab_usage_watch_seconds_total", {"user": "bob"}), 600)
+        new_relay.ingest([self.ev("p3", "request.created", "alice")])
+        self.assertEqual(new_metrics.value(EVENTS, {"service": "seerr", "kind": "request.created",
+                                                     "user": "alice"}), 3)
+
     def test_the_health_report_marks_disabled_collectors(self):
         r = self.relay(sonarr=None, radarr=FakeCollector("radarr", ([], "m")))
         r.poll_collector("radarr")
