@@ -5,17 +5,23 @@ import threading
 import unittest
 import urllib.error
 import urllib.request
+from unittest import mock
 
 import helpers  # noqa: F401  (puts roles/svc_infra/files on sys.path)
+from usage_relay import httpserver
 from usage_relay.httpserver import RelayHTTPServer
 from usage_relay.metrics import Metrics
 
 
 class FakeRelay:
+    def __init__(self):
+        self.selftest_calls = 0
+
     def health_report(self):
         return {"now": 1.0, "collectors": {}}
 
     def selftest_insert(self):
+        self.selftest_calls += 1
         return "selftest:1"
 
 
@@ -52,3 +58,14 @@ class ServerTests(unittest.TestCase):
         with self.assertRaises(urllib.error.HTTPError) as caught:
             self.get("/nope")
         self.assertEqual(caught.exception.code, 404)
+
+    def test_selftest_is_refused_when_the_caller_is_not_recognised_as_loopback(self):
+        # The 403 branch is the only guard on a write path. Shrinking LOOPBACK
+        # to empty simulates a request this server would treat as non-local
+        # without needing an actual non-loopback client.
+        before = self.server.relay.selftest_calls
+        with mock.patch.object(httpserver, "LOOPBACK", frozenset()):
+            with self.assertRaises(urllib.error.HTTPError) as caught:
+                self.get("/selftest", data=b"")
+        self.assertEqual(caught.exception.code, 403)
+        self.assertEqual(self.server.relay.selftest_calls, before)
