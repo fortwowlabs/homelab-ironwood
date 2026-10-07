@@ -74,6 +74,17 @@ def assess(report: dict) -> tuple[list[str], list[str]]:
     return lines, stale
 
 
+def verdict(report: dict) -> tuple[list[str], bool]:
+    """assess(), plus the "could not look" guard: a report where nothing is
+    enabled must fail rather than read as a pass made entirely of `disabled`
+    lines."""
+    lines, stale = assess(report)
+    enabled = any(health["enabled"] for health in report["collectors"].values())
+    if not enabled:
+        return lines + ["no collector is enabled — nothing was checked"], True
+    return lines, bool(stale)
+
+
 def cmd_run(settings: Settings, env: Mapping[str, str]) -> int:
     ntfy_url = env.get("NTFY_URL", "")
     if not ntfy_url:
@@ -197,15 +208,15 @@ def cmd_check(settings: Settings, wait: float, sleep: Callable[[float], None] = 
     deadline = clock() + wait
     while True:
         try:
-            lines, stale = assess(json.loads(_http(url)))
+            lines, failed = verdict(json.loads(_http(url)))
         except (OSError, ValueError, KeyError) as exc:
             _err(f"check: the relay did not answer on {url}: {exc}")
             return 1
-        if not stale or clock() >= deadline:
+        if not failed or clock() >= deadline:
             break
         sleep(5)
     print("\n".join(lines))
-    return 1 if stale else 0
+    return 1 if failed else 0
 
 
 def main(argv: list[str] | None = None) -> int:

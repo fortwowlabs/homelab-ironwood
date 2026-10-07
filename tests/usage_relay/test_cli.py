@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from helpers import TOPICS, FakeNtfy, make_settings
-from usage_relay.cli import assess, cmd_digest, cmd_selftest, selftest_count
+from usage_relay.cli import assess, cmd_digest, cmd_selftest, selftest_count, verdict
 from usage_relay.httpserver import RelayHTTPServer
 from usage_relay.metrics import Metrics
 from usage_relay.model import Event
@@ -33,6 +33,36 @@ class AssessTests(unittest.TestCase):
             "seerr: disabled (no API key)",
             "sonarr: stale, last looked 400s ago — HTTP 500 from http://x",
         ])
+
+
+class VerdictTests(unittest.TestCase):
+    """F4: `check` must not read as a pass when nothing was actually looked
+    at -- "could not look" is a fail, not a silent disabled-only report."""
+
+    def test_zero_enabled_collectors_fails_with_an_explanatory_line(self):
+        report = {"now": 1000.0, "collectors": {
+            "jellyfin": {"enabled": False, "last_success": None, "last_error": None},
+            "seerr": {"enabled": False, "last_success": None, "last_error": None},
+        }}
+        lines, failed = verdict(report)
+        self.assertTrue(failed)
+        self.assertIn("no collector is enabled — nothing was checked", lines)
+
+    def test_at_least_one_enabled_and_fresh_collector_passes(self):
+        report = {"now": 1000.0, "collectors": {
+            "jellyfin": {"enabled": True, "last_success": 990.0, "last_error": None},
+            "seerr": {"enabled": False, "last_success": None, "last_error": None},
+        }}
+        lines, failed = verdict(report)
+        self.assertFalse(failed)
+        self.assertNotIn("no collector is enabled — nothing was checked", lines)
+
+    def test_a_stale_enabled_collector_still_fails(self):
+        report = {"now": 10_000.0, "collectors": {
+            "jellyfin": {"enabled": True, "last_success": 1.0, "last_error": None},
+        }}
+        lines, failed = verdict(report)
+        self.assertTrue(failed)
 
 
 class SelftestCountTests(unittest.TestCase):

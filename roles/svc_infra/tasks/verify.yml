@@ -314,6 +314,10 @@
   register: usage_relay_check
   changed_when: false
 
+- name: Show which usage collectors were checked and which are disabled
+  ansible.builtin.debug:
+    var: usage_relay_check.stdout_lines
+
 - name: Mark svc-infra verification complete
   ansible.builtin.set_fact:
     svc_infra_verified: true
