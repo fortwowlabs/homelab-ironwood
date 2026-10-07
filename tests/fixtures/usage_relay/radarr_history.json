@@ -1,0 +1,5 @@
+[
+  {"id": 55, "eventType": "downloadFolderImported", "date": "2026-10-05T12:05:00Z", "movieId": 3,
+   "sourceTitle": "Example.Movie.2024.1080p.WEB",
+   "movie": {"title": "Example Movie", "year": 2024, "tmdbId": 9001}}
+]
