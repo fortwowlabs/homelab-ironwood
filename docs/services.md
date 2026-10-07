@@ -373,8 +373,13 @@ Where the data lives:
   - A consistent snapshot is written nightly to
     `/opt/homelab/appdata/usage-relay/usage.snapshot.db`. That snapshot is
     what the backup tars.
-  - To restore: stop the relay, copy the snapshot over `usage.db`, and start
-    it again.
+  - To restore: stop the relay (`systemctl stop usage-relay`), `rm -f
+    /var/lib/usage-relay/usage.db-wal /var/lib/usage-relay/usage.db-shm`, then
+    `install -o homelab -g homelab -m 0640
+    /opt/homelab/appdata/usage-relay/usage.snapshot.db /var/lib/usage-relay/usage.db`,
+    then `systemctl start usage-relay`. Copying the snapshot straight over
+    `usage.db` as root would leave a root-owned file StateDirectory does not
+    re-chown, and a leftover `-wal` file would replay stale writes onto it.
 
 Checking it by hand, on svc-infra:
 

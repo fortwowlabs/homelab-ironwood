@@ -289,7 +289,12 @@ digest built from a failed read would look like a quiet week.
     ever tar a consistent copy. A live WAL database copied mid-write is not a
     backup.
   - `usage-relay` is added to `infra_extra_backup_paths`.
-  - To restore, stop the relay and copy the snapshot over `usage.db`.
+  - To restore, stop the relay (`systemctl stop usage-relay`), remove
+    `usage.db-wal`/`usage.db-shm`, then `install -o homelab -g homelab -m 0640`
+    the snapshot as `usage.db` and start the relay again -- copying the
+    snapshot straight over `usage.db` as root would leave it root-owned and a
+    leftover WAL would replay onto it. See docs/services.md's Usage
+    notifications section for the exact commands.
 - **Retention.** Rows older than `usage_retention_days` (default 365) are
   deleted nightly. This is household viewing history, and it is bounded on
   purpose.
