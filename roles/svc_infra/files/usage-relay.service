@@ -11,6 +11,13 @@
 Description=Household usage relay
 After=network-online.target
 Wants=network-online.target
+# Restart=on-failure alone never gives up: with RestartSec=10 the default
+# 5-starts-in-10s limit cannot trip, so a relay that dies at startup would loop
+# forever in `activating` and never reach `failed` — where homelab-failedunits
+# alerts. Five failed starts in ten minutes lands it in `failed` (same reasoning
+# as chat-egress.service.j2).
+StartLimitIntervalSec=10min
+StartLimitBurst=5
 
 [Service]
 Type=simple

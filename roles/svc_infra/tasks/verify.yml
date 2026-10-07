@@ -300,7 +300,8 @@
 # SQLite (and is then removed). check is the "could not look" guard: every
 # collector with a key must have polled successfully within 5 minutes, and a
 # keyless one is printed as `disabled` rather than passed. Both run the relay's
-# own CLI through systemd-run, so user, environment and sandbox match the unit.
+# own CLI through systemd-run, so it runs as the relay's user with the relay's
+# state directory and ntfy environment.
 - name: Prove the usage relay records, counts and pushes
   ansible.builtin.command:
     argv: "{{ usage_relay_cli + ['selftest'] }}"

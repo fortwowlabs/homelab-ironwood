@@ -17,6 +17,13 @@
   ansible.builtin.import_tasks: apps.yml
   tags: [apps]
 
+# Before backup.yml: usage-relay is in infra_extra_backup_paths, and backup.yml
+# takes an initial backup when an artifact is missing — the snapshot directory
+# this creates (and the relay's startup snapshot) must already exist by then.
+- name: Install the household usage relay
+  ansible.builtin.import_tasks: usage-relay.yml
+  tags: [usagerelay]
+
 - name: Configure infra backups
   ansible.builtin.import_tasks: backup.yml
   tags: [backup]
@@ -28,10 +35,6 @@
 - name: Install the weekly alert-topic delivery canary
   ansible.builtin.import_tasks: alert-canary.yml
   tags: [alertcanary]
-
-- name: Install the household usage relay
-  ansible.builtin.import_tasks: usage-relay.yml
-  tags: [usagerelay]
 
 # Last before verify.yml, and both halves of that placement matter. It is after
 # apps.yml because the container must exist before its cgroup can be matched.

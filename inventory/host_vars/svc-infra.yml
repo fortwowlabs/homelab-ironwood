@@ -116,6 +116,7 @@ onfailure_units_extra:
   # (Restart=on-failure), not timer-triggered, and the base
   # homelab-failedunits watcher already alerts on it once systemd gives up
   # restarting it and it lands in `systemctl --failed`.
+  #
   # The weekly digest. A failed run means no Sunday message, which would
   # otherwise be indistinguishable from a quiet week.
   - homelab-usage-digest.service
