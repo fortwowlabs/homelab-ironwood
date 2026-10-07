@@ -73,6 +73,16 @@ class ArrCollectorTests(unittest.TestCase):
         c.poll("2026-10-05T11:00:00Z")
         self.assertTrue(self.fetch.calls[0][0].endswith("&includeMovie=true"))
 
+    def test_the_first_poll_baseline_then_an_empty_history_yields_nothing(self):
+        # F1 regression, generalised: a baseline taken from poll(None), fed
+        # straight back into poll(mark) against an upstream that (correctly,
+        # like the real "since" filter) has nothing new to report, must not
+        # manufacture events out of nothing.
+        c = self.collector("sonarr", {"http://sonarr.example/api/v3/history/since": []})
+        _, mark = c.poll(None)
+        events, _ = c.poll(mark)
+        self.assertEqual(events, [])
+
     def test_only_sonarr_and_radarr_are_accepted(self):
         with self.assertRaises(ValueError):
             ArrCollector(service="lidarr", base_url="http://x", api_key="k", fetch=FakeFetch(), interval=60)

@@ -75,6 +75,43 @@ class SeerrTests(unittest.TestCase):
         self.assertEqual(len(events), 6)
 
     def test_a_request_yielding_no_events_fetches_no_title(self):
-        self.c.poll("2026-10-05T12:12:30Z")
-        urls = [url for url, _ in self.fetch.calls]
-        self.assertNotIn(f"{BASE}/api/v1/tv/7001", urls)
+        # updatedAt >= mark (passes the outer filter), createdAt < mark (not
+        # "created"), status 1 = pending (not "approved"), media status 2 =
+        # pending (not "available") -- no event_spec survives, so _events_for
+        # must return before ever calling self._title(). tmdbId is set (and
+        # NOT registered with FakeFetch) so that, if the early return were
+        # removed, _title would attempt a real fetch and the test would fail
+        # loudly instead of passing by accident (tmdbId=None short-circuits
+        # _title without fetching, which would hide a removed early return).
+        payload = {"results": [{
+            "id": 50, "status": 1, "type": "tv",
+            "createdAt": "2026-10-05T11:00:00.000Z", "updatedAt": "2026-10-05T12:05:00.000Z",
+            "media": {"tmdbId": 9050, "tvdbId": 7001, "status": 2},
+            "requestedBy": {"displayName": "Dana", "jellyfinUsername": "dana"}, "seasons": []}]}
+        fetch = FakeFetch({f"{BASE}/api/v1/request": payload})
+        c = SeerrCollector(base_url=BASE, api_key="example-api-key", fetch=fetch, interval=60,
+                           clock=FakeClock())
+        events, _ = c.poll("2026-10-05T12:00:00Z")
+        self.assertEqual(events, [])
+        self.assertNotIn(f"{BASE}/api/v1/tv/9050", [url for url, _ in fetch.calls])
+
+    def test_a_first_deploy_does_not_resurrect_an_existing_auto_approved_request(self):
+        # Reproduces F1: a request that already existed at first-poll time,
+        # with createdAt == updatedAt (an auto-approved request looks like
+        # this), must not be re-announced as "created" on the very next poll
+        # just because it is still the newest row the collector has seen.
+        payload = {"results": [{
+            "id": 99, "status": 2, "type": "movie",
+            "createdAt": "2026-10-05T11:00:00.000Z", "updatedAt": "2026-10-05T11:00:00.000Z",
+            "media": {"tmdbId": 9099, "tvdbId": None, "status": 1},
+            "requestedBy": {"displayName": "Carol", "jellyfinUsername": "carol"}, "seasons": []}]}
+        fetch = FakeFetch({f"{BASE}/api/v1/request": payload})
+        # FakeClock() starts at 2026-10-05T12:00:00Z, AFTER this request's
+        # createdAt/updatedAt of 11:00:00Z -- the shape that makes the old
+        # "baseline = latest" code set the mark to 11:00:00Z instead of the
+        # clock, so the unchanged request reappears on the next poll.
+        c = SeerrCollector(base_url=BASE, api_key="example-api-key", fetch=fetch, interval=60,
+                           clock=FakeClock())
+        _, mark = c.poll(None)
+        events, _ = c.poll(mark)
+        self.assertEqual(events, [])

@@ -37,6 +37,15 @@ class SabnzbdTests(unittest.TestCase):
         self.c.poll("1791201600")
         self.assertIn("apikey=example-api-key", self.fetch.calls[0][0])
 
+    def test_the_first_poll_baseline_then_the_same_history_yields_nothing(self):
+        # F1 regression, generalised: poll(None) sets the baseline from this
+        # exact fixture; polling again with the SAME fixture (nothing new
+        # happened) must emit zero events, not re-announce the jobs that set
+        # the baseline.
+        _, mark = self.c.poll(None)
+        events, _ = self.c.poll(mark)
+        self.assertEqual(events, [])
+
     def test_unexpected_shapes_are_shape_errors(self):
         with self.assertRaises(ShapeError):
             parse_slots({"queue": {}})

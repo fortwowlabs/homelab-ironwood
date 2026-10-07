@@ -92,6 +92,15 @@ class JellyfinTests(unittest.TestCase):
         _, mark = self.poll(PLAYING, mark)
         self.assertEqual(self.poll(PLAYING, mark, collector=self.collector())[0], [])
 
+    def test_the_first_poll_baseline_then_the_same_sessions_yield_nothing(self):
+        # F1 regression, generalised: poll(None) sets the baseline from
+        # whatever is playing; polling again with the SAME sessions (nothing
+        # changed) must emit zero events, not announce the sessions that set
+        # the baseline as newly started.
+        _, mark = self.poll(PLAYING, None)
+        events, _ = self.poll(PLAYING, mark)
+        self.assertEqual(events, [])
+
     def test_an_unreadable_mark_is_treated_as_a_baseline(self):
         self.assertEqual(self.poll(PLAYING, "not json")[0], [])
 

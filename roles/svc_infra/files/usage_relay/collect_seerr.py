@@ -67,7 +67,17 @@ class SeerrCollector:
         requests = parse_requests(self._fetch(self._base + PAGE, self._headers))
         latest = max((r["updated"] for r in requests), default=None)
         if mark is None:
-            return [], latest or from_epoch(self._clock())
+            # The baseline must be at least the clock, not just the newest
+            # existing row: an auto-approved request has createdAt ==
+            # updatedAt, and if that row also happens to be the newest one,
+            # a baseline of "latest" alone leaves the mark sitting exactly on
+            # it -- the next poll's `updated < mark` check then lets it
+            # through, and `created >= mark` announces it as new. Taking the
+            # clock into account pushes the mark past every existing row (in
+            # the ordinary case where requests predate the first poll), so
+            # an unchanged request is excluded outright on the next poll.
+            baseline = from_epoch(self._clock())
+            return [], max(latest, baseline) if latest else baseline
         events: list[Event] = []
         for request in requests:
             if request["updated"] < mark:
