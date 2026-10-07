@@ -119,7 +119,7 @@ validate-python:
 # new file rather than a new Makefile line; ruff is not a gate, it is a tool
 # that lints the gates, and routing it through the runner it lints would invert
 # that dependency for nothing.
-	$(RUFF) check --no-cache tests scripts
+	$(RUFF) check --no-cache tests scripts roles/svc_infra/files/usage_relay
 
 validate-links:
 	$(PYTHON) tests/run_gates.py links
