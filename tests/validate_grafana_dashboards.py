@@ -50,6 +50,10 @@ EMITTER_PATHS = (
     # reason, and its --prefix is spelled the same way the plays spell theirs,
     # so both collectors below read it without a special case.
     "roles/svc_infra/templates/chat-egress-probe.sh.j2",
+    # The usage relay serves /metrics itself rather than writing a textfile.
+    # Its CATALOG lines start at column 0 with the metric name, so the
+    # metric-line regex below reads it with no special case.
+    "roles/svc_infra/files/usage_relay/metrics.py",
 )
 
 # node_exporter's own series, which this repo does not emit but legitimately
@@ -88,7 +92,9 @@ PREFIX_ARG = re.compile(r"--prefix['\",\s\]\[-]*?(homelab_[a-z0-9_]+)", re.S)
 # aggregation clause such as `sum by (instance) (...)`. Homelab-nodes.json's
 # CPU/network panels use exactly that clause.
 NOT_METRICS = {"sum", "topk", "time", "rate", "increase", "avg", "max", "min",
-               "count", "by", "without", "and", "or", "unless", "instance"}
+               "count", "by", "without", "and", "or", "unless", "instance",
+               # Label names in `sum by (...)` clauses on the usage dashboard.
+               "user", "mode", "service", "collector", "topic"}
 
 
 def emitted_metric_names() -> set[str]:
@@ -133,6 +139,9 @@ EXTRACTION_CASES = (
      {"homelab_scan_last_success_timestamp_seconds"}),
     # `instance` is a label here, not a metric, and `by`/`sum` are keywords.
     ("sum by (instance) (homelab_release_errors)", {"homelab_release_errors"}),
+    # A label in a by-clause next to a range selector, as the usage dashboard writes it.
+    ('sum by (user) (increase(homelab_usage_events_total{kind="playback.started"}[1d]))',
+     {"homelab_usage_events_total"}),
 )
 
 

@@ -1,0 +1,110 @@
+{
+  "uid": "homelab-usage",
+  "title": "Household usage",
+  "description": "Requests, imports, failures and playback recorded by the usage relay on svc-infra (roles/svc_infra/files/usage_relay). Managed by Ansible — UI edits are reverted on restart; copy it to a new name to experiment. Titles are deliberately absent: they live in the relay's SQLite log and the weekly digest at https://scan.<domain>/usage.txt.",
+  "tags": ["homelab"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "1m",
+  "time": { "from": "now-30d", "to": "now" },
+  "panels": [
+    { "type": "row", "title": "Now", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 }, "panels": [] },
+    {
+      "type": "stat", "title": "Streams now",
+      "description": "0 when Jellyfin is being polled and nothing plays; blank when the relay itself is not reporting.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 0, "y": 1 },
+      "fieldConfig": { "defaults": { "noValue": "relay not reporting", "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null } ] } }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "sum(homelab_usage_playback_active) or (0 * homelab_usage_collector_last_success_timestamp{collector=\"jellyfin\"})" } ]
+    },
+    {
+      "type": "stat", "title": "Transcoding now",
+      "description": "Streams costing server CPU. Software transcode on svc-media: more than one 4K transcode at a time will stutter.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 6, "y": 1 },
+      "fieldConfig": { "defaults": { "noValue": "relay not reporting", "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "orange", "value": 2 } ] } }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "sum(homelab_usage_playback_active{mode=\"transcode\"}) or (0 * homelab_usage_collector_last_success_timestamp{collector=\"jellyfin\"})" } ]
+    },
+    {
+      "type": "stat", "title": "Seconds since each collector looked",
+      "description": "Red past 300s: that collector is blind, which is different from the house being quiet.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 12, "y": 1 },
+      "fieldConfig": { "defaults": { "noValue": "no collector has looked", "unit": "s", "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 300 } ] } }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "time() - homelab_usage_collector_last_success_timestamp", "legendFormat": "{{collector}}" } ]
+    },
+    {
+      "type": "stat", "title": "Collector errors (24h)",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 6, "x": 18, "y": 1 },
+      "fieldConfig": { "defaults": { "noValue": "relay not reporting", "color": { "mode": "thresholds" },
+        "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 1 } ] } }, "overrides": [] },
+      "options": { "colorMode": "value", "graphMode": "none", "reduceOptions": { "calcs": ["lastNotNull"], "fields": "", "values": false } },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "sum by (collector) (increase(homelab_usage_collector_errors_total[1d]))", "legendFormat": "{{collector}}" } ]
+    },
+    { "type": "row", "title": "Usage (rolling 24h)", "collapsed": false, "gridPos": { "h": 1, "w": 24, "x": 0, "y": 5 }, "panels": [] },
+    {
+      "type": "timeseries", "title": "Playback starts per person",
+      "description": "Includes resumes and the owner's own viewing; the weekly digest counts distinct titles instead.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "sum by (user) (increase(homelab_usage_events_total{kind=\"playback.started\"}[1d]))", "legendFormat": "{{user}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "Hours watched per person",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "sum by (user) (increase(homelab_usage_watch_seconds_total[1d])) / 3600", "legendFormat": "{{user}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "Streams by play method",
+      "description": "Direct play costs svc-media almost nothing; transcode is the CPU-bound path.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "sum by (mode) (homelab_usage_playback_active)", "legendFormat": "{{mode}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "Requests per person",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "sum by (user) (increase(homelab_usage_events_total{kind=\"request.created\"}[1d]))", "legendFormat": "{{user}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "Imports by service",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "sum by (service) (increase(homelab_usage_events_total{kind=\"download.imported\"}[1d]))", "legendFormat": "{{service}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "Download failures by service",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "sum by (service) (increase(homelab_usage_events_total{kind=\"download.failed\"}[1d]))", "legendFormat": "{{service}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "Push failures by topic",
+      "description": "Non-zero means ntfy refused or was unreachable; pending pushes retry each cycle.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 30 },
+      "targets": [ { "refId": "A", "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "expr": "sum by (topic) (increase(homelab_usage_push_failures_total[1d]))", "legendFormat": "{{topic}}" } ]
+    }
+  ]
+}
