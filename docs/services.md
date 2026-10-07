@@ -293,6 +293,51 @@ Direct source -------> Shelfmark -> the same destinations
 Shelfmark complements LazyLibrarian rather than replacing its background
 author, series, and new-release monitoring.
 
+## Beszel monitoring setup
+
+Beszel's hub (svc-infra, `beszel.{{ service_domain }}`) deploys fully
+automated — but the agent on each of the three service VMs needs one manual
+step first, because the credentials it needs only exist after the hub itself
+has been visited once (there's no API/CLI to generate them ahead of time):
+
+1. Deploy normally (`make deploy` or `make infra`). The hub comes up; every
+   agent skips itself with a loud WARNING in the play output — this is
+   expected on a fresh install, not a failure.
+2. Visit `https://beszel.{{ service_domain }}` and create the admin account.
+3. Under **Settings > Tokens**, create (or copy) the **universal token** —
+   this single token authenticates every agent, no per-host token needed.
+4. The **key** is the hub's public key, also shown on that same tokens page
+   (or when manually adding a system) — copy it in full, including the
+   `ssh-ed25519 ...` prefix.
+5. `make vault-edit`, set `vault_beszel_token` and `vault_beszel_key` to
+   those two values, save.
+6. Re-run `make deploy` (or `make dl`/`make media`/`make infra`
+   individually). Every agent now renders, starts, and reports in — check
+   the hub UI for three connected systems.
+
+`vault_beszel_token`/`vault_beszel_key` are shared by all three agents; there
+is nothing host-specific to configure per VM.
+
+## Grafana dashboards
+
+Two provisioned dashboards, both owned by this repo (`allowUiUpdates: false`,
+so UI edits revert on restart — copy a dashboard to a new name to experiment):
+
+- **Homelab nodes** — host CPU, memory, disk and network from node_exporter.
+- **Homelab estate** — CVE counts, images behind upstream, container drift, and
+  a freshness row that reports how old each of those numbers is. Fed by the
+  textfile collector rather than a scrape; see "Trending is separate from
+  alerting, and both are needed" in `CLAUDE.md`. Its default range is 30 days
+  because the series update nightly and weekly — a 6h window shows nothing and
+  looks broken.
+
+Freshness is judged per emitter, not against one global threshold: scan and
+drift read as stale past 26h, release past 8 days, because a single threshold
+would show the weekly release series as permanently red. The "Critical CVEs"
+tile alarms at 1; "High CVEs" deliberately does not, because high-severity
+findings are routine across the pinned image catalog and a tile that is always
+red stops getting read.
+
 ## Usage notifications
 
 `usage-relay.service` on svc-infra records how the household uses the media
@@ -341,51 +386,6 @@ Checking it by hand, on svc-infra:
 `make verify` runs that `check`, plus a `selftest`. The selftest pushes a
 synthetic event to `usage-selftest` and reads it back. A collector without a
 key prints as `disabled`. It is never reported as a pass.
-
-## Beszel monitoring setup
-
-Beszel's hub (svc-infra, `beszel.{{ service_domain }}`) deploys fully
-automated — but the agent on each of the three service VMs needs one manual
-step first, because the credentials it needs only exist after the hub itself
-has been visited once (there's no API/CLI to generate them ahead of time):
-
-1. Deploy normally (`make deploy` or `make infra`). The hub comes up; every
-   agent skips itself with a loud WARNING in the play output — this is
-   expected on a fresh install, not a failure.
-2. Visit `https://beszel.{{ service_domain }}` and create the admin account.
-3. Under **Settings > Tokens**, create (or copy) the **universal token** —
-   this single token authenticates every agent, no per-host token needed.
-4. The **key** is the hub's public key, also shown on that same tokens page
-   (or when manually adding a system) — copy it in full, including the
-   `ssh-ed25519 ...` prefix.
-5. `make vault-edit`, set `vault_beszel_token` and `vault_beszel_key` to
-   those two values, save.
-6. Re-run `make deploy` (or `make dl`/`make media`/`make infra`
-   individually). Every agent now renders, starts, and reports in — check
-   the hub UI for three connected systems.
-
-`vault_beszel_token`/`vault_beszel_key` are shared by all three agents; there
-is nothing host-specific to configure per VM.
-
-## Grafana dashboards
-
-Two provisioned dashboards, both owned by this repo (`allowUiUpdates: false`,
-so UI edits revert on restart — copy a dashboard to a new name to experiment):
-
-- **Homelab nodes** — host CPU, memory, disk and network from node_exporter.
-- **Homelab estate** — CVE counts, images behind upstream, container drift, and
-  a freshness row that reports how old each of those numbers is. Fed by the
-  textfile collector rather than a scrape; see "Trending is separate from
-  alerting, and both are needed" in `CLAUDE.md`. Its default range is 30 days
-  because the series update nightly and weekly — a 6h window shows nothing and
-  looks broken.
-
-Freshness is judged per emitter, not against one global threshold: scan and
-drift read as stale past 26h, release past 8 days, because a single threshold
-would show the weekly release series as permanently red. The "Critical CVEs"
-tile alarms at 1; "High CVEs" deliberately does not, because high-severity
-findings are routine across the pinned image catalog and a tile that is always
-red stops getting read.
 
 ## Seerr and RomM migration notes
 
