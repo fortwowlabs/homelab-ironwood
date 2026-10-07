@@ -69,5 +69,11 @@ class HelperTests(unittest.TestCase):
         self.assertEqual(redact("http://x/api?mode=history&apikey=abc&limit=5"),
                          "http://x/api?mode=history&apikey=REDACTED&limit=5")
 
+    def test_redact_hides_any_param_ending_in_a_key_name(self):
+        self.assertEqual(redact("http://x/cb?access_token=s3cret&x=1"),
+                         "http://x/cb?access_token=REDACTED&x=1")
+        self.assertEqual(redact("http://x/a?mode=token-list&limit=5"),
+                         "http://x/a?mode=token-list&limit=5")
+
     def test_snippet_is_bounded(self):
         self.assertEqual(len(snippet("x" * 5000)), 2048)

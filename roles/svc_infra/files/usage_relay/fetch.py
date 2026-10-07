@@ -17,7 +17,7 @@ from collections.abc import Callable
 Fetch = Callable[[str, dict[str, str]], object]
 
 SNIPPET_CHARS = 2048
-_KEY_PARAM = re.compile(r"(?i)\b(apikey|api_key|token)=[^&]*")
+_KEY_PARAM = re.compile(r"(?i)([?&][\w.-]*?(?:apikey|api_key|token))=[^&]*")
 
 
 class FetchError(Exception):
