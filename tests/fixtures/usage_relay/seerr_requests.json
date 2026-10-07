@@ -1,0 +1,15 @@
+{"pageInfo": {"pages": 1, "pageSize": 50, "results": 3, "page": 1},
+ "results": [
+  {"id": 11, "status": 1, "type": "movie",
+   "createdAt": "2026-10-05T12:10:00.000Z", "updatedAt": "2026-10-05T12:10:00.000Z",
+   "media": {"tmdbId": 9001, "tvdbId": null, "status": 2},
+   "requestedBy": {"displayName": "Alice", "jellyfinUsername": "Alice"}, "seasons": []},
+  {"id": 12, "status": 2, "type": "tv",
+   "createdAt": "2026-10-05T12:11:00.000Z", "updatedAt": "2026-10-05T12:12:00.000Z",
+   "media": {"tmdbId": 7001, "tvdbId": 4001, "status": 5},
+   "requestedBy": {"displayName": "Bob", "jellyfinUsername": "bob"}, "seasons": [{"seasonNumber": 2}]},
+  {"id": 3, "status": 2, "type": "movie",
+   "createdAt": "2026-01-01T09:00:00.000Z", "updatedAt": "2026-10-05T12:13:00.000Z",
+   "media": {"tmdbId": 9002, "tvdbId": null, "status": 5},
+   "requestedBy": {"displayName": "Alice", "jellyfinUsername": "alice"}, "seasons": []}
+ ]}
