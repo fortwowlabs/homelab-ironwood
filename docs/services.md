@@ -356,7 +356,7 @@ Subscribe to these ntfy topics on `http://<svc-media>:8080`:
 | `usage-requests` | Someone requested a movie or show | normal |
 | `usage-library` | Something is ready to watch (season packs arrive as one message) | normal |
 | `usage-playback` | Someone started playing something, with device and direct play vs transcode | low or silent |
-| `usage-failures` | A grab, import or SABnzbd job failed | high |
+| `usage-failures` | A download failed (Sonarr/Radarr, or a SABnzbd job) | high |
 | `usage-digest` | The weekly summary, Sunday 18:00 | normal |
 
 Your own playback (`usage_push_ignore_users`) is recorded but never pushed. If

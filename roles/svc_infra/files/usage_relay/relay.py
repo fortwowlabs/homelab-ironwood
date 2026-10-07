@@ -4,9 +4,12 @@ Order inside poll_collector() is what makes restarts lossless: events are
 inserted BEFORE the new mark is stored, so a crash between the two re-reads a
 page whose rows the store then drops as duplicates — never skips one.
 
-A SQLite error is the one failure that is allowed to kill the process. A relay
-that pushes without recording would break "emit the number the alert used",
-and systemd's Restart=on-failure brings it back.
+SQLite errors are deliberately fatal: a relay that pushes without recording
+would break "emit the number the alert used". Anything else that escapes the
+run loop -- an unwritable snapshot path, say -- also exits the process
+non-zero rather than being swallowed. Either way systemd's Restart=on-failure
+brings it back, and a relay that keeps failing reaches `failed` once it hits
+the start limit.
 """
 
 from __future__ import annotations
