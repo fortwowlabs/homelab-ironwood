@@ -55,7 +55,7 @@ class RelayTests(unittest.TestCase):
         return Event(id=event_id, ts=from_epoch(self.clock() + offset), service=service, kind=kind,
                      user=user, title=event_id, detail=detail)
 
-    def test_the_first_poll_records_the_mark_and_pushes_nothing(self):
+    def test_the_first_poll_records_the_mark(self):
         c = FakeCollector("sonarr", ([], "2026-10-05T12:00:00Z"))
         r = self.relay(sonarr=c)
         r.poll_collector("sonarr")
