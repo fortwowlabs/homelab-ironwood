@@ -1,0 +1,9 @@
+[
+  {"Id": "sess-tv", "UserName": "Alice", "DeviceName": "Living Room TV", "Client": "Android TV",
+   "NowPlayingItem": {"Id": "item-ep3", "Name": "Episode Three", "Type": "Episode",
+                      "SeriesName": "The Example Show", "ParentIndexNumber": 2, "IndexNumber": 3},
+   "PlayState": {"PositionTicks": 6000000000, "PlayMethod": "Transcode", "IsPaused": false}},
+  {"Id": "sess-phone", "UserName": "Bob", "DeviceName": "Pixel", "Client": "Jellyfin Android",
+   "NowPlayingItem": {"Id": "item-movie", "Name": "Example Movie", "Type": "Movie", "ProductionYear": 2024},
+   "PlayState": {"PositionTicks": 0, "PlayMethod": "DirectPlay", "IsPaused": false}}
+]
