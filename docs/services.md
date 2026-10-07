@@ -262,6 +262,16 @@ credentials in task output.
 9. In RomM, verify metadata-provider credentials and ingest owned ROMs under
    `/srv/media/romm/roms/<platform>/`; there is no arr-style ROM acquisition
    pipeline.
+10. For the usage relay, put five read-only API keys in the vault
+    (`make vault-edit`). An empty key disables just that collector.
+    - `vault_usage_jellyfin_api_key`: Jellyfin → Dashboard → API Keys → **+**
+      (name it `usage-relay`).
+    - `vault_usage_seerr_api_key`: Seerr → Settings → General → API Key.
+    - `vault_usage_sonarr_api_key` and `vault_usage_radarr_api_key`: Settings
+      → General → API Key in each app.
+    - `vault_usage_sabnzbd_api_key`: SABnzbd → Config → General → API Key.
+
+    Then run `make infra`.
 
 The media request flow is:
 
@@ -282,6 +292,55 @@ Direct source -------> Shelfmark -> the same destinations
 
 Shelfmark complements LazyLibrarian rather than replacing its background
 author, series, and new-release monitoring.
+
+## Usage notifications
+
+`usage-relay.service` on svc-infra records how the household uses the media
+stack. Full design:
+[usage notifications](superpowers/specs/2026-10-06-usage-notifications-design.md).
+
+It polls five services: Jellyfin sessions every 30 s, and Seerr requests,
+Sonarr and Radarr history, and SABnzbd history every 60 s. It does not
+receive webhooks. The download apps live in the VPN jail, which cannot open
+connections out to svc-infra, so the relay pulls from them instead.
+
+Subscribe to these ntfy topics on `http://<svc-media>:8080`:
+
+| Topic | What arrives | Suggested phone setting |
+|---|---|---|
+| `usage-requests` | Someone requested a movie or show | normal |
+| `usage-library` | Something is ready to watch (season packs arrive as one message) | normal |
+| `usage-playback` | Someone started playing something, with device and direct play vs transcode | low or silent |
+| `usage-failures` | A grab, import or SABnzbd job failed | high |
+| `usage-digest` | The weekly summary, Sunday 18:00 | normal |
+
+Your own playback (`usage_push_ignore_users`) is recorded but never pushed. If
+the relay itself cannot reach a service for 15 minutes, that goes to
+`homelab-alerts`, not to a usage topic.
+
+Where the data lives:
+
+- **Dashboard:** Grafana's **Household usage** dashboard shows trends.
+- **Digest:** the latest weekly digest is at `https://scan.<domain>/usage.txt`.
+- **Database:**
+  - The event log is SQLite at `/var/lib/usage-relay/usage.db`, kept for
+    `usage_retention_days` (365).
+  - A consistent snapshot is written nightly to
+    `/opt/homelab/appdata/usage-relay/usage.snapshot.db`. That snapshot is
+    what the backup tars.
+  - To restore: stop the relay, copy the snapshot over `usage.db`, and start
+    it again.
+
+Checking it by hand, on svc-infra:
+
+    sudo systemd-run --wait --pipe --quiet --collect -p User=homelab -p Group=homelab \
+      -p EnvironmentFile=/etc/homelab-notify.env -p StateDirectory=usage-relay -p StateDirectoryMode=0750 \
+      -E PYTHONPATH=/opt/usage-relay /usr/bin/python3 -m usage_relay \
+      --config /etc/usage-relay/config.json check
+
+`make verify` runs that `check`, plus a `selftest`. The selftest pushes a
+synthetic event to `usage-selftest` and reads it back. A collector without a
+key prints as `disabled`. It is never reported as a pass.
 
 ## Beszel monitoring setup
 

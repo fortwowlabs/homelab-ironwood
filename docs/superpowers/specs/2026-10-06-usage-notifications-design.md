@@ -160,7 +160,7 @@ the import is unattributed. The relay does not guess.
 | `usage-requests` | `request.created` | default | 📥 **Valerie** requested *Dune: Part Two* (movie) |
 | `usage-library` | `download.imported` | default | ✅ Ready: *The Bear* S02E03 · requested by Valerie |
 | `usage-playback` | `playback.started` | low | ▶️ **Erin**: *The Bear* S02E03 · Living Room TV · transcoding |
-| `usage-failures` | `download.failed` | high | ⚠️ Radarr import failed: *Dune: Part Two*: no matching file |
+| `usage-failures` | `download.failed` | high | ⚠️ Radarr failed: *Dune: Part Two*: no matching file |
 | `usage-digest` | weekly digest | default | see below |
 | `usage-selftest` | `selftest` | min | read back by verify; nobody subscribes |
 
@@ -278,6 +278,7 @@ digest built from a failed read would look like a quiet week.
   - Hardening: `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`,
     `NoNewPrivileges=yes`. Writable paths are its `StateDirectory=` plus the
     snapshot directory.
+  - A start limit (5 failed starts in 10 minutes) lets a crash-looping relay reach `failed`, where the estate's existing failed-units watcher alerts. It is deliberately not in `onfailure_units_extra`: that list is for timer-triggered units.
 - **State.**
   - The live database is `/var/lib/usage-relay/usage.db`
     (`StateDirectory=usage-relay`), opened in WAL mode.
