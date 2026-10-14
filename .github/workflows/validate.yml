@@ -46,7 +46,7 @@ jobs:
       ANSIBLE_LOCAL_TEMP: ${{ github.workspace }}/.ansible/tmp
     steps:
       - name: Check out the proposed change
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           # Full history is required by tests/scan_history_secrets.py.
           fetch-depth: 0
@@ -63,7 +63,7 @@ jobs:
       # Makefile to save that is more machinery than the saving is worth, and
       # this job is an after-the-fact advisory run, not a gate anyone waits on.
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: "3.13"
 
