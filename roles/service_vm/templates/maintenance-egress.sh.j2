@@ -7,6 +7,20 @@ set -euo pipefail
 state=/run/homelab-maintenance-egress.open
 backstop=/etc/nftables/host-backstop.nft
 
+# True when the backstop's output chain still has its default-drop policy.
+# The listing is captured whole before it is tested. `nft list ... | grep -q`
+# is wrong under pipefail: grep exits on its first match, nft takes SIGPIPE if
+# it is still writing, and the pipeline reports 141 although the check passed.
+# On 2026-10-12 that aborted `close` after the strict backstop was restored but
+# before the state file was removed, and the next nightly verify failed on a
+# window that was actually shut. tests/validate_maintenance_egress.py
+# reproduces it.
+strict_output_policy() {
+  local chain
+  chain=$(nft list chain inet host_backstop output)
+  [[ $chain == *"policy drop"* ]]
+}
+
 case "${1:-}" in
   open)
     if ! nft list table inet host_backstop >/dev/null 2>&1; then
@@ -14,7 +28,7 @@ case "${1:-}" in
       exit 0
     fi
     [[ ! -e "$state" ]] || { echo "maintenance egress is already open" >&2; exit 1; }
-    nft list chain inet host_backstop output | grep -q 'policy drop'
+    strict_output_policy
     # Record the open transaction before changing the rules. The caller's
     # always block can then restore safely even if a later insertion fails.
     install -m 0600 /dev/null "$state"
@@ -31,7 +45,7 @@ case "${1:-}" in
     # Primary path: atomically reload the strict backstop (delete+recreate the
     # table), which drops the temporary 80/443/DNS accepts along with any drift.
     if nft -f "$backstop"; then
-      nft list chain inet host_backstop output | grep -q 'policy drop'
+      strict_output_policy
       rm -f "$state"
       echo "closed"
     else
