@@ -4,11 +4,17 @@
 # media_vms group — renaming that host means renaming this file too. See
 # "Renaming a service VM" in docs/operations.md.
 vm_id:      130
-vm_cores:   6
+vm_cores:   8
 vm_memory:  10240
 vm_disk_gb: 100
 # vm_cores bumped 4->6 (2026-07-23) to match svc-infra/svc-download after
 # thurgadin RAM/CPU headroom was freed up.
+# 6->8 (2026-10-14) for Jellyfin CPU transcoding (no GPU). Measured on 6 vCPU:
+# a 4K DV/HDR remux re-encoded to 1080p SDR (tonemapx + libx264 veryfast) ran
+# at 1.2x realtime using ~4.6 cores — one stream with no headroom for busy
+# scenes. The host is RAM-bound, not CPU-bound, so cores are the cheap lever.
+# Takes effect only after a PVE stop/start: CPU hotplug is off on this VM, so
+# `make reconcile` leaves the new count pending until then.
 # TrueNAS (convoker, VM 100) is order=1. That comment used to live here and was
 # FALSE — the VM had no `startup` line at all, so Proxmox started it *after*
 # every ordered VM and stopped it *first*. The 2026-08-04 cold start cost five
