@@ -204,6 +204,7 @@ def validate_role_contract(failures: list[str]) -> None:
         "Report absent VM creation during check mode",
         "Report partial disk completion during check mode",
         "Report boot disk growth during check mode",
+        "Report scratch disk attach during check mode",
     ):
         task = task_by_name(document, name)
         if not task or task.get("changed_when") is not True:
@@ -231,6 +232,8 @@ def validate_role_contract(failures: list[str]) -> None:
         "Import missing scsi0 boot disk",
         "Set resumable scsi0 boot order",
         "Grow VM {{ vm_id }} scsi0",
+        "Attach missing scsi1 scratch disk",
+        "Assert scsi1 scratch disk matches inventory",
     )
     for fragment in required_fragments:
         if fragment not in text:

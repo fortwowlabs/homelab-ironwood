@@ -1,0 +1,108 @@
+---
+# Jellyfin transcode scratch storage and the encoding settings that bound it.
+# Runs before files.yml so the mount exists before any Jellyfin restart, and
+# so files.yml can fold an encoding.xml change into the restart set.
+
+- name: Read the transcode scratch disk
+  ansible.builtin.stat:
+    path: "{{ media_transcode_device }}"
+  register: media_transcode_device_stat
+
+- name: Assert the transcode scratch disk is attached
+  ansible.builtin.assert:
+    that:
+      - media_transcode_device_stat.stat.exists
+    fail_msg: >-
+      {{ media_transcode_device }} is missing. The scsi1 scratch disk comes
+      from vm_scratch_disk_gb via the provision play (`make reconcile` or a
+      full deploy); configure the guest only after it is attached.
+
+# blkid exits 2 when the device carries no recognisable signature at all.
+# Anything else on it — another filesystem, a partition table — leaves TYPE
+# empty or wrong and mkfs.xfs (no -f) refuses to overwrite it, so an occupied
+# disk fails loudly instead of being reformatted.
+- name: Read the transcode disk filesystem type
+  ansible.builtin.command:
+    argv: [blkid, -o, value, -s, TYPE, "{{ media_transcode_device }}"]
+  register: media_transcode_fstype
+  failed_when: media_transcode_fstype.rc not in [0, 2]
+  changed_when: false
+  check_mode: false
+
+- name: Create XFS on the blank transcode disk
+  when: media_transcode_fstype.rc == 2
+  ansible.builtin.command:
+    argv: [mkfs.xfs, -L, transcodes, "{{ media_transcode_device }}"]
+  changed_when: true
+
+- name: Assert the transcode disk holds XFS
+  when: not ansible_check_mode or media_transcode_fstype.rc == 0
+  ansible.builtin.command:
+    argv: [blkid, -o, value, -s, TYPE, "{{ media_transcode_device }}"]
+  register: media_transcode_fstype_after
+  changed_when: false
+  check_mode: false
+  failed_when: media_transcode_fstype_after.stdout | trim != 'xfs'
+
+# nofail: a missing disk must not drop the VM into emergency mode and take
+# every other service with it. The Jellyfin unit's ExecStartPre refuses to
+# start on a bare mountpoint instead, so the failure stays scoped to Jellyfin
+# rather than silently filling root.
+- name: Mount the transcode disk
+  ansible.posix.mount:
+    path: "{{ media_transcode_dir }}"
+    src: "{{ media_transcode_device }}"
+    fstype: xfs
+    opts: defaults,noatime,nofail
+    state: mounted
+
+# Container uid 0 maps to the host homelab user, so homelab ownership is what
+# Jellyfin (root in the container) needs to write here.
+- name: Own the transcode disk root for the rootless service account
+  ansible.builtin.file:
+    path: "{{ media_transcode_dir }}"
+    state: directory
+    owner: homelab
+    group: homelab
+    mode: "0750"
+
+# Jellyfin creates encoding.xml on first start, so a fresh install has none
+# yet; the next converge applies the settings. The file is read once at
+# startup and only rewritten when the dashboard saves, so an edit here takes
+# effect through the restart files.yml schedules.
+- name: Read Jellyfin encoding configuration
+  ansible.builtin.stat:
+    path: /opt/homelab/appdata/jellyfin/config/config/encoding.xml
+  register: media_jellyfin_encoding_stat
+
+- name: Set the Jellyfin encoding values this repo owns
+  when: media_jellyfin_encoding_stat.stat.exists
+  ansible.builtin.replace:
+    path: /opt/homelab/appdata/jellyfin/config/config/encoding.xml
+    regexp: "<{{ item.key }}>[^<]*</{{ item.key }}>"
+    replace: "<{{ item.key }}>{{ item.value }}</{{ item.key }}>"
+  loop: "{{ jellyfin_encoding_settings | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}={{ item.value }}"
+  register: media_jellyfin_encoding
+
+# `replace` is silent when the element is absent, which would read as success
+# while setting nothing. Require every value to be present as intended.
+- name: Read back the Jellyfin encoding configuration
+  when: media_jellyfin_encoding_stat.stat.exists and not ansible_check_mode
+  ansible.builtin.slurp:
+    src: /opt/homelab/appdata/jellyfin/config/config/encoding.xml
+  register: media_jellyfin_encoding_readback
+
+- name: Assert every owned Jellyfin encoding value is set
+  when: media_jellyfin_encoding_stat.stat.exists and not ansible_check_mode
+  ansible.builtin.assert:
+    that:
+      - >-
+        ('<' ~ item.key ~ '>' ~ item.value ~ '</' ~ item.key ~ '>')
+        in (media_jellyfin_encoding_readback.content | b64decode)
+    fail_msg: "encoding.xml does not contain {{ item.key }}={{ item.value }}"
+    quiet: true
+  loop: "{{ jellyfin_encoding_settings | dict2items }}"
+  loop_control:
+    label: "{{ item.key }}"

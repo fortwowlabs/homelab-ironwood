@@ -71,3 +71,28 @@ media_backup_artifacts_active: >-
          minecraft_servers.keys() | difference(minecraft_enabled_servers.keys())
          | map('regex_replace', '^', 'minecraft-') | list)
      | list }}
+
+# Jellyfin transcode segments live on their own disk (pve_vm's scsi1 scratch
+# disk), not on tmpfs and not on root. tmpfs was 6G of a 10G VM and filled in
+# about a minute on a 4K remux; after that ffmpeg wrote every further segment
+# as 0 bytes without logging an error, and playback died at exactly the last
+# non-empty segment (2026-10-14). The by-id path is stable across reboots and
+# controller reordering, unlike /dev/sdb.
+#
+# Deliberately NOT under /srv: on these hosts /srv/* means NFS, and
+# service_vm's node-exporter gate fails on any /srv/ filesystem metric because
+# a statted NFS mount wedges the collector during a storage outage. Outside
+# /srv, node_exporter charts this disk's fill like any local filesystem.
+media_transcode_dir: /var/lib/jellyfin-transcodes
+media_transcode_device: /dev/disk/by-id/scsi-0QEMU_QEMU_HARDDISK_drive-scsi1
+
+# Jellyfin's encoding.xml values this repo owns. Throttling pauses ffmpeg once
+# it is ThrottleDelaySeconds ahead of the client; segment deletion removes
+# segments SegmentKeepSeconds behind it. Both were off, so ffmpeg ran at 9x
+# realtime and kept every segment. 300s rather than Jellyfin's 720s default:
+# 720s of an 80 Mbps remux is ~7G on its own.
+jellyfin_encoding_settings:
+  EnableThrottling: "true"
+  ThrottleDelaySeconds: "180"
+  EnableSegmentDeletion: "true"
+  SegmentKeepSeconds: "300"

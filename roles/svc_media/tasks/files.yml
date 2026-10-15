@@ -350,6 +350,7 @@
           + (['romm-db', 'romm'] if media_romm_network.changed else [])
           + (['romm-db', 'romm'] if (media_romm_secret_templates.changed | default(false)) else [])
           + (['beszel-agent'] if (media_beszel_agent_template.changed | default(false)) else [])
+          + (['jellyfin'] if (media_jellyfin_encoding.changed | default(false)) else [])
           + (
               media_minecraft_templates.results
               | selectattr('changed')

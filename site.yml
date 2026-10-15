@@ -46,6 +46,7 @@
             vm_memory:  "{{ hostvars[item].vm_memory }}"
             vm_disk_gb: "{{ hostvars[item].vm_disk_gb }}"
             vm_startup: "{{ hostvars[item].vm_startup }}"
+            vm_scratch_disk_gb: "{{ hostvars[item].vm_scratch_disk_gb | default(0) }}"
           loop: "{{ groups['service_vms'] }}"
       # If provisioning fails, tell me and stop before touching guests.
       rescue:

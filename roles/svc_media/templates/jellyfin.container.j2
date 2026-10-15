@@ -8,12 +8,17 @@
 # source range); everything else goes through Caddy at jellyfin.{{ service_domain }}
 # (reached over the tailnet via the subnet router).
 #
-# Transcoding: 3700X host, NO iGPU — CPU transcode. Fine for 1-2 concurrent
-# 1080p jobs on 4 vCPU; prefer direct-play clients. v5: tmpfs moved to
-# /cache/transcodes (the official image's actual default transcode path —
-# /transcodes was never written to, so v4's tmpfs shielded nothing) and
-# sized 6g. NOTE: tmpfs pages count against VM RAM when in use; the VM has
-# 10G. If you see memory pressure during heavy transcodes, drop to 4g here.
+# Transcoding: 3700X host, NO GPU — CPU transcode. A 4K HDR remux re-encoded
+# to 1080p SDR measured 1.2x realtime on 6 vCPU (the VM now has 8); prefer
+# direct-play clients.
+#
+# /cache/transcodes (the image's default transcode path) is the dedicated
+# scsi1 disk mounted at {{ media_transcode_dir }}, NOT tmpfs. The old 6g tmpfs
+# filled in about a minute on a 4K remux, ffmpeg then wrote 0-byte segments
+# without logging anything, and playback stopped dead at the last real one —
+# while the tmpfs held 6G of a 10G VM's RAM. What keeps the disk from filling
+# is Jellyfin's throttling + segment deletion (roles/svc_media/tasks/
+# transcodes.yml); the separate disk only bounds the damage if they don't.
 [Unit]
 Description=Jellyfin
 # Retry budget for the NFS guard in ExecStartPre below. A rootless USER unit
@@ -39,13 +44,14 @@ Volume=%h/appdata/jellyfin/config:/config:Z
 Volume=%h/appdata/jellyfin/cache:/cache:Z
 Volume=/srv/media/tv:/media/tv:ro
 Volume=/srv/media/movies:/media/movies:ro
-Tmpfs=/cache/transcodes:size=6g
+Volume={{ media_transcode_dir }}:/cache/transcodes:Z
 Environment=JELLYFIN_PublishedServerUrl=http://{{ ansible_host }}:8096
 
 [Service]
 # Refuse to start on a bare mountpoint: stat triggers the automount,
-# findmnt proves real nfs4 is behind it.
-ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null'
+# findmnt proves real nfs4 is behind it. The transcode disk mounts nofail, so
+# without its check a missing disk would put segments back on root.
+ExecStartPre=/bin/sh -c 'stat /srv/media/. >/dev/null && findmnt -t nfs4 -M /srv/media >/dev/null && mountpoint -q {{ media_transcode_dir }}'
 Restart=on-failure
 # Without this, Restart defaults to 100ms and the budget above is spent
 # instantly. 10s x 30 attempts covers a cold NAS.

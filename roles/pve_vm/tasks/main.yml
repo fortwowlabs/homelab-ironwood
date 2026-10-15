@@ -563,6 +563,44 @@
   register: pve_scsi_resized
   changed_when: true
 
+# Optional scratch disk on scsi1 (vm_scratch_disk_gb > 0). Create-once like
+# every other disk here: attached when missing, otherwise only asserted — never
+# grown, shrunk, moved or replaced. It exists so a workload that can fill a
+# disk (Jellyfin transcodes) fills this one instead of the VM's root
+# filesystem. The guest formats and mounts it; this role only provides it.
+# Disk hotplug is on by default, so attaching it needs no VM restart.
+- name: Record requested scratch disk state
+  ansible.builtin.set_fact:
+    pve_scratch_requested: "{{ (vm_scratch_disk_gb | default(0) | int) > 0 }}"
+    pve_scratch_present: "{{ vm_resize_info.proxmox_vms[0].config.scsi1 is defined }}"
+
+- name: Report scratch disk attach during check mode
+  when:
+    - ansible_check_mode
+    - pve_scratch_requested
+    - not pve_scratch_present
+  ansible.builtin.debug:
+    msg: >-
+      VM {{ vm_id }} would get a {{ vm_scratch_disk_gb }}G scratch disk on
+      scsi1. Check mode made no changes.
+  changed_when: true
+
+- name: "Attach missing scsi1 scratch disk to VM {{ vm_id }}"
+  when:
+    - not ansible_check_mode
+    - pve_scratch_requested
+    - not pve_scratch_present
+  delegate_to: "{{ pve_ssh_host }}"
+  ansible.builtin.command:
+    argv:
+      - qm
+      - set
+      - "{{ vm_id | string }}"
+      - --scsi1
+      - "{{ pve_storage }}:{{ vm_scratch_disk_gb | int }},discard=on,iothread=1,ssd=1"
+  register: pve_scratch_attached
+  changed_when: true
+
 - name: "Read final VM {{ vm_id }} configuration"
   when: not ansible_check_mode
   community.proxmox.proxmox_vm_info:
@@ -626,6 +664,35 @@
     fail_msg: >-
       VM {{ vm_id }} scsi0 did not converge to {{ vm_disk_gb }}G. Inspect it
       manually; the role will never replace or shrink the disk.
+
+- name: Extract final scsi1 scratch disk size
+  when:
+    - not ansible_check_mode
+    - pve_scratch_requested
+  ansible.builtin.set_fact:
+    pve_scratch_size_matches: >-
+      {{ (vm_final_info.proxmox_vms[0].config.scsi1 | default('')) |
+         regex_findall('(?:^|(?<=,))size=([0-9]+(?:[.][0-9]+)?[KkMmGgTt])(?=,|$)') }}
+
+- name: Assert scsi1 scratch disk matches inventory
+  when:
+    - not ansible_check_mode
+    - pve_scratch_requested
+  ansible.builtin.assert:
+    that:
+      - vm_final_info.proxmox_vms[0].config.scsi1 is defined
+      - >-
+        vm_final_info.proxmox_vms[0].config.scsi1 is
+        match('^' ~ (pve_storage | regex_escape) ~ ':')
+      - pve_scratch_size_matches | length == 1
+      - >-
+        ((pve_scratch_size_matches[0][:-1] | float) *
+         pve_size_unit_bytes[(pve_scratch_size_matches[0][-1] | upper)]) | int
+        == (vm_scratch_disk_gb | int) * 1073741824
+    fail_msg: >-
+      VM {{ vm_id }} scsi1 is missing, not on {{ pve_storage }}, or not
+      {{ vm_scratch_disk_gb }}G. The role never resizes or replaces an existing
+      scratch disk; reconcile inventory or change it during maintenance.
 
 - name: "Start VM {{ vm_id }}"
   when: not ansible_check_mode

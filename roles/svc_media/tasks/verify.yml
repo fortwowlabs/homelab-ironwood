@@ -31,6 +31,16 @@
     media_romm_db_owner_gate.stdout | trim
     != (romm_db_container_uid | string) ~ ':' ~ (romm_db_container_gid | string)
 
+# The disk mounts nofail, so a lost scsi1 boots fine and only shows up here
+# (and as Jellyfin refusing to start). findmnt on the path proves a real
+# filesystem is mounted there, not an empty directory on root.
+- name: Verify the Jellyfin transcode disk is mounted
+  ansible.builtin.command:
+    argv: [findmnt, -n, -o, FSTYPE, --mountpoint, "{{ media_transcode_dir }}"]
+  register: media_transcode_mount_gate
+  changed_when: false
+  failed_when: media_transcode_mount_gate.stdout | trim != 'xfs'
+
 - name: Verify Jellyfin answers on its LAN-bound address
   ansible.builtin.uri:
     url: "http://{{ ansible_host }}:8096/System/Info/Public"

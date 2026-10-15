@@ -7,6 +7,14 @@ vm_id:      130
 vm_cores:   8
 vm_memory:  10240
 vm_disk_gb: 100
+# Dedicated scsi1 disk for Jellyfin transcode segments (mounted at
+# /var/lib/jellyfin-transcodes by roles/svc_media/tasks/transcodes.yml). Sized for the worst
+# case, not the expected one: with throttling and segment deletion a stream
+# holds ~(180s ahead + 300s behind) x ~12 MB/s = ~6G, but if throttling does not
+# engage, a single remux writes the whole file — the largest 4K remux in the
+# library is 68G. Filling THIS disk fails one stream; filling root takes down
+# every service on the VM, which is why it is not just a directory on scsi0.
+vm_scratch_disk_gb: 100
 # vm_cores bumped 4->6 (2026-07-23) to match svc-infra/svc-download after
 # thurgadin RAM/CPU headroom was freed up.
 # 6->8 (2026-10-14) for Jellyfin CPU transcoding (no GPU). Measured on 6 vCPU:
