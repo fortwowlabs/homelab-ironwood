@@ -1,0 +1,13 @@
+[Unit]
+Description=Check the Tailscale subnet route every 10 minutes
+
+[Timer]
+# Frequent, unlike the daily watchers: the 2026-11-10 outage lasted most of a
+# day with nobody noticing. Repeat ntfy pushes for one fault are suppressed by
+# notify-failure.sh; healthchecks.io alerts only on state changes.
+OnBootSec=5min
+OnUnitActiveSec=10min
+RandomizedDelaySec=60
+
+[Install]
+WantedBy=timers.target

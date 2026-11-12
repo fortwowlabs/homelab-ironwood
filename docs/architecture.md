@@ -69,9 +69,20 @@ LAN address.
 
 TrueNAS exports the media and backup datasets over NFSv4. All three guests
 mount them with systemd automounts and prove access as the service UID;
-server-side ownership remains authoritative because root squash is expected. A
-dedicated Tailscale subnet router, not any service VM, provides remote access to the
-LAN subnet.
+server-side ownership remains authoritative because root squash is expected.
+
+Remote access is one Tailscale subnet route for the LAN subnet, and as of
+2026-11-11 the only node advertising it is **edgar** (PVE VM 108, a Windows
+desktop VM this repo does not manage) — not a dedicated router, as this page
+used to say. On 2026-11-10 Tailscale's auto-updater uninstalled the client
+there and failed to reinstall it on a full disk, and remote access was down
+for most of a day with every other check green. svc-media is also a tailnet
+node (installed by hand, not by this repo, and not advertising routes); its
+`homelab-tailnet-route` timer checks every 10 minutes that some node holds
+the route, is online, and answers `tailscale ping`, and pings the
+`homelab-tailnet-route` healthchecks.io check so the alert reaches a phone
+that is away from home — ntfy cannot, because it is reached over the route
+itself.
 
 ## Sources of truth
 

@@ -117,6 +117,40 @@
   failed_when: ansible_host not in media_dns_gate.stdout
   check_mode: false
 
+# Every remote path into the estate rides one Tailscale subnet route. It went
+# down for most of a day on 2026-11-10 with every other check green, because
+# nothing looked at it. The check runs from svc-media's own tailnet node; see
+# the script header for why it is Online-plus-ping and not just "a router
+# exists". Tailscale itself is not installed by this repo (see
+# docs/architecture.md); the check reports "cannot look" if it is absent.
+- name: Install the tailnet route check
+  ansible.builtin.template:
+    src: tailnet-route.sh.j2
+    dest: /usr/local/sbin/homelab-tailnet-route.sh
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Install the tailnet route check units
+  ansible.builtin.copy:
+    src: "{{ item }}"
+    dest: "/etc/systemd/system/{{ item }}"
+    owner: root
+    group: root
+    mode: "0644"
+  loop:
+    - homelab-tailnet-route.service
+    - homelab-tailnet-route.timer
+  register: media_tailnet_route_units
+
+- name: Arm the tailnet route check
+  ansible.builtin.systemd:
+    name: homelab-tailnet-route.timer
+    enabled: true
+    state: started
+    daemon_reload: "{{ media_tailnet_route_units is changed }}"
+  when: not ansible_check_mode
+
 - name: Configure Caddy access layer
   when: media_access_layer | default('manual') == 'caddy'
   block:

@@ -80,3 +80,4 @@ onfailure_units_extra:
   - certbot-renew.service
   - homelab-certwatch.service
   - homelab-heartbeat.service
+  - homelab-tailnet-route.service

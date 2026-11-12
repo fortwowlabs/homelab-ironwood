@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+{{ ansible_managed | comment }}
+# homelab-tailnet-route.sh — prove that remote devices can still reach the LAN.
+#
+# Every remote path into this estate — the household's phones, the TV at
+# Valerie's, this repo's own operator off-site — rides one Tailscale subnet
+# route for {{ lan_cidr }}. On 2026-11-10 the only node advertising it (edgar,
+# a Windows VM) let Tailscale's auto-updater uninstall the client and then fail
+# to reinstall it on a full disk. The VM stayed up, its guest agent answered,
+# every service passed every check, and nobody outside the house could reach
+# anything for most of a day. Nothing here looked at the route.
+#
+# This looks at it, from svc-media's own tailnet node, in two layers:
+#
+#   1. Control plane: some node holds {{ lan_cidr }} as a PRIMARY route and
+#      is online. An offline router still holds PrimaryRoutes in the netmap —
+#      that was exactly the state on 2026-11-11 — so "a router exists" is not
+#      enough; it must be Online.
+#   2. Data plane: `tailscale ping` to that router answers. Online in the
+#      netmap means the coordination server heard from it, not that it
+#      passes packets.
+#
+# Exit codes, kept distinct on purpose:
+#   0  the route is up
+#   1  the route is DOWN (no router, router offline, or router not answering)
+#   2  could not look (no tailscale, not logged in, unparseable status)
+# Both nonzero codes fail the unit, so OnFailure alerts on either. "Could not
+# look" must never read as "all clear".
+#
+# The positive control: a status that parses must contain this node's own
+# Self entry with a tailnet address. If it does not, we did not really look.
+set -uo pipefail
+
+# shellcheck source=/dev/null
+[[ -r /etc/homelab-healthchecks.env ]] && . /etc/homelab-healthchecks.env
+
+CIDR={{ lan_cidr | quote }}
+TAILSCALE=/usr/bin/tailscale
+HC_PING=/usr/local/sbin/hc-ping.sh
+FORWARD_FILE=/proc/sys/net/ipv4/ip_forward
+
+# healthchecks.io is the channel that matters most for THIS check: ntfy is
+# LAN-only, so a phone away from home receives ntfy alerts over the very
+# route this script watches. When the route is down, only an alert from
+# outside the house can arrive.
+report() {  # report <rc> <message>
+    local rc=$1 msg=$2
+    if [[ -z "${HC_PING_TAILNET_ROUTE:-}" ]]; then
+        echo "WARNING: HC_PING_TAILNET_ROUTE is not set — no alert leaves the house when this fails; add the tailnet-route UUID to the vault (see all_vault.yml.example)" >&2
+    fi
+    if (( rc == 0 )); then
+        echo "$msg"
+        "$HC_PING" "${HC_PING_TAILNET_ROUTE:-}"
+    else
+        echo "$msg" >&2
+        "$HC_PING" "${HC_PING_TAILNET_ROUTE:-}" fail
+    fi
+    exit "$rc"
+}
+
+if [[ ! -x "$TAILSCALE" ]]; then
+    report 2 "CANNOT LOOK: ${TAILSCALE} is missing — this host is not a tailnet node, so the route cannot be checked from here"
+fi
+
+if ! status=$("$TAILSCALE" status --json 2>&1); then
+    report 2 "CANNOT LOOK: 'tailscale status --json' failed: ${status:0:300}"
+fi
+
+if ! backend=$(jq -er '.BackendState' <<<"$status" 2>/dev/null); then
+    report 2 "CANNOT LOOK: tailscale status did not parse as JSON"
+fi
+if [[ "$backend" != "Running" ]]; then
+    report 2 "CANNOT LOOK: this node's tailscale is '${backend}', not Running — re-authenticate it before trusting this check"
+fi
+
+self_ip=$(jq -r '.Self.TailscaleIPs[0] // empty' <<<"$status")
+if [[ -z "$self_ip" ]]; then
+    report 2 "CANNOT LOOK: tailscale status has no Self address — the netmap was not really read"
+fi
+
+# Every node (this one included) holding the CIDR as a primary route, as
+# "<self|peer> <online> <ip> <name>". PrimaryRoutes is the coordination
+# server's elected router, so with HA routers exactly one node holds it.
+routers=$(jq -r --arg cidr "$CIDR" '
+    ([.Self | . + {kind: "self"}] + [(.Peer // {})[] | . + {kind: "peer"}])[]
+    | select((.PrimaryRoutes // []) | index($cidr))
+    | "\(.kind) \(.Online // false) \(.TailscaleIPs[0] // "-") \(.HostName // "?")"
+' <<<"$status")
+
+if [[ -z "$routers" ]]; then
+    report 1 "ROUTE DOWN: no tailnet node holds ${CIDR} as a primary route — remote devices cannot reach the LAN. Check the subnet router's advertisement and its approval in the Tailscale admin console."
+fi
+
+problems=""
+up=""
+while read -r kind online ip name; do
+    if [[ "$online" != "true" ]]; then
+        problems+=$'\n'"router ${name} (${ip}) holds ${CIDR} but is OFFLINE"
+        continue
+    fi
+    if [[ "$kind" == "self" ]]; then
+        if [[ "$(cat "$FORWARD_FILE" 2>/dev/null)" != "1" ]]; then
+            problems+=$'\n'"this node routes ${CIDR} but IPv4 forwarding is off"
+            continue
+        fi
+        up="${name} (this node)"
+        continue
+    fi
+    if pong=$("$TAILSCALE" ping -c 3 --timeout 5s "$ip" 2>&1) && grep -q '^pong' <<<"$pong"; then
+        up="${name} (${ip}): $(grep -m1 '^pong' <<<"$pong")"
+    else
+        problems+=$'\n'"router ${name} (${ip}) is online in the netmap but does not answer tailscale ping: ${pong:0:200}"
+    fi
+done <<<"$routers"
+
+if [[ -n "$problems" ]]; then
+    report 1 "ROUTE DOWN for ${CIDR}:${problems}"
+fi
+report 0 "route ${CIDR} OK via ${up}"

@@ -136,6 +136,9 @@ def main() -> int:
         # above.
         "truenas_ip": main_vars["truenas_ip"],
         "truenas_vmid": main_vars["truenas_vmid"],
+        # tailnet-route.sh.j2 looks for this exact CIDR in PrimaryRoutes; read
+        # from main.yml for the same reason as the two above.
+        "lan_cidr": main_vars["lan_cidr"],
         "nfsguard_port": pve_mon_defaults["nfsguard_port"],
         "nfsguard_connect_timeout": pve_mon_defaults["nfsguard_connect_timeout"],
         # failed-units-watch.sh.j2 branches on group membership to decide

@@ -145,7 +145,7 @@ not complete.
 | Symptom | Likely cause |
 |---|---|
 | Direct dnsmasq query works but pfSense query is empty | Missing/unapplied domain override, conflicting host override, or DNSSEC rejection |
-| LAN works but tailnet does not | Tailscale split-DNS domain or subnet route is missing |
+| LAN works but tailnet does not | Tailscale split-DNS domain or subnet route is missing. Run `sudo systemctl start homelab-tailnet-route` on svc-media and read its journal: it names the router and says whether it is offline or deaf. An offline router still shows the route in `PrimaryRoutes` |
 | One name is missing | The service is absent from `caddy_services`, proxy-enabled `download_apps`, or `extra_dns_records` |
 | All names resolve to `.30` although backends use `.31`/`.32` | Correct: Caddy fronts every HTTPS service |
 | Certificate is untrusted or names the wrong domain | Caddy is serving the old/internal certificate or the Certbot copy hook failed |

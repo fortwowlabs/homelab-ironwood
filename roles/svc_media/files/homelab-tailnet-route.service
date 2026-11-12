@@ -1,0 +1,12 @@
+[Unit]
+Description=Check the Tailscale subnet route that all remote access depends on
+After=network-online.target tailscaled.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Type=oneshot disables the start timeout by default; see
+# homelab-diskalert.service. Three tailscale pings at 5s each plus a
+# retrying healthchecks ping fit comfortably; a wedge must still end `failed`.
+TimeoutStartSec=180
+ExecStart=/usr/local/sbin/homelab-tailnet-route.sh

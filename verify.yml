@@ -98,6 +98,16 @@
           The wildcard certificate is inside its expiry warning window:
           {{ hostvars[media_host].media_cert_detail | default('see homelab-certwatch.sh') }}
 
+    # Deferred from svc_media's route check for the same reason. A missing
+    # fact means the check never ran, which fails too.
+    - name: Assert remote access has a working Tailscale subnet route
+      ansible.builtin.assert:
+        that:
+          - hostvars[media_host].media_tailnet_route_ok | default(false) | bool
+        fail_msg: >-
+          Remote devices cannot reach the LAN:
+          {{ hostvars[media_host].media_tailnet_route_detail | default('the route check did not run') }}
+
     - name: Send safe verification success notification
       ansible.builtin.include_role:
         name: notify

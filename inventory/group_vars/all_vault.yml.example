@@ -304,6 +304,12 @@ vault_authelia_password_plaintexts:
 #   homelab-pve         1 day  / 6 h     daily health check on the PVE host
 #   homelab-heartbeat   1 day  / 3 h     svc-media (proves the ntfy host lives)
 #   homelab-scan        1 day  / 6 h     nightly security scan on svc-infra
+#   homelab-tailnet-route 10 min / 30 min svc-media (remote access route up)
+#
+# homelab-tailnet-route is the one that matters most while away: ntfy is
+# LAN-only, so when the subnet route is down an away-from-home phone cannot
+# receive ntfy at all. This check pings /fail on every bad run, so
+# healthchecks.io alerts within minutes rather than waiting out the grace.
 #
 # There is deliberately no separate scrub check: PVE already scrubs monthly
 # from /etc/cron.d/zfsutils-linux, and homelab-pve-health fails if the last
@@ -318,6 +324,8 @@ vault_hc_ping_heartbeat: ""
 # verify gate rejects any empty HC_PING_* value, and svc-media renders the same
 # file while never running the scan. See healthchecks.env.j2 for the full note.
 vault_hc_ping_scan:      ""
+# Same omit-when-empty rule as vault_hc_ping_scan; only svc-media uses it.
+vault_hc_ping_tailnet_route: ""
 
 # --- GitHub API token for the weekly release report -------------------------
 # OPTIONAL, and empty is the normal state. The report reads registry labels and
