@@ -7,6 +7,9 @@
 # image-gen means one application stopped functioning while every container
 # stayed green. That is the exact failure this check exists to catch, so
 # collapsing it into verify would bury it.
+# That separation is enforced: svc-infra's verify failed-units gate exempts
+# homelab-image-gen@* and homelab-image-edit@* (service_vm_failed_units_exempt
+# in host_vars), so they alert only through their own OnFailure hook.
 [Unit]
 Description=homelab-iac in-chat image generation check for %i
 Wants=network-online.target

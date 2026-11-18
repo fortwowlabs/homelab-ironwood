@@ -651,6 +651,32 @@ of error as the R2V queue-delay above: a measurement taken in a convenient
 order rather than a clean one. Restart between models, or do not publish the
 number.
 
+**The nightly image checks now clear the card before and after they run, and
+log what that did.** Since 2026-11-18 each check calls `scripts/gpu_host.py`
+first: it evicts every resident Ollama model (`keep_alive` 0, confirmed through
+`/api/ps`) and posts `/free` with `unload_models` and `free_memory` to ComfyUI.
+Afterwards `scripts/gpu_host_release.py` waits up to 300 s for ComfyUI's queue
+to drain, so a timed-out check's own prompt can finish, and then frees again;
+if the queue is still busy it leaves memory resident rather than pull a model
+out from under a running job. The reason is the 2026-11-17 incident, where a
+model left resident from earlier testing made the checks fail for want of
+VRAM. Each step logs the card's free and total MiB before and after the
+`/free`, and the helper polls `torch_vram_total` until it stops falling, so
+whether torch's reservation is actually returned is observable per run instead
+of assumed. **It is not yet confirmed against a live ComfyUI as of 2026-11-18**:
+ComfyUI on TERRA was down when this was written, so the earlier warning about
+`/free` leaving the reservation in place stands until a run's log shows free
+memory rising. To read it, on svc-infra:
+
+```bash
+journalctl -u 'homelab-image-gen@svcops.service' -u 'homelab-image-edit@svcops.service'
+```
+
+Look for the `gpu: comfy free` and `gpu-release:` lines, which end in
+`vram <free>/<total> MiB free -> <free>/<total> MiB free`. An unreachable
+ComfyUI is reported as inconclusive and does not page; see the
+[design](superpowers/specs/2026-11-18-gpu-check-verdicts-design.md).
+
 #### Qwen Image Edit: the editing checkpoint
 
 Added 2026-08-31. Sourced from `Comfy-Org/Qwen-Image-Edit_ComfyUI` (diffusion
