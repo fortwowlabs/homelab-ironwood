@@ -4,7 +4,11 @@
 - name: Verify every service VM without changing service state
   hosts: service_vms
   gather_facts: false
-  any_errors_fatal: true
+  # Off on purpose: each host's rescue fires only for that host. On 2026-11-18
+  # one failed app-check unit on svc-infra paged all three VMs because this was
+  # true. A partial run still ends red: the localhost play below refuses success
+  # unless every host's *_verified facts are true.
+  any_errors_fatal: false
   tasks:
     - name: Run host verification with failure notification
       block:

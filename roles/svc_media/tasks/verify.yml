@@ -287,10 +287,11 @@
 # the check that would actually have caught an expiring certificate, and a
 # timer being active says nothing about whether the script works.
 #
-# The failure is deferred rather than raised here. This play carries
-# any_errors_fatal, so a cert inside the warning window used to abort the entire
-# run at this point — taking with it node_exporter, the failed-unit sweep and
-# the whole hypervisor play that follows. A certificate with three weeks left is
+# The failure is deferred rather than raised here. A cert inside the warning
+# window used to abort the entire run at this point (the play then carried
+# any_errors_fatal; it no longer does, but a failure here still ends this host's
+# remaining checks) — taking with it node_exporter, the failed-unit sweep and
+# the rest of this host's verification. A certificate with three weeks left is
 # a real problem but not a reason to stop checking the disks, so the result is
 # carried to the final play and asserted there, which still ends the run red.
 - name: Check whether the certificate is near expiry

@@ -7,6 +7,8 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 # Which `make validate-*` target runs this gate. Discovered by
 # tests/run_gates.py, so a gate with no group fails the build rather than
 # silently never running.
@@ -100,8 +102,49 @@ def drift_rc_gate_problems(text: str) -> list[str]:
     return problems
 
 
+def cascade_problems(playbook_text: str) -> list[str]:
+    """The service-VM play must not let one host's failure fail the others.
+
+    On 2026-11-18 one failed app-check unit on svc-infra failed that host's
+    verification, and `any_errors_fatal: true` pushed svc-media and svc-download
+    into their own rescue blocks too: three "VERIFY FAILED" alerts, one fault.
+    With the flag off each host's rescue fires only for that host. That is only
+    safe because the localhost play refuses success unless every host's
+    `service_vm_verified` fact is true, so a partial run still ends red; both
+    halves are asserted here, since removing either one breaks the other's
+    premise.
+    """
+    problems: list[str] = []
+    plays = yaml.safe_load(playbook_text)
+    service_plays = [p for p in plays if p.get("hosts") == "service_vms"]
+    local_plays = [p for p in plays if p.get("hosts") == "localhost"]
+    if len(service_plays) != 1:
+        problems.append(
+            f"verify.yml: expected exactly one `hosts: service_vms` play, found {len(service_plays)}"
+        )
+    for play in service_plays:
+        if play.get("any_errors_fatal") is True:
+            problems.append(
+                "verify.yml: the service_vms play sets any_errors_fatal: true — one "
+                "host's failed check would fire every other host's rescue and alert"
+            )
+    asserted = ""
+    for play in local_plays:
+        for task in play.get("tasks", []):
+            if task.get("name") == "Assert all host verification facts":
+                asserted += "\n".join(map(str, task["ansible.builtin.assert"]["that"]))
+    for host_var in ("download_host", "media_host", "infra_host"):
+        if f"hostvars[{host_var}].service_vm_verified" not in asserted:
+            problems.append(
+                f"verify.yml: the localhost play no longer asserts service_vm_verified "
+                f"for {host_var} — without it a partial run would end green"
+            )
+    return problems
+
+
 def main() -> int:
     failures: list[str] = []
+    failures.extend(cascade_problems((ROOT / "verify.yml").read_text(encoding="utf-8")))
     combined = ""
     drift_text = ""
     for task_file in SAFE_TASKS:
