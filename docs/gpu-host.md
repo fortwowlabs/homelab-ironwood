@@ -657,10 +657,18 @@ answers at all, then looks at its queue (a busy queue makes the run
 inconclusive and frees nothing), and only then, through `scripts/gpu_host.py`,
 evicts every resident Ollama model (`keep_alive` 0, confirmed through
 `/api/ps`) and posts `/free` with `unload_models` and `free_memory` to ComfyUI.
-Afterwards `scripts/gpu_host_release.py` waits up to 300 s for ComfyUI's queue
-to drain, so a timed-out check's own prompt can finish, and then frees again;
-if the queue is still busy it leaves memory resident rather than pull a model
-out from under a running job. The reason for clearing the card is the
+Afterwards `scripts/gpu_host_release.py --check gen|edit` frees again, with
+three rules. It does nothing if that check's feature flag
+(`image_generation_enabled` / `image_edit_enabled`) is false. A busy queue is
+waited on (up to 300 s) only when systemd's `$SERVICE_RESULT` is `timeout`,
+because only a `TimeoutStartSec` kill leaves the check's own prompt queued;
+for any other result a busy queue is someone else's job and the models are left
+resident at once, without waiting. And one `--deadline` (default 390 s) bounds
+the whole run so it finishes inside `TimeoutStopSec=420`. A stop-post timeout
+would not be hidden by the `-` prefix, which ignores only the hook's exit code:
+it fails the unit and fires `OnFailure`. A manual `make image-gen-check` or
+`make image-edit-check` also evicts Ollama and frees ComfyUI, but no release
+follows a manual run, since the release is the unit's `ExecStopPost`. The reason for clearing the card is the
 2026-08-31 incident above, where a large model stack left resident on the GPU
 broke the nightly checks. The 2026-11-17/18 incident is the reason an
 unreachable ComfyUI is now inconclusive and does not page: ComfyUI was not
@@ -671,23 +679,27 @@ otherwise inconclusive), while the edit check ignores it, because an HTTP error
 on the edit POST is always inconclusive.
 
 The logs make torch's reservation observable per run instead of assumed. Three
-lines matter, each as the code prints it:
+lines matter, each as the code prints it. A figure is `<free>/<total> MiB free`
+for the device, followed by `(torch <free>/<total> MiB free)`, the allocator's
+reservation inside ComfyUI (`torch_vram_free` / `torch_vram_total`), which is
+what separates a `/free` that worked from one that left the reservation in
+place:
 
-- `gpu: ollama evict confirmed; vram before <free>/<total> MiB free` (or
-  `NOT confirmed`), logged by the check before it frees.
-- `gpu: comfy free confirmed (posted=True); vram <free>/<total> MiB free ->
-  <free>/<total> MiB free`, the before and after of the `/free`. The helper
-  also polls `torch_vram_total` until it stops falling, but only the device's
-  free and total figures reach the log.
-- `gpu-release: posted=True before <free>/<total> MiB free, after <free>/<total>
-  MiB free`, the same pair from the release after the check. It has no `vram`
-  token and no arrow, and the other `gpu-release:` lines say why nothing was
-  freed.
+- `gpu: ollama evict confirmed; vram before <fig>` (or `NOT confirmed`),
+  logged by the check before it frees.
+- `gpu: comfy free confirmed (posted=True); vram <fig> -> <fig>`, the before
+  and after of the `/free`. "Confirmed" means only that `/free` returned 2xx
+  and `/system_stats` was readable afterwards; it is not proof that memory
+  fell. Judge that from the before and after figures, especially the torch
+  pair. The helper polls `torch_vram_total` until it stops falling.
+- `gpu-release: posted=True before <fig>, after <fig>`, the same pair from the
+  release after the check. It has no `vram` token and no arrow, and the other
+  `gpu-release:` lines say why nothing was freed.
 
 **Whether `/free` actually returns the reservation is not yet confirmed
 against a live ComfyUI as of 2026-11-18**: ComfyUI on TERRA was down when this
 was written, so the earlier warning about `/free` leaving it in place stands
-until a run's log shows free memory rising. To read it, on svc-infra:
+until a run's log shows free memory, torch's figure in particular, rising. To read it, on svc-infra:
 
 ```bash
 journalctl -u 'homelab-image-gen@svcops.service' -u 'homelab-image-edit@svcops.service'

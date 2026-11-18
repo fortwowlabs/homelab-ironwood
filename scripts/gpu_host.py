@@ -136,7 +136,16 @@ def ollama_evict(base_url: str, timeout: float = 30.0, wait: float = 5.0) -> boo
 
 
 def _mib(v: dict | None) -> str:
-    return "?" if v is None else f"{v['vram_free'] // 2**20}/{v['vram_total'] // 2**20} MiB free"
+    """`<free>/<total> MiB free (torch <free>/<total> MiB free)`; the torch
+    part is the allocator's reservation inside ComfyUI, which is what tells
+    a /free that worked apart from one that left the reservation in place."""
+    if v is None:
+        return "?"
+    out = f"{v['vram_free'] // 2**20}/{v['vram_total'] // 2**20} MiB free"
+    if "torch_vram_free" in v and "torch_vram_total" in v:
+        out += (f" (torch {v['torch_vram_free'] // 2**20}/"
+                f"{v['torch_vram_total'] // 2**20} MiB free)")
+    return out
 
 
 def make_room(comfy_url: str, ollama_url: str, settle: float = 20.0) -> bool:

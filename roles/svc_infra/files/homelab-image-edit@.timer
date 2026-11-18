@@ -6,7 +6,9 @@ Description=Run the in-chat image editing check nightly for %i
 [Timer]
 Unit=homelab-image-edit@%i.service
 # 07:00, after image-gen's 06:15 (+ up to 900s randomized delay, + up to
-# 900s TimeoutStartSec) has had time to finish. Both checks submit real
+# 900s TimeoutStartSec, + up to ~7 min for gpu_host_release's stop phase,
+# TimeoutStopSec=420) has had time to finish: gen's worst case ends about
+# 06:52. Both checks submit real
 # ComfyUI prompts and the two should not race each other on the same GPU.
 OnCalendar=*-*-* 07:00:00
 RandomizedDelaySec=900

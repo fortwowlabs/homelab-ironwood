@@ -24,6 +24,9 @@ freed) and an HTTP 400 from a reachable ComfyUI is ours: `broken`. If the room
 could not be confirmed, a generation error stays inconclusive. Every HTTP error
 is logged with its status and body.
 
+A manual `make image-gen-check` run evicts Ollama and frees ComfyUI like the
+nightly one, but no release step follows it (that is the unit's ExecStopPost).
+
 Design: docs/superpowers/specs/2026-08-14-comfyui-image-generation-design.md
 """
 
@@ -88,7 +91,12 @@ def probe(base_url: str, token: str, catalog: dict,
               "under someone else's job", file=sys.stderr)
         return "inconclusive", {}
     if busy is None:
-        print("could not read ComfyUI's queue; continuing", file=sys.stderr)
+        # TCP accepted but /queue did not answer: a wedged HTTP layer. Go on
+        # (make_room is harmless), but ComfyUI is NOT proven reachable, so a
+        # 400 from Open WebUI below cannot be attributed to our mapping.
+        print("could not read ComfyUI's queue; ComfyUI's HTTP layer did not "
+              "answer, so it is not proven reachable; continuing",
+              file=sys.stderr)
     room_confirmed = gpu_host.make_room(comfy, catalog["ollama_base_url"])
 
     # Cheapest first: this evaluates workflow[model_node_id]["class_type"]
@@ -99,8 +107,13 @@ def probe(base_url: str, token: str, catalog: dict,
     except urllib.error.HTTPError as error:
         log_http_error("/api/v1/images/models", error)
         if error.code == 400:
-            # Broken mapping normally surfaces as a 400 here.
-            return "broken", {"homelab_image_generation_ok": 0.0}
+            # Broken mapping normally surfaces as a 400 here -- but only if
+            # ComfyUI answered over HTTP (queue readable). A wedged ComfyUI
+            # makes Open WebUI return the same generic 400.
+            if busy is not None:
+                return "broken", {"homelab_image_generation_ok": 0.0}
+            print("INCONCLUSIVE: ComfyUI's HTTP layer did not answer, so this "
+                  "400 may be Open WebUI failing to reach it", file=sys.stderr)
         return "inconclusive", {}
     except (urllib.error.URLError, OSError, ValueError):
         return "inconclusive", {}

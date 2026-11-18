@@ -22,10 +22,13 @@ ExecStart=/opt/homelab-iac/.venv/bin/python \
     --metrics-dir /opt/homelab/appdata/node-exporter-textfile \
     --timeout 900
 # Release TERRA's card whatever the outcome — success, failure, crash or a
-# TimeoutStartSec kill. "-" so a release problem never changes the verdict.
-ExecStopPost=-/opt/homelab-iac/.venv/bin/python /opt/homelab-iac/scripts/gpu_host_release.py
-# 300 s queue drain + 20 s settle + HTTP timeouts, with margin. systemd kills
-# the hook after this; the "-" prefix ignores that.
+# TimeoutStartSec kill. "-" so a nonzero exit from the hook never changes the
+# verdict. systemd passes $SERVICE_RESULT to it; only "timeout" earns a queue drain.
+ExecStopPost=-/opt/homelab-iac/.venv/bin/python /opt/homelab-iac/scripts/gpu_host_release.py --check edit
+# The release script enforces its own --deadline (390 s by default) so its work
+# finishes inside this. If it were killed at the limit anyway, the "-" prefix
+# would NOT hide it: a stop-post timeout sets Result=timeout and fails the
+# unit, so OnFailure fires. "-" ignores only the hook's exit code.
 TimeoutStopSec=420
 # Editing loads a ~28 GB stack cold every night (it cannot stay resident
 # alongside a chat model, design §5) against a desktop that may be asleep.

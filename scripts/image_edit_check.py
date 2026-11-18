@@ -13,6 +13,9 @@ proof our checkpoint executed, not merely that *an* image came back.
 Verdicts are tri-state, same convention as image_generation_check.py:
 `inconclusive` means could-not-look and escalates rather than passing.
 
+A manual `make image-edit-check` run evicts Ollama and frees ComfyUI like the
+nightly one, but no release step follows it (that is the unit's ExecStopPost).
+
 Design: docs/superpowers/specs/2026-08-27-comfyui-image-editing-design.md
 """
 

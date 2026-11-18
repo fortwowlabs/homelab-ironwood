@@ -28,6 +28,9 @@ from gpu_fake import FakeGpu, closed_port_url  # noqa: E402
 
 STATS = {"devices": [{"vram_total": 100, "vram_free": 40,
                       "torch_vram_total": 50, "torch_vram_free": 10}]}
+MIB = 2**20
+BIG_STATS = {"devices": [{"vram_total": 24000 * MIB, "vram_free": 4000 * MIB,
+                          "torch_vram_total": 20000 * MIB, "torch_vram_free": 1000 * MIB}]}
 IDLE = {"queue_running": [], "queue_pending": []}
 BUSY = {"queue_running": [["x"]], "queue_pending": []}
 MODEL = "gen-model.safetensors"
@@ -104,6 +107,33 @@ def t_gen_models_400() -> str | None:
     return None
 
 
+def t_gen_wedged_comfy() -> str | None:
+    """TCP accepts but HTTP does not answer: Open WebUI's 400 is not ours."""
+    with FakeGpu() as f:
+        gen_routes(f)
+        f.routes[("GET", "/queue")] = (500, b"wedged")
+        f.routes[("GET", "/api/v1/images/models")] = (400, b'{"detail":"x"}')
+        v, err, _ = run(image_generation_check, f, f.url, f.url)
+        if v != "inconclusive" or "HTTP layer did not answer" not in err or "HTTP 400" not in err:
+            return f"wedged comfy: {v!r}, stderr={err!r}"
+    return None
+
+
+def t_make_room_logs_torch() -> str | None:
+    with FakeGpu() as c, FakeGpu() as o:
+        gpu_routes(c)
+        gpu_routes(o)
+        c.routes[("GET", "/system_stats")] = (200, BIG_STATS)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err):
+            gpu_host.make_room(c.url, o.url, settle=0.2)
+        want = ("vram 4000/24000 MiB free (torch 1000/20000 MiB free) -> "
+                "4000/24000 MiB free (torch 1000/20000 MiB free)")
+        if want not in err.getvalue():
+            return f"torch figures missing from make_room log: {err.getvalue()!r}"
+    return None
+
+
 def t_gen_post_500() -> str | None:
     with FakeGpu() as f:
         gen_routes(f)
@@ -169,7 +199,7 @@ def t_edit() -> str | None:
 
 
 def release(url: str | None, catalog_text: str | None = None, missing: bool = False,
-            extra: tuple[str, ...] = ()):
+            extra: tuple[str, ...] = (), check: str = "gen", result: str = "success"):
     """Run scripts/gpu_host_release.py as the unit would; (rc, combined output)."""
     import subprocess
     import tempfile
@@ -177,11 +207,13 @@ def release(url: str | None, catalog_text: str | None = None, missing: bool = Fa
         cat = Path(d) / ("nope.yml" if missing else "images.yml")
         if not missing:
             cat.write_text(catalog_text if catalog_text is not None
-                           else f"comfyui_base_url: {url}\n")
+                           else f"comfyui_base_url: {url}\n"
+                           "image_generation_enabled: true\nimage_edit_enabled: true\n")
         r = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "gpu_host_release.py"),
              "--catalog", str(cat), "--settle", "0.2",
-             "--drain", "1", "--poll", "0.2", *extra],
+             "--drain", "1", "--poll", "0.2",
+             "--check", check, "--service-result", result, *extra],
             capture_output=True, text=True, timeout=60)
     return r.returncode, r.stdout + r.stderr
 
@@ -194,12 +226,23 @@ def t_release_unreachable() -> str | None:
 
 
 def t_release_busy() -> str | None:
+    # Result exit-code: the check never owned the queue. No wait, no /free.
     with FakeGpu() as f:
         gpu_routes(f, BUSY)
-        rc, out = release(f.url)
+        t = time.monotonic()
+        rc, out = release(f.url, result="exit-code", extra=("--drain", "30"))
+        dt = time.monotonic() - t
+        if rc != 0 or "someone else's job; models left resident" not in out \
+                or ("POST", "/free") in paths(f) or dt > 10 \
+                or paths(f).count(("GET", "/queue")) != 1:
+            return f"exit-code busy: rc={rc} dt={dt:.1f} out={out!r} requests={paths(f)}"
+    # Result timeout: our own prompt may still be queued, so wait, then give up.
+    with FakeGpu() as f:
+        gpu_routes(f, BUSY)
+        rc, out = release(f.url, result="timeout")
         if rc != 0 or "still busy after 1s; models left resident" not in out \
                 or ("POST", "/free") in paths(f):
-            return f"rc={rc} out={out!r} requests={paths(f)}"
+            return f"timeout busy: rc={rc} out={out!r} requests={paths(f)}"
     return None
 
 
@@ -207,9 +250,54 @@ def t_release_drains() -> str | None:
     with FakeGpu() as f:
         gpu_routes(f)
         f.routes[("GET", "/queue")] = [(200, BUSY), (200, BUSY), (200, IDLE)]
-        rc, out = release(f.url, extra=("--drain", "10"))
+        rc, out = release(f.url, result="timeout", extra=("--drain", "10"))
         if rc != 0 or ("POST", "/free") not in paths(f):
-            return f"rc={rc} out={out!r} requests={paths(f)}"
+            return f"timeout drain: rc={rc} out={out!r} requests={paths(f)}"
+    # The same busy-then-idle queue under any other result must NOT be drained.
+    with FakeGpu() as f:
+        gpu_routes(f)
+        f.routes[("GET", "/queue")] = [(200, BUSY), (200, BUSY), (200, IDLE)]
+        rc, out = release(f.url, result="exit-code", extra=("--drain", "10"))
+        if rc != 0 or ("POST", "/free") in paths(f):
+            return f"exit-code no-drain: rc={rc} out={out!r} requests={paths(f)}"
+    return None
+
+
+def t_release_deadline() -> str | None:
+    """A long drain is cut off by the single overall --deadline."""
+    with FakeGpu() as f:
+        gpu_routes(f, BUSY)
+        t = time.monotonic()
+        rc, out = release(f.url, result="timeout",
+                          extra=("--drain", "100", "--deadline", "1"))
+        dt = time.monotonic() - t
+        if rc != 0 or dt > 15 or ("POST", "/free") in paths(f) \
+                or "models left resident" not in out:
+            return f"deadline: rc={rc} dt={dt:.1f} out={out!r}"
+    return None
+
+
+def t_release_feature_disabled() -> str | None:
+    for check, flag in (("gen", "image_generation_enabled"), ("edit", "image_edit_enabled")):
+        with FakeGpu() as f:
+            gpu_routes(f)
+            text = (f"comfyui_base_url: {f.url}\nimage_generation_enabled: true\n"
+                    f"image_edit_enabled: true\n").replace(f"{flag}: true", f"{flag}: false")
+            rc, out = release(f.url, catalog_text=text, check=check, result="timeout")
+            if rc != 0 or f.requests or "disabled" not in out:
+                return f"{check} disabled: rc={rc} out={out!r} requests={paths(f)}"
+    return None
+
+
+def t_release_flag_scoped() -> str | None:
+    """Gen disabled does not suppress the edit release (flags are per check)."""
+    with FakeGpu() as f:
+        gpu_routes(f)
+        text = (f"comfyui_base_url: {f.url}\nimage_generation_enabled: false\n"
+                "image_edit_enabled: true\n")
+        rc, out = release(f.url, catalog_text=text, check="edit")
+        if rc != 0 or ("POST", "/free") not in paths(f):
+            return f"edit with gen disabled: rc={rc} out={out!r}"
     return None
 
 
@@ -230,6 +318,13 @@ def t_release_idle() -> str | None:
         rc, out = release(f.url)
         if rc != 0 or ("POST", "/free") not in paths(f) or "before" not in out or "after" not in out:
             return f"rc={rc} out={out!r} requests={paths(f)}"
+    with FakeGpu() as f:
+        gpu_routes(f)
+        f.routes[("GET", "/system_stats")] = (200, BIG_STATS)
+        rc, out = release(f.url)
+        want = "before 4000/24000 MiB free (torch 1000/20000 MiB free)"
+        if want not in out:
+            return f"torch figures missing from release line: {out!r}"
     return None
 
 
