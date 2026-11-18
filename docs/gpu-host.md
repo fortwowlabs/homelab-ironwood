@@ -701,10 +701,24 @@ place:
   release after the check. It has no `vram` token and no arrow, and the other
   `gpu-release:` lines say why nothing was freed.
 
-**Whether `/free` actually returns the reservation is not yet confirmed
-against a live ComfyUI as of 2026-11-18**: ComfyUI on TERRA was down when this
-was written, so the earlier warning about `/free` leaving it in place stands
-until a run's log shows free memory, torch's figure in particular, rising. To read it, on svc-infra:
+**Measured live on 2026-11-18: `/free` with `free_memory` does return the
+memory.** After a 50-step Qwen Image Edit run the release logged device free
+going 3251 → 22923 MiB of 24563, back to the pre-run baseline, with torch's
+reservation left at 32 MiB. After an SDXL generation it went 16300 → 22925 MiB.
+So the earlier warning about `/free` leaving the reservation in place does not
+reproduce with this request body; it remains true that `/free` is asynchronous,
+which is why the release polls before reading the "after" figure.
+
+**ComfyUI's "device free" does not see other processes' VRAM on this host.**
+With `qwen3.8:27b` resident in Ollama (16.2 GiB by `/api/ps`), ComfyUI's
+`/system_stats` still reported 21721 MiB free, and evicting it moved that figure
+by only ~1.2 GiB. So the `gpu: ollama evict` line's `vram before` figure says
+nothing about Ollama's footprint — trust `/api/ps` (the "confirmed" in that line)
+for Ollama, and the `vram`/`torch` pairs only for ComfyUI's own memory. The
+same run proved the eviction mattered: the edit, which peaks near the card's
+limit, completed with the chat model evicted first.
+
+To read the figures, on svc-infra:
 
 ```bash
 journalctl -u 'homelab-image-gen@svcops.service' -u 'homelab-image-edit@svcops.service'
