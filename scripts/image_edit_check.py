@@ -35,6 +35,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import gpu_host  # noqa: E402
 from owui_image_config import api_get, api_post  # noqa: E402
 
 CATALOG_PATH = ROOT / "inventory" / "group_vars" / "all" / "images.yml"
@@ -67,6 +68,20 @@ def probe(base_url: str, token: str, catalog: dict,
     expected_model = catalog["image_edit_model"]
     started = time.monotonic()
 
+    comfy = catalog["comfyui_base_url"]
+    if not gpu_host.reachable(comfy):
+        print(f"INCONCLUSIVE: ComfyUI at {comfy} is unreachable",
+              file=sys.stderr)
+        return "inconclusive", {}
+    busy = gpu_host.comfy_queue_busy(comfy)
+    if busy is True:
+        print("INCONCLUSIVE: ComfyUI queue is busy; not freeing memory "
+              "under someone else's job", file=sys.stderr)
+        return "inconclusive", {}
+    if busy is None:
+        print("could not read ComfyUI's queue; continuing", file=sys.stderr)
+    gpu_host.make_room(comfy, catalog["ollama_base_url"])
+
     image_b64 = base64.b64encode(tiny_png()).decode("ascii")
     payload = {"image": f"data:image/png;base64,{image_b64}", "prompt": PROMPT}
 
@@ -90,8 +105,8 @@ def probe(base_url: str, token: str, catalog: dict,
             body = error.read().decode("utf-8", "replace")[:500]
         except Exception:
             pass
-        print(f"INCONCLUSIVE: POST /api/v1/images/edit returned HTTP "
-              f"{error.code}: {body}", file=sys.stderr)
+        print(f"INCONCLUSIVE: HTTP {error.code} from "
+              f"/api/v1/images/edit: {body}", file=sys.stderr)
         return "inconclusive", {}
     except (urllib.error.URLError, OSError, ValueError):
         return "inconclusive", {}
@@ -108,7 +123,15 @@ def probe(base_url: str, token: str, catalog: dict,
             url, headers={"Authorization": f"Bearer {token}"})
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = response.read()
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+    except urllib.error.HTTPError as error:
+        body = ""
+        try:
+            body = error.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            pass
+        print(f"HTTP {error.code} from {url}: {body}", file=sys.stderr)
+        return "inconclusive", {}
+    except (urllib.error.URLError, OSError):
         return "inconclusive", {}
 
     try:

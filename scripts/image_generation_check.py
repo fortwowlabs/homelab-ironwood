@@ -16,6 +16,14 @@ Open WebUI unreachable, auth rejected, timeout) and escalates rather than
 passing, because "could not look" reading as "fine" is how every other check
 in this repo has failed at least once.
 
+Before touching Open WebUI the check probes ComfyUI directly. An unreachable
+ComfyUI is could-not-look (Open WebUI would otherwise answer a generic HTTP 400
+after a long connect timeout, which used to read as `broken`). A busy queue is
+also inconclusive. Otherwise the card is cleared (Ollama evicted, ComfyUI
+freed) and an HTTP 400 from a reachable ComfyUI is ours: `broken`. If the room
+could not be confirmed, a generation error stays inconclusive. Every HTTP error
+is logged with its status and body.
+
 Design: docs/superpowers/specs/2026-08-14-comfyui-image-generation-design.md
 """
 
@@ -36,6 +44,7 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
 
+import gpu_host  # noqa: E402
 from owui_image_config import api_get, api_post  # noqa: E402
 
 CATALOG_PATH = ROOT / "inventory" / "group_vars" / "all" / "images.yml"
@@ -50,11 +59,37 @@ def png_size(data: bytes) -> tuple[int, int]:
     return width, height
 
 
+def http_error_body(error: urllib.error.HTTPError) -> str:
+    try:
+        return error.read().decode("utf-8", "replace")[:500]
+    except Exception:
+        return ""
+
+
+def log_http_error(path: str, error: urllib.error.HTTPError) -> None:
+    print(f"HTTP {error.code} from {path}: {http_error_body(error)}",
+          file=sys.stderr)
+
+
 def probe(base_url: str, token: str, catalog: dict,
           timeout: int) -> tuple[str, dict[str, float]]:
     expected_model = catalog["image_generation_model"]
     expected_w, expected_h = (int(n) for n in catalog["image_size"].split("x"))
     started = time.monotonic()
+
+    comfy = catalog["comfyui_base_url"]
+    if not gpu_host.reachable(comfy):
+        print(f"INCONCLUSIVE: ComfyUI at {comfy} is unreachable",
+              file=sys.stderr)
+        return "inconclusive", {}
+    busy = gpu_host.comfy_queue_busy(comfy)
+    if busy is True:
+        print("INCONCLUSIVE: ComfyUI queue is busy; not freeing memory "
+              "under someone else's job", file=sys.stderr)
+        return "inconclusive", {}
+    if busy is None:
+        print("could not read ComfyUI's queue; continuing", file=sys.stderr)
+    room_confirmed = gpu_host.make_room(comfy, catalog["ollama_base_url"])
 
     # Cheapest first: this evaluates workflow[model_node_id]["class_type"]
     # internally, so a mapping naming an absent node 400s here rather than
@@ -62,6 +97,7 @@ def probe(base_url: str, token: str, catalog: dict,
     try:
         models = api_get(base_url, "/api/v1/images/models", token, timeout)
     except urllib.error.HTTPError as error:
+        log_http_error("/api/v1/images/models", error)
         if error.code == 400:
             # Broken mapping normally surfaces as a 400 here.
             return "broken", {"homelab_image_generation_ok": 0.0}
@@ -78,8 +114,14 @@ def probe(base_url: str, token: str, catalog: dict,
     try:
         result = api_post(base_url, "/api/v1/images/generations", token,
                           {"prompt": PROMPT, "n": 1}, timeout)
-    except urllib.error.HTTPError:
-        return "broken", {"homelab_image_generation_ok": 0.0}
+    except urllib.error.HTTPError as error:
+        log_http_error("/api/v1/images/generations", error)
+        if room_confirmed:
+            return "broken", {"homelab_image_generation_ok": 0.0}
+        print("INCONCLUSIVE: GPU memory could not be cleared first, so this "
+              "error may be contention rather than our mapping",
+              file=sys.stderr)
+        return "inconclusive", {}
     except (urllib.error.URLError, OSError, ValueError):
         return "inconclusive", {}
 
@@ -98,7 +140,10 @@ def probe(base_url: str, token: str, catalog: dict,
             url, headers={"Authorization": f"Bearer {token}"})
         with urllib.request.urlopen(request, timeout=timeout) as response:
             data = response.read()
-    except (urllib.error.URLError, urllib.error.HTTPError, OSError):
+    except urllib.error.HTTPError as error:
+        log_http_error(url, error)
+        return "inconclusive", {}
+    except (urllib.error.URLError, OSError):
         return "inconclusive", {}
 
     try:
