@@ -88,6 +88,7 @@ def probe(base_url: str, token: str, catalog: dict,
     image_b64 = base64.b64encode(tiny_png()).decode("ascii")
     payload = {"image": f"data:image/png;base64,{image_b64}", "prompt": PROMPT}
 
+    gpu_host.mark_submitted()
     try:
         result = api_post(base_url, "/api/v1/images/edit", token, payload, timeout)
     except urllib.error.HTTPError as error:

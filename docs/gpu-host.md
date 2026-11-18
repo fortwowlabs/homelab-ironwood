@@ -660,10 +660,15 @@ evicts every resident Ollama model (`keep_alive` 0, confirmed through
 Afterwards `scripts/gpu_host_release.py --check gen|edit` frees again, with
 three rules. It does nothing if that check's feature flag
 (`image_generation_enabled` / `image_edit_enabled`) is false. A busy queue is
-waited on (up to 300 s) only when systemd's `$SERVICE_RESULT` is `timeout`,
-because only a `TimeoutStartSec` kill leaves the check's own prompt queued;
-for any other result a busy queue is someone else's job and the models are left
-resident at once, without waiting. And one `--deadline` (default 390 s) bounds
+waited on (up to 300 s) only when our own prompt may still be in it: either
+systemd's `$SERVICE_RESULT` is `timeout` (a `TimeoutStartSec` kill), or the
+check left a `submitted` marker in its `RuntimeDirectory=` just before POSTing
+its request. The marker covers the common case, because each check's own client
+`--timeout` (300 s for generation, 900 s for edit) is shorter than
+`TimeoutStartSec`, so a slow generation ends as `inconclusive`, exit 2,
+`SERVICE_RESULT=success`, with the prompt still running in ComfyUI. With neither
+a timeout nor a marker a busy queue is someone else's job and the models are
+left resident at once, without waiting. And one `--deadline` (default 390 s) bounds
 the whole run so it finishes inside `TimeoutStopSec=420`. A stop-post timeout
 would not be hidden by the `-` prefix, which ignores only the hook's exit code:
 it fails the unit and fires `OnFailure`. A manual `make image-gen-check` or

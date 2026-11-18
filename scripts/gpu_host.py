@@ -12,12 +12,36 @@ from __future__ import annotations
 
 import http.client
 import json
+import os
 import socket
 import sys
 import time
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
+
+SUBMITTED_MARKER = "submitted"
+
+
+def mark_submitted() -> None:
+    """Record that our own prompt may now exist in ComfyUI.
+
+    Written into $RUNTIME_DIRECTORY (systemd sets it for the check units)
+    just before the generation/edit request, so ExecStopPost can tell "our
+    prompt may still be running" from "someone else's job" even when the
+    check ended with SERVICE_RESULT=success. Unset (manual runs): skipped.
+    Never raises and never changes a verdict.
+    """
+    d = os.environ.get("RUNTIME_DIRECTORY")
+    if not d:
+        return
+    try:
+        with open(os.path.join(d, SUBMITTED_MARKER), "w", encoding="utf-8") as fh:
+            fh.write("1\n")
+    except Exception as e:  # noqa: BLE001 - must never change the verdict
+        print(f"could not write submitted marker in {d} ({type(e).__name__}: {e})",
+              file=sys.stderr)
+
 
 VRAM_KEYS = ("vram_total", "vram_free", "torch_vram_total", "torch_vram_free")
 

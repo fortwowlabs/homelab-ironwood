@@ -11,6 +11,12 @@ After=network-online.target
 [Service]
 Type=oneshot
 User=%i
+# systemd creates this owned by User=, exports $RUNTIME_DIRECTORY to ExecStart
+# and ExecStopPost, and removes it after ExecStopPost. The check drops a
+# `submitted` marker here just before POSTing, so the release hook can tell our
+# own still-running prompt from someone else's job even when the check's own
+# client timeout ended the run as exit 2 / SERVICE_RESULT=success.
+RuntimeDirectory=homelab-image-edit-%i
 WorkingDirectory=/opt/homelab-iac
 # ExecStartPre, NOT ConditionPathIsDirectory: systemd treats an unmet condition
 # as SUCCESS, so a missing venv would end nightly checking with every indicator
@@ -23,7 +29,7 @@ ExecStart=/opt/homelab-iac/.venv/bin/python \
     --timeout 900
 # Release TERRA's card whatever the outcome — success, failure, crash or a
 # TimeoutStartSec kill. "-" so a nonzero exit from the hook never changes the
-# verdict. systemd passes $SERVICE_RESULT to it; only "timeout" earns a queue drain.
+# verdict. systemd passes $SERVICE_RESULT to it; "timeout", or a `submitted` marker, earns a queue drain.
 ExecStopPost=-/opt/homelab-iac/.venv/bin/python /opt/homelab-iac/scripts/gpu_host_release.py --check edit
 # The release script enforces its own --deadline (390 s by default) so its work
 # finishes inside this. If it were killed at the limit anyway, the "-" prefix

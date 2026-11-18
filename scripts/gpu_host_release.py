@@ -9,9 +9,13 @@ missing key) are logged and still exit 0 -- the "-" on ExecStopPost already
 ignores failures, but a non-zero stop hook still adds a failure line to the
 journal.
 
-Only a TimeoutStartSec kill ($SERVICE_RESULT == "timeout") earns a wait for a
-busy queue; for any other result a busy queue is someone else's job and is
-left alone at once. Nothing is released for a check whose feature flag is off.
+A busy queue earns a wait (then a free) only when our own prompt may still be in
+it: $SERVICE_RESULT == "timeout" (TimeoutStartSec kill), or the check left a
+`submitted` marker in $RUNTIME_DIRECTORY (--runtime-dir) just before POSTing
+its request. The marker matters because the checks' own client --timeout is
+shorter than TimeoutStartSec, so a slow generation ends as `inconclusive`,
+exit 2, SERVICE_RESULT=success, with the prompt still running in ComfyUI.
+Otherwise a busy queue is someone else's job and is left alone at once. Nothing is released for a check whose feature flag is off.
 One --deadline bounds the whole run so it finishes inside TimeoutStopSec.
 """
 
@@ -38,7 +42,8 @@ FLAGS = {"gen": "image_generation_enabled", "edit": "image_edit_enabled"}
 
 
 def release(catalog_path: Path, check: str, service_result: str, settle: float,
-            drain: float, poll: float, deadline: float) -> None:
+            drain: float, poll: float, deadline: float,
+            runtime_dir: Path | None = None) -> None:
     end = time.monotonic() + deadline
     with open(catalog_path, encoding="utf-8") as fh:
         catalog = yaml.safe_load(fh)
@@ -55,17 +60,18 @@ def release(catalog_path: Path, check: str, service_result: str, settle: float,
     if busy is None:
         print("gpu-release: queue state unreadable; models left resident")
         return
-    if busy and service_result != "timeout":
-        # Only a TimeoutStartSec kill leaves our own prompt queued behind us.
-        # Any other result with a busy queue means the job is someone else's
-        # (busy at the check's start, or a human is generating): do not wait,
-        # do not free.
-        print(f"gpu-release: queue busy (service result {service_result or 'unset'}); "
-              "someone else's job; models left resident")
+    submitted = runtime_dir is not None and (runtime_dir / gpu_host.SUBMITTED_MARKER).exists()
+    if busy and service_result != "timeout" and not submitted:
+        # Our own prompt is queued only after a TimeoutStartSec kill or once
+        # the check submitted its request (marker). Otherwise the job is
+        # someone else's (busy at the check's start, or a human is
+        # generating): do not wait, do not free.
+        print(f"gpu-release: queue busy (service result {service_result or 'unset'}, "
+              "no submitted marker); someone else's job; models left resident")
         return
     if busy:
-        # Timeout kill: killing our client does not cancel its prompt in
-        # ComfyUI. Wait for it to drain rather than leave the stack resident,
+        # Our own prompt may still be running: a timeout kill does not cancel
+        # it in ComfyUI, and neither does the check's own client timeout. Wait for it to drain rather than leave the stack resident,
         # but never past the overall deadline.
         wait = max(0.0, min(drain, end - time.monotonic()))
         stop = time.monotonic() + wait
@@ -95,7 +101,11 @@ def main(argv: list[str] | None = None) -> int:
                         help="which check this follows; its feature flag gates the release")
         ap.add_argument("--service-result",
                         default=os.environ.get("SERVICE_RESULT", ""),
-                        help="systemd's $SERVICE_RESULT; only 'timeout' drains a busy queue")
+                        help="systemd's $SERVICE_RESULT; 'timeout' drains a busy queue")
+        rd = os.environ.get("RUNTIME_DIRECTORY")
+        ap.add_argument("--runtime-dir", type=Path, default=Path(rd) if rd else None,
+                        help="directory holding the check's `submitted` marker "
+                             "(default $RUNTIME_DIRECTORY); a marker drains a busy queue")
         ap.add_argument("--settle", type=float, default=20.0)
         ap.add_argument("--drain", type=float, default=300.0,
                         help="seconds to wait for a busy queue to drain")
@@ -105,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
                              "TimeoutStopSec=420")
         args = ap.parse_args(argv)
         release(args.catalog, args.check, args.service_result, args.settle,
-                args.drain, args.poll, args.deadline)
+                args.drain, args.poll, args.deadline, args.runtime_dir)
     except SystemExit:
         print("gpu-release: bad arguments (ignored)", file=sys.stderr)
     except Exception as e:  # noqa: BLE001 - must never change the verdict

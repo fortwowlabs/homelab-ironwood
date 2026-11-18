@@ -124,6 +124,7 @@ def probe(base_url: str, token: str, catalog: dict,
               f"offers ({sorted(available)})", file=sys.stderr)
         return "broken", {"homelab_image_generation_ok": 0.0}
 
+    gpu_host.mark_submitted()
     try:
         result = api_post(base_url, "/api/v1/images/generations", token,
                           {"prompt": PROMPT, "n": 1}, timeout)

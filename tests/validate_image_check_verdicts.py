@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import contextlib
 import io
+import os
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -199,7 +201,8 @@ def t_edit() -> str | None:
 
 
 def release(url: str | None, catalog_text: str | None = None, missing: bool = False,
-            extra: tuple[str, ...] = (), check: str = "gen", result: str = "success"):
+            extra: tuple[str, ...] = (), check: str = "gen", result: str = "success",
+            marker: bool = False):
     """Run scripts/gpu_host_release.py as the unit would; (rc, combined output)."""
     import subprocess
     import tempfile
@@ -209,11 +212,16 @@ def release(url: str | None, catalog_text: str | None = None, missing: bool = Fa
             cat.write_text(catalog_text if catalog_text is not None
                            else f"comfyui_base_url: {url}\n"
                            "image_generation_enabled: true\nimage_edit_enabled: true\n")
+        rt = Path(d) / "rt"
+        rt.mkdir()
+        if marker:
+            (rt / "submitted").write_text("1\n")
         r = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "gpu_host_release.py"),
              "--catalog", str(cat), "--settle", "0.2",
              "--drain", "1", "--poll", "0.2",
-             "--check", check, "--service-result", result, *extra],
+             "--check", check, "--service-result", result,
+             "--runtime-dir", str(rt), *extra],
             capture_output=True, text=True, timeout=60)
     return r.returncode, r.stdout + r.stderr
 
@@ -260,6 +268,116 @@ def t_release_drains() -> str | None:
         rc, out = release(f.url, result="exit-code", extra=("--drain", "10"))
         if rc != 0 or ("POST", "/free") in paths(f):
             return f"exit-code no-drain: rc={rc} out={out!r} requests={paths(f)}"
+    return None
+
+
+def t_release_marker_drains() -> str | None:
+    """Result success (the check's own client timed out) but our prompt was
+    submitted: drain the busy queue, then free."""
+    with FakeGpu() as f:
+        gpu_routes(f)
+        f.routes[("GET", "/queue")] = [(200, BUSY), (200, BUSY), (200, IDLE)]
+        rc, out = release(f.url, result="success", marker=True, extra=("--drain", "10"))
+        p = paths(f)
+        if rc != 0 or ("POST", "/free") not in p or p.count(("GET", "/queue")) < 3:
+            return f"marker drain: rc={rc} out={out!r} requests={p}"
+    with FakeGpu() as f:
+        gpu_routes(f)
+        f.routes[("GET", "/queue")] = [(200, BUSY), (200, BUSY), (200, IDLE)]
+        rc, out = release(f.url, result="success", marker=False, extra=("--drain", "10"))
+        p = paths(f)
+        if rc != 0 or ("POST", "/free") in p or p.count(("GET", "/queue")) != 1 \
+                or "someone else's job" not in out:
+            return f"no marker, success, busy: rc={rc} out={out!r} requests={p}"
+    return None
+
+
+def with_runtime_dir(value: str, fn):
+    old = os.environ.get("RUNTIME_DIRECTORY")
+    os.environ["RUNTIME_DIRECTORY"] = value
+    try:
+        return fn()
+    finally:
+        if old is None:
+            os.environ.pop("RUNTIME_DIRECTORY", None)
+        else:
+            os.environ["RUNTIME_DIRECTORY"] = old
+
+
+def t_marker_written_on_submit() -> str | None:
+    for name, module, routes in (("gen", image_generation_check, gen_routes),
+                                 ("edit", image_edit_check, edit_routes)):
+        with tempfile.TemporaryDirectory() as d, FakeGpu() as f:
+            routes(f)
+            v, _, _ = with_runtime_dir(d, lambda m=module, g=f: run(m, g, g.url, g.url))
+            if v != "ok":
+                return f"{name}: verdict {v!r}"
+            if not (Path(d) / "submitted").exists():
+                return f"{name}: no submitted marker after a submitted request"
+    return None
+
+
+def t_marker_not_written_when_unreachable() -> str | None:
+    for module in (image_generation_check, image_edit_check):
+        with tempfile.TemporaryDirectory() as d, FakeGpu() as f:
+            v, _, _ = with_runtime_dir(
+                d, lambda m=module, g=f: run(m, g, closed_port_url(), g.url))
+            if v != "inconclusive" or (Path(d) / "submitted").exists():
+                return f"{module.__name__}: verdict {v!r}, marker={list(Path(d).iterdir())}"
+    return None
+
+
+def t_marker_failure_never_changes_verdict() -> str | None:
+    """RUNTIME_DIRECTORY pointing nowhere: logged, verdict untouched."""
+    with FakeGpu() as f:
+        gen_routes(f)
+        v, err, _ = with_runtime_dir(
+            "/nonexistent/dir/for/marker",
+            lambda: run(image_generation_check, f, f.url, f.url))
+    if v != "ok" or "marker" not in err:
+        return f"unwritable marker dir: {v!r}, stderr={err!r}"
+    return None
+
+
+def units_wiring_problem(units: dict[str, str]) -> str | None:
+    import re
+    for check, text in units.items():
+        stop = [ln for ln in text.splitlines() if ln.startswith("ExecStopPost=")]
+        if len(stop) != 1 or not re.search(
+                rf"gpu_host_release\.py\b.*--check {check}\b", stop[0]):
+            return f"{check}: ExecStopPost does not pass --check {check}: {stop}"
+        if not re.search(r"^RuntimeDirectory=\S+", text, re.M):
+            return f"{check}: unit declares no RuntimeDirectory="
+    return None
+
+
+def t_units_wire_release_and_runtime_dir() -> str | None:
+    """Gate: the release hook must name its own check and the unit must
+    export RUNTIME_DIRECTORY, or the marker silently never reaches it."""
+    files = ROOT / "roles" / "svc_infra" / "files"
+    return units_wiring_problem({
+        "gen": (files / "homelab-image-gen@.service").read_text(),
+        "edit": (files / "homelab-image-edit@.service").read_text()})
+
+
+def t_units_gate_can_fail() -> str | None:
+    """Positive control: the gate above must reject each defect."""
+    files = ROOT / "roles" / "svc_infra" / "files"
+    gen = (files / "homelab-image-gen@.service").read_text()
+    edit = (files / "homelab-image-edit@.service").read_text()
+    good = {"gen": gen, "edit": edit}
+
+    def drop(text: str, prefix: str) -> str:
+        return "\n".join(ln for ln in text.splitlines() if not ln.startswith(prefix))
+
+    for label, bad in (
+            ("gen RuntimeDirectory removed", {**good, "gen": drop(gen, "RuntimeDirectory=")}),
+            ("edit RuntimeDirectory removed", {**good, "edit": drop(edit, "RuntimeDirectory=")}),
+            ("gen wrong --check", {**good, "gen": gen.replace("--check gen", "--check edit")}),
+            ("edit wrong --check", {**good, "edit": edit.replace("--check edit", "--check gen")}),
+            ("gen ExecStopPost removed", {**good, "gen": drop(gen, "ExecStopPost=")})):
+        if not units_wiring_problem(bad):
+            return f"gate did not fail for: {label}"
     return None
 
 
