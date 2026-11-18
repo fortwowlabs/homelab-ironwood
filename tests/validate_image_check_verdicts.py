@@ -168,7 +168,8 @@ def t_edit() -> str | None:
     return None
 
 
-def release(url: str | None, catalog_text: str | None = None, missing: bool = False):
+def release(url: str | None, catalog_text: str | None = None, missing: bool = False,
+            extra: tuple[str, ...] = ()):
     """Run scripts/gpu_host_release.py as the unit would; (rc, combined output)."""
     import subprocess
     import tempfile
@@ -179,7 +180,8 @@ def release(url: str | None, catalog_text: str | None = None, missing: bool = Fa
                            else f"comfyui_base_url: {url}\n")
         r = subprocess.run(
             [sys.executable, str(ROOT / "scripts" / "gpu_host_release.py"),
-             "--catalog", str(cat), "--settle", "0.2"],
+             "--catalog", str(cat), "--settle", "0.2",
+             "--drain", "1", "--poll", "0.2", *extra],
             capture_output=True, text=True, timeout=60)
     return r.returncode, r.stdout + r.stderr
 
@@ -195,7 +197,29 @@ def t_release_busy() -> str | None:
     with FakeGpu() as f:
         gpu_routes(f, BUSY)
         rc, out = release(f.url)
-        if rc != 0 or "left resident" not in out or ("POST", "/free") in paths(f):
+        if rc != 0 or "still busy after 1s; models left resident" not in out \
+                or ("POST", "/free") in paths(f):
+            return f"rc={rc} out={out!r} requests={paths(f)}"
+    return None
+
+
+def t_release_drains() -> str | None:
+    with FakeGpu() as f:
+        gpu_routes(f)
+        f.routes[("GET", "/queue")] = [(200, BUSY), (200, BUSY), (200, IDLE)]
+        rc, out = release(f.url, extra=("--drain", "10"))
+        if rc != 0 or ("POST", "/free") not in paths(f):
+            return f"rc={rc} out={out!r} requests={paths(f)}"
+    return None
+
+
+def t_release_unreadable() -> str | None:
+    with FakeGpu() as f:
+        gpu_routes(f)
+        f.routes[("GET", "/queue")] = (500, {})
+        rc, out = release(f.url)
+        if rc != 0 or "queue state unreadable; models left resident" not in out \
+                or ("POST", "/free") in paths(f):
             return f"rc={rc} out={out!r} requests={paths(f)}"
     return None
 

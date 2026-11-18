@@ -27,6 +27,9 @@ ExecStart=/opt/homelab-iac/.venv/bin/python \
 # Release TERRA's card whatever the outcome — success, failure, crash or a
 # TimeoutStartSec kill. "-" so a release problem never changes the verdict.
 ExecStopPost=-/opt/homelab-iac/.venv/bin/python /opt/homelab-iac/scripts/gpu_host_release.py
+# 300 s queue drain + 20 s settle + HTTP timeouts, with margin. systemd kills
+# the hook after this; the "-" prefix ignores that.
+TimeoutStopSec=420
 # Generation against a card that may hold a 17 GB resident chat model, on a
 # desktop that may be asleep. Long enough to be a real answer, short enough
 # that a hang is reported the same night.
