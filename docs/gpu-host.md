@@ -652,30 +652,49 @@ order rather than a clean one. Restart between models, or do not publish the
 number.
 
 **The nightly image checks now clear the card before and after they run, and
-log what that did.** Since 2026-11-18 each check calls `scripts/gpu_host.py`
-first: it evicts every resident Ollama model (`keep_alive` 0, confirmed through
+log what that did.** Since 2026-11-18 each check first probes that ComfyUI
+answers at all, then looks at its queue (a busy queue makes the run
+inconclusive and frees nothing), and only then, through `scripts/gpu_host.py`,
+evicts every resident Ollama model (`keep_alive` 0, confirmed through
 `/api/ps`) and posts `/free` with `unload_models` and `free_memory` to ComfyUI.
 Afterwards `scripts/gpu_host_release.py` waits up to 300 s for ComfyUI's queue
 to drain, so a timed-out check's own prompt can finish, and then frees again;
 if the queue is still busy it leaves memory resident rather than pull a model
-out from under a running job. The reason is the 2026-11-17 incident, where a
-model left resident from earlier testing made the checks fail for want of
-VRAM. Each step logs the card's free and total MiB before and after the
-`/free`, and the helper polls `torch_vram_total` until it stops falling, so
-whether torch's reservation is actually returned is observable per run instead
-of assumed. **It is not yet confirmed against a live ComfyUI as of 2026-11-18**:
-ComfyUI on TERRA was down when this was written, so the earlier warning about
-`/free` leaving the reservation in place stands until a run's log shows free
-memory rising. To read it, on svc-infra:
+out from under a running job. The reason for clearing the card is the
+2026-08-31 incident above, where a large model stack left resident on the GPU
+broke the nightly checks. The 2026-11-17/18 incident is the reason an
+unreachable ComfyUI is now inconclusive and does not page: ComfyUI was not
+answering at all, and the check misread that as the application being broken.
+The two checks differ in one respect: the generation check uses whether room
+was confirmed (an HTTP error on its generation POST is broken only if it was,
+otherwise inconclusive), while the edit check ignores it, because an HTTP error
+on the edit POST is always inconclusive.
+
+The logs make torch's reservation observable per run instead of assumed. Three
+lines matter, each as the code prints it:
+
+- `gpu: ollama evict confirmed; vram before <free>/<total> MiB free` (or
+  `NOT confirmed`), logged by the check before it frees.
+- `gpu: comfy free confirmed (posted=True); vram <free>/<total> MiB free ->
+  <free>/<total> MiB free`, the before and after of the `/free`. The helper
+  also polls `torch_vram_total` until it stops falling, but only the device's
+  free and total figures reach the log.
+- `gpu-release: posted=True before <free>/<total> MiB free, after <free>/<total>
+  MiB free`, the same pair from the release after the check. It has no `vram`
+  token and no arrow, and the other `gpu-release:` lines say why nothing was
+  freed.
+
+**Whether `/free` actually returns the reservation is not yet confirmed
+against a live ComfyUI as of 2026-11-18**: ComfyUI on TERRA was down when this
+was written, so the earlier warning about `/free` leaving it in place stands
+until a run's log shows free memory rising. To read it, on svc-infra:
 
 ```bash
 journalctl -u 'homelab-image-gen@svcops.service' -u 'homelab-image-edit@svcops.service'
 ```
 
-Look for the `gpu: comfy free` and `gpu-release:` lines, which end in
-`vram <free>/<total> MiB free -> <free>/<total> MiB free`. An unreachable
-ComfyUI is reported as inconclusive and does not page; see the
-[design](superpowers/specs/2026-11-18-gpu-check-verdicts-design.md).
+See the [design](superpowers/specs/2026-11-18-gpu-check-verdicts-design.md)
+for the verdicts.
 
 #### Qwen Image Edit: the editing checkpoint
 
