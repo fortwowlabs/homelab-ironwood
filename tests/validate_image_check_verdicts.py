@@ -168,6 +168,56 @@ def t_edit() -> str | None:
     return None
 
 
+def release(url: str | None, catalog_text: str | None = None, missing: bool = False):
+    """Run scripts/gpu_host_release.py as the unit would; (rc, combined output)."""
+    import subprocess
+    import tempfile
+    with tempfile.TemporaryDirectory() as d:
+        cat = Path(d) / ("nope.yml" if missing else "images.yml")
+        if not missing:
+            cat.write_text(catalog_text if catalog_text is not None
+                           else f"comfyui_base_url: {url}\n")
+        r = subprocess.run(
+            [sys.executable, str(ROOT / "scripts" / "gpu_host_release.py"),
+             "--catalog", str(cat), "--settle", "0.2"],
+            capture_output=True, text=True, timeout=60)
+    return r.returncode, r.stdout + r.stderr
+
+
+def t_release_unreachable() -> str | None:
+    rc, out = release(closed_port_url())
+    if rc != 0 or "unreachable" not in out:
+        return f"rc={rc} out={out!r}"
+    return None
+
+
+def t_release_busy() -> str | None:
+    with FakeGpu() as f:
+        gpu_routes(f, BUSY)
+        rc, out = release(f.url)
+        if rc != 0 or "left resident" not in out or ("POST", "/free") in paths(f):
+            return f"rc={rc} out={out!r} requests={paths(f)}"
+    return None
+
+
+def t_release_idle() -> str | None:
+    with FakeGpu() as f:
+        gpu_routes(f)
+        rc, out = release(f.url)
+        if rc != 0 or ("POST", "/free") not in paths(f) or "before" not in out or "after" not in out:
+            return f"rc={rc} out={out!r} requests={paths(f)}"
+    return None
+
+
+def t_release_bad_catalog() -> str | None:
+    for kw in ({"missing": True}, {"catalog_text": "foo: [unclosed\n  - : :"},
+               {"catalog_text": "other_key: 1\n"}):
+        rc, out = release(None, **kw)
+        if rc != 0 or not out.strip():
+            return f"{kw}: rc={rc} out={out!r}"
+    return None
+
+
 def main() -> int:
     # Production settle is 20 s; the checks call make_room through the module.
     real = gpu_host.make_room

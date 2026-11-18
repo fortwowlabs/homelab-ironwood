@@ -21,6 +21,9 @@ ExecStart=/opt/homelab-iac/.venv/bin/python \
     --token-file /etc/homelab-owui-admin.token \
     --metrics-dir /opt/homelab/appdata/node-exporter-textfile \
     --timeout 900
+# Release TERRA's card whatever the outcome — success, failure, crash or a
+# TimeoutStartSec kill. "-" so a release problem never changes the verdict.
+ExecStopPost=-/opt/homelab-iac/.venv/bin/python /opt/homelab-iac/scripts/gpu_host_release.py
 # Editing loads a ~28 GB stack cold every night (it cannot stay resident
 # alongside a chat model, design §5) against a desktop that may be asleep.
 # Longer than image-gen's 900s for that reason.
