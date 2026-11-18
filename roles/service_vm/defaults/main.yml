@@ -45,3 +45,8 @@ service_vm_onfailure_units: >-
 # verify_runner_secret_file in roles/svc_infra/defaults/main.yml. Defaults are
 # not scanned by that test.
 service_hc_ping_vars: "vault_hc_ping_*"
+
+# fnmatch globs on unit names that `make verify` leaves out of its failed-units
+# gate (still printed, never silent). Only for units with their own failure
+# alerting; tests/validate_failed_units_exempt.py enforces that.
+service_vm_failed_units_exempt: []

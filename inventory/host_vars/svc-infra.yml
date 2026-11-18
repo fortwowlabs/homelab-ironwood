@@ -120,3 +120,12 @@ onfailure_units_extra:
   # The weekly digest. A failed run means no Sunday message, which would
   # otherwise be indistinguishable from a quiet week.
   - homelab-usage-digest.service
+
+# 2026-11-18: the nightly app checks stay in `failed` after a bad night, and
+# that made verify fail, conflating "one application stopped working" with "the
+# estate drifted". They alert elsewhere: the OnFailure drop-ins in
+# onfailure_units_extra above (notify-failure@) and the homelab-failedunits
+# watcher. Verify still prints them, it just does not fail on them.
+service_vm_failed_units_exempt:
+  - "homelab-image-gen@*.service"
+  - "homelab-image-edit@*.service"

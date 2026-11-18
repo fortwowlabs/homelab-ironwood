@@ -12,10 +12,46 @@
   # own success check, so without it any error that leaves stdout empty reads
   # as a clean host — the command not existing, a wedged dbus, a systemctl
   # that wrote its complaint to stderr. The check would pass at the exact
-  # moment it should fire.
-  failed_when: >-
-    service_vm_failed_units.rc != 0
-    or (service_vm_failed_units.stdout | trim | length > 0)
+  # moment it should fire. The stdout test lives in the assert below, after
+  # exempt units are separated out.
+  failed_when: service_vm_failed_units.rc != 0
+
+# service_vm_failed_units_exempt holds fnmatch globs on the unit name (the
+# first field of each line). Each is regex-escaped, its `*` turned back into
+# `.*`, and the set anchored as ^(a|b)(\s|$). With no globs the regex is
+# empty-guarded: `^()` would match every line and exempt everything.
+# tests/validate_failed_units_exempt.py refuses an exemption for any unit
+# that has no alerting of its own.
+- name: Separate exempt failed system services from real ones
+  ansible.builtin.set_fact:
+    service_vm_failed_units_exempt_re: >-
+      {{ ('^(' + (service_vm_failed_units_exempt | map('regex_escape')
+          | map('regex_replace', '\\\*', '.*') | join('|')) + ')(\s|$)')
+         if service_vm_failed_units_exempt | length > 0 else '' }}
+    service_vm_failed_units_lines: >-
+      {{ service_vm_failed_units.stdout_lines | map('trim') | reject('equalto', '') | list }}
+
+- name: Sort failed system services into exempt and real
+  ansible.builtin.set_fact:
+    service_vm_failed_units_exempted: >-
+      {{ service_vm_failed_units_lines | select('match', service_vm_failed_units_exempt_re) | list
+         if service_vm_failed_units_exempt_re | length > 0 else [] }}
+    service_vm_failed_units_real: >-
+      {{ service_vm_failed_units_lines | reject('match', service_vm_failed_units_exempt_re) | list
+         if service_vm_failed_units_exempt_re | length > 0 else service_vm_failed_units_lines }}
+
+- name: Report exempt failed system services
+  ansible.builtin.debug:
+    msg: >-
+      Left out of this gate (they alert through their own OnFailure hook, not
+      through verify): {{ service_vm_failed_units_exempted }}
+  when: service_vm_failed_units_exempted | length > 0
+
+- name: Assert no non-exempt system service has failed
+  ansible.builtin.assert:
+    that: service_vm_failed_units_real | length == 0
+    fail_msg: "Failed system services: {{ service_vm_failed_units_real }}"
+    quiet: true
 
 - name: Check for failed rootless user services
   ansible.builtin.command:
