@@ -135,9 +135,44 @@ def t_make_room() -> str | None:
     return None
 
 
+def t_malformed_http() -> str | None:
+    """A half-up host can answer with garbage; that must read as None/False."""
+    import socket
+    import threading
+
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    url = f"http://127.0.0.1:{srv.getsockname()[1]}"
+
+    def serve():
+        while True:
+            try:
+                c, _ = srv.accept()
+            except OSError:
+                return
+            c.recv(4096)
+            c.sendall(b"GARBAGE\r\n\r\n")
+            c.close()
+
+    threading.Thread(target=serve, daemon=True).start()
+    try:
+        got = {
+            "queue": gpu_host.comfy_queue_busy(url),
+            "vram": gpu_host.comfy_vram(url),
+            "ps": gpu_host.ollama_resident(url),
+            "evict": gpu_host.ollama_evict(url),
+            "free": gpu_host.comfy_free(url, settle=0.2)["posted"],
+        }
+    finally:
+        srv.close()
+    want = {"queue": None, "vram": None, "ps": None, "evict": False, "free": False}
+    return None if got == want else f"malformed HTTP: {got!r}"
+
+
 def main() -> int:
     failures = []
-    for fn in (t_reachable, t_queue, t_vram, t_free, t_evict, t_make_room):
+    for fn in (t_reachable, t_queue, t_vram, t_free, t_evict, t_make_room, t_malformed_http):
         try:
             err = fn()
         except Exception as e:  # a raise is itself the defect under test

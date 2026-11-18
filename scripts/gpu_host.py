@@ -10,6 +10,7 @@ raise would surface as exit 1, which the checks read as `broken`.
 
 from __future__ import annotations
 
+import http.client
 import json
 import socket
 import sys
@@ -30,7 +31,7 @@ def _request(url: str, timeout: float, payload: dict | None = None):
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             raw = resp.read()
-    except (OSError, ValueError, urllib.error.URLError):
+    except (OSError, ValueError, urllib.error.URLError, http.client.HTTPException):
         return None
     try:
         return json.loads(raw) if raw.strip() else {}
@@ -47,7 +48,7 @@ def _post_ok(url: str, payload: dict, timeout: float) -> bool:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             resp.read()
         return True
-    except (OSError, ValueError, urllib.error.URLError):
+    except (OSError, ValueError, urllib.error.URLError, http.client.HTTPException):
         return False
 
 
