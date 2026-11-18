@@ -56,6 +56,32 @@ EXTRA_RENDERS: tuple[tuple[str, dict], ...] = (
 )
 
 
+# notify-failure.sh.j2 must quote only the failing invocation. The old form,
+# `journalctl -u "$unit" -n 20`, reads the last 20 lines across every run, so a
+# failure alert opened with the previous day's "Deactivated successfully". The
+# rendered script must select by invocation ID, and keep the old form only as
+# the fallback for a unit that has no InvocationID yet.
+NOTIFY_FAILURE_TEMPLATE = "roles/service_vm/templates/notify-failure.sh.j2"
+# Both match halves are required. `"INVOCATION_ID=$inv"` is quoted as it
+# appears in the rendered script: the `_SYSTEMD_` form has `_` before
+# INVOCATION_ID, not a double quote, so the substring alone cannot stand in for
+# it. That half carries systemd's "Failed with result" lines.
+NOTIFY_FAILURE_REQUIRED = (
+    "_SYSTEMD_INVOCATION_ID=$inv",
+    '"INVOCATION_ID=$inv"',
+    'journalctl -u "$unit" -n 20',
+)
+
+
+def notify_failure_violations(rendered: str) -> list[str]:
+    """Each required fragment the rendered notify-failure script lacks."""
+    return [
+        f"rendered script lacks {fragment!r}"
+        for fragment in NOTIFY_FAILURE_REQUIRED
+        if fragment not in rendered
+    ]
+
+
 def main() -> int:
     shellcheck = os.environ.get("SHELLCHECK", "shellcheck")
     apps_document = yaml.safe_load(
@@ -205,6 +231,9 @@ def main() -> int:
                 "    rather than adding a `| default(...)` to the template."
             )
             continue
+        if template_name == NOTIFY_FAILURE_TEMPLATE:
+            for violation in notify_failure_violations(rendered):
+                failures.append(f"{template_name}: {violation}")
         result = subprocess.run(
             [shellcheck, "--shell=bash", "-"],
             input=rendered,

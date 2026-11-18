@@ -38,10 +38,19 @@ fi
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
-# The last lines of the unit's own journal, so the phone alert carries the
-# reason and not just the name. ntfy truncates long bodies server-side; keep
-# it well under that so the tail (which holds the actual error) survives.
-context=$(journalctl -u "$unit" -n 20 --no-pager -o cat 2>/dev/null | tail -c 3000)
+# The journal lines of the run that just failed, so the phone alert carries the
+# reason and not just the name. Selected by InvocationID: the old form (the
+# last 20 lines of the unit, across every run) quoted earlier runs, so an alert
+# could open with yesterday's "Deactivated successfully". The -u form is kept
+# only as the fallback for a unit with no InvocationID yet. ntfy truncates long
+# bodies server-side; keep it well under that so the tail (the actual error)
+# survives.
+context=""
+inv=$(systemctl show -p InvocationID --value "$unit" 2>/dev/null || true)
+if [[ -n "$inv" ]]; then
+    context=$(journalctl "_SYSTEMD_INVOCATION_ID=$inv" + "INVOCATION_ID=$inv" --no-pager -o cat 2>/dev/null | tail -c 3000)
+fi
+[[ -n "$context" ]] || context=$(journalctl -u "$unit" -n 20 --no-pager -o cat 2>/dev/null | tail -c 3000)
 [[ -n "$context" ]] || context="(no journal output)"
 
 result=$(systemctl show -p Result --value "$unit" 2>/dev/null || echo unknown)
