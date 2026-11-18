@@ -25,12 +25,13 @@
 # this line can never be the step that discovers a broken mapping.
 image_workflow: pony
 
-# comfyui_base_url and image_generation_enabled DUPLICATE gpu_host_ip and
-# gpu_host_online in main.yml. That is deliberate: this file is read by plain
-# yaml.safe_load with no Jinja rendering, so it cannot reference them. The
-# duplication is safe only because validate_openwebui_image_config.py fails the
-# build when the two disagree — do not "fix" one without the other.
+# comfyui_base_url, ollama_base_url and image_generation_enabled DUPLICATE
+# gpu_host_ip and gpu_host_online in main.yml. That is deliberate: this file is
+# read by plain yaml.safe_load with no Jinja rendering, so it cannot reference
+# them. The duplication is safe only because validate_openwebui_image_config.py
+# fails the build when the two disagree — do not "fix" one without the other.
 comfyui_base_url: "http://192.168.1.40:8188"
+ollama_base_url: "http://192.168.1.40:11434"
 image_generation_enabled: true
 
 # The checkpoint filename as ComfyUI lists it in

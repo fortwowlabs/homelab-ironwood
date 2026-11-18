@@ -130,6 +130,7 @@ def good_catalog() -> dict:
     return {
         "image_workflow": "sdxl",
         "comfyui_base_url": "http://192.168.1.40:8188",
+        "ollama_base_url": "http://192.168.1.40:11434",
         "image_generation_enabled": True,
         "image_generation_model": "sd_xl_base_1.0.safetensors",
         "image_size": "1024x1024",
@@ -209,6 +210,10 @@ def _drift_base_url(catalog, workflows, main_vars):
     catalog["comfyui_base_url"] = "http://192.168.1.99:8188"
 
 
+def _drift_ollama_url(catalog, workflows, main_vars):
+    catalog["ollama_base_url"] = "http://192.168.1.99:11434"
+
+
 def _drift_enabled(catalog, workflows, main_vars):
     main_vars["gpu_host_online"] = False
 
@@ -275,6 +280,7 @@ VALIDATION_CASES = (
     ("editor-format workflow", _editor_format, "editor format"),
     ("image_workflow names a missing file", _missing_workflow_file, "nonexistent"),
     ("comfyui_base_url disagrees with gpu_host_ip", _drift_base_url, "gpu_host_ip"),
+    ("ollama_base_url disagrees with gpu_host_ip", _drift_ollama_url, "gpu_host_ip"),
     ("image_generation_enabled disagrees with gpu_host_online", _drift_enabled,
      "gpu_host_online"),
     ("mapped node absent from a non-selected workflow",
@@ -481,6 +487,13 @@ def check_config(catalog: dict, workflows: dict[str, dict],
             f"comfyui_base_url is {catalog.get('comfyui_base_url')!r} but "
             f"gpu_host_ip in main.yml implies {expected_url!r} — the two have "
             "drifted and the push would point at the wrong host"
+        )
+    expected_ollama = f"http://{main_vars.get('gpu_host_ip')}:11434"
+    if catalog.get("ollama_base_url") != expected_ollama:
+        failures.append(
+            f"ollama_base_url is {catalog.get('ollama_base_url')!r} but "
+            f"gpu_host_ip in main.yml implies {expected_ollama!r} — the "
+            "nightly eviction would unload models on the wrong host"
         )
     if bool(catalog.get("image_generation_enabled")) != bool(
             main_vars.get("gpu_host_online")):
