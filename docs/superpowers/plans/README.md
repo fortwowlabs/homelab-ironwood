@@ -38,6 +38,7 @@ title. The column is only worth having for the rows that are not "Shipped".
 | [2026-09-03-media-converge-parity](2026-09-03-media-converge-parity.md) | Shipped |
 | [2026-09-03-secret-guard-loop](2026-09-03-secret-guard-loop.md) | Deferred — the plan leads with the argument against itself; read that before starting |
 | [2026-09-04-software-version-bump-backlog](2026-09-04-software-version-bump-backlog.md) | Phase 1 shipped (beszel-agent, jdownloader-2, homepage); Phases 2-5 not started |
+| [2026-11-25-caddy-cert-reload](2026-11-25-caddy-cert-reload.md) | Shipped |
 
 Three of the eighteen are **handoff notes** rather than implementation plans:
 they carry context from one session to the next mid-feature and do not stand on
