@@ -132,6 +132,14 @@ or application data is already lost.
    service also check its generated proxy socket and nftables input port.
 3. If TLS alone fails, compare the served certificate and locally installed
    Caddy root. Do not confuse it with the Proxmox CA.
+
+   If `homelab-certwatch` says Caddy is serving a different certificate than
+   `/etc/caddy/certs/fullchain.pem`, certbot renewed and the files are right but
+   Caddy is still serving the old one from memory (2026-11-25: a plain reload
+   logged "config is unchanged"). Run
+   `sudo caddy reload --force --config /etc/caddy/Caddyfile`, then re-run
+   `homelab-certwatch.sh`. If it says the deploy hook did not copy the renewal,
+   re-run `/etc/letsencrypt/renewal-hooks/deploy/caddy.sh` instead.
 4. Regenerate the access layer with `make access`; never edit rendered DNS,
    Caddy, or Homepage files in place.
 5. Smoke-test every configured backend, not just the one first reported.

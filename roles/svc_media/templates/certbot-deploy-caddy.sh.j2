@@ -9,6 +9,12 @@ install -o root -g caddy -m 0640 \
   "$cert_source/fullchain.pem" "$cert_destination/fullchain.pem"
 install -o root -g caddy -m 0640 \
   "$cert_source/privkey.pem" "$cert_destination/privkey.pem"
+# --force, because a plain reload is a no-op here: the Caddyfile's `tls` paths
+# never change, so Caddy logs "config is unchanged" and keeps serving the old
+# certificate from memory (2026-11-25). Only a forced reload re-runs the cert
+# loaders. It is done here rather than as a unit drop-in (ExecReload=) because
+# the unit file is the package's and the hook is the one place that knows the
+# certificate just changed.
 if systemctl is-active --quiet caddy; then
-  systemctl reload caddy
+  caddy reload --force --config /etc/caddy/Caddyfile
 fi

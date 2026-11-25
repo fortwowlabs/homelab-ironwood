@@ -107,7 +107,7 @@ muted, and a muted channel is the same as no alerting at all.
 | `notify-failure@.service` | all VMs + PVE | on failure | any unit in `onfailure_units_*` failing |
 | `homelab-failedunits.timer` | all VMs | 15 min | units already failed, system and rootless |
 | `homelab-diskalert.timer` | all VMs | 15 min | local FS ≥85%, NFS ≥90% |
-| `homelab-certwatch.timer` | svc-media | daily | wildcard certificate under 21 days |
+| `homelab-certwatch.timer` | svc-media | daily | wildcard under 21 days, or served ≠ on-disk |
 | `homelab-heartbeat.timer` | svc-media | daily | pings healthchecks.io; fails if ntfy is down |
 | `homelab-backups-fresh.timer` | svc-infra | daily 04:40 | any VM's newest backup older than 26h |
 | `homelab-diskguard.timer` | PVE | 15 min | pool or root/vz ≥80% |

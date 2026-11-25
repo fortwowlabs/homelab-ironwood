@@ -92,14 +92,15 @@
         fail_msg: "Refusing success: not every safe verification phase completed."
 
     # Deferred from svc_media's certwatch gate so that a certificate inside its
-    # warning window does not abort the run before the hypervisor play. The run
-    # still ends red — just after everything else has been checked.
-    - name: Assert the TLS certificate is not near expiry
+    # warning window, or one Caddy is not actually serving, does not abort the
+    # run before the hypervisor play. The run still ends red — just after
+    # everything else has been checked.
+    - name: Assert the TLS certificate check passed (expiry, and Caddy serving the on-disk certificate)
       ansible.builtin.assert:
         that:
           - hostvars[media_host].media_cert_ok | default(false) | bool
         fail_msg: >-
-          The wildcard certificate is inside its expiry warning window:
+          The wildcard certificate check failed:
           {{ hostvars[media_host].media_cert_detail | default('see homelab-certwatch.sh') }}
 
     # Deferred from svc_media's route check for the same reason. A missing

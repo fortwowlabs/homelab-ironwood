@@ -67,7 +67,7 @@ section here, read [The dead-man's switch](#the-dead-mans-switch).
 | `PVE disk alarm` | a ZFS pool or PVE root ≥80% | **most urgent of the disk alerts** — a full pool freezes every guest |
 | `ZFS on thurgadin: …` | zed saw a pool event | `zpool status -v`; a degraded pool needs hands |
 | `SMART warning on thurgadin` | a disk is reporting problems | order a replacement; this is your warning time |
-| `homelab-certwatch` failed | the wildcard is under 21 days and has not renewed | check `certbot-renew.service` and the Cloudflare token — everything goes untrusted if this expires |
+| `homelab-certwatch` failed | the wildcard is under 21 days and has not renewed, or Caddy is serving a different certificate than the one on disk, or the served certificate could not be read | read the message. Under 21 days: check `certbot-renew.service` and the Cloudflare token — everything goes untrusted if this expires. Different certificate: run `sudo caddy reload --force --config /etc/caddy/Caddyfile` |
 | `homelab-backups-fresh` failed | some VM's newest backup is over 26h old | body names the host and its newest file |
 | `homelab-verify@svcops` failed | nightly verification failed | body has the Ansible output; a real application fault |
 | `homelab deploy FAILED` / `VERIFY FAILED` | you ran something remotely and it broke | ordinary deploy failure |

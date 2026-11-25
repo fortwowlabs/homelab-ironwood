@@ -284,7 +284,8 @@
   changed_when: false
 
 # Run the watcher itself rather than trusting that its timer exists: this is
-# the check that would actually have caught an expiring certificate, and a
+# the check that would actually have caught an expiring certificate, or Caddy
+# still serving a certificate other than the one on disk, and a
 # timer being active says nothing about whether the script works.
 #
 # The failure is deferred rather than raised here. A cert inside the warning
@@ -294,7 +295,7 @@
 # the rest of this host's verification. A certificate with three weeks left is
 # a real problem but not a reason to stop checking the disks, so the result is
 # carried to the final play and asserted there, which still ends the run red.
-- name: Check whether the certificate is near expiry
+- name: Check the certificate (expiry, and Caddy serving the on-disk certificate)
   ansible.builtin.command: /usr/local/sbin/homelab-certwatch.sh
   register: media_certwatch_gate
   changed_when: false

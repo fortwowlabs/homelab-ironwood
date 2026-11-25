@@ -70,7 +70,7 @@ def render(template: str, **ctx: object) -> str:
     context.update(ctx)
     text = env.from_string((ROOT / template).read_text(encoding="utf-8")).render(**context)
     if "{{" in text:
-        raise SystemExit(f"{template} still contains '{{{{' after rendering")
+        raise SystemExit(f"render: {template} still contains '{{{{' after rendering")
     return text
 
 
@@ -148,6 +148,30 @@ def closed_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+HOOK = "roles/svc_media/templates/certbot-deploy-caddy.sh.j2"
+
+
+def check_hook() -> list[str]:
+    """The deploy hook must force the reload; a plain one is a no-op here.
+
+    On 2026-11-25 `systemctl reload caddy` logged "config is unchanged" and
+    Caddy kept serving the old certificate, because the Caddyfile's `tls`
+    paths never change. Only `caddy reload --force` re-runs the cert loaders.
+    """
+    text = render(HOOK)
+    problems = []
+    if "caddy reload --force --config /etc/caddy/Caddyfile" not in text:
+        problems.append(
+            f"hook: {HOOK} must run `caddy reload --force --config /etc/caddy/Caddyfile`; "
+            "on 2026-11-25 a plain reload said \"config is unchanged\" and Caddy kept "
+            "serving the old certificate")
+    if "systemctl reload caddy" in text:
+        problems.append(
+            f"hook: {HOOK} still runs `systemctl reload caddy`, which is a no-op "
+            "(\"config is unchanged\") when only the certificate files changed")
+    return problems
 
 
 def main() -> int:
@@ -231,7 +255,10 @@ def main() -> int:
                     failures.append(f"{name}: script did not finish within {CASE_TIMEOUT}s")
                     continue
                 out = result.stdout + result.stderr
-                if result.returncode != want_rc or want_text not in out:
+                # clean's text is a progress line on stdout; the failure texts
+                # are on stderr. Match each where it belongs.
+                haystack = result.stdout if name == "clean" else out
+                if result.returncode != want_rc or want_text not in haystack:
                     failures.append(
                         f"{name}: expected rc={want_rc} containing {want_text!r}, "
                         f"got rc={result.returncode}\n{out.rstrip()}")
@@ -239,6 +266,7 @@ def main() -> int:
                 if listener is not None:
                     listener.close()
 
+    failures.extend(check_hook())
     if failures:
         print("certwatch: FAIL", file=sys.stderr)
         for failure in failures:
@@ -246,7 +274,7 @@ def main() -> int:
         return 1
 
     note = "" if have_timeout else "; silent skipped: no coreutils timeout"
-    print(f"certwatch: OK ({ran} cases, {ran - 1} of them must fail{note})")
+    print(f"certwatch: OK ({ran} cases, {ran - 1} of them must fail{note}; deploy hook forces reload)")
     return 0
 
 

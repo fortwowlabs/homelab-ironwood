@@ -103,8 +103,10 @@ the `fortwow.dev` zone and no broader scope.
 Certbot stores the wildcard under
 `/etc/letsencrypt/live/fortwow.dev/`. An Ansible task performs the initial copy
 to `/etc/caddy/certs/`; the deploy hook at
-`/etc/letsencrypt/renewal-hooks/deploy/caddy.sh` repeats the copy and reloads
-Caddy after every successful renewal. `certbot-renew.timer` runs unattended.
+`/etc/letsencrypt/renewal-hooks/deploy/caddy.sh` repeats the copy and force-reloads
+Caddy (`caddy reload --force`) after every successful renewal. A plain reload
+is a no-op: the Caddyfile's `tls` paths never change, so Caddy logs "config is
+unchanged" and keeps serving the old certificate from memory. `certbot-renew.timer` runs unattended.
 
 Test the complete ACME path without consuming production rate limits:
 
@@ -129,6 +131,12 @@ curl --fail --head https://home.fortwow.dev
 openssl s_client -connect home.fortwow.dev:443 \
   -servername home.fortwow.dev </dev/null 2>/dev/null \
   | openssl x509 -noout -issuer -ext subjectAltName
+
+# fingerprint of what Caddy serves vs. the copy on disk; they must match
+openssl s_client -connect home.fortwow.dev:443 \
+  -servername home.fortwow.dev </dev/null 2>/dev/null \
+  | openssl x509 -noout -fingerprint -sha256
+sudo openssl x509 -in /etc/caddy/certs/fullchain.pem -noout -fingerprint -sha256
 ```
 
 The certificate must have a Let's Encrypt issuer and `DNS:*.fortwow.dev` in
@@ -148,7 +156,7 @@ not complete.
 | LAN works but tailnet does not | Tailscale split-DNS domain or subnet route is missing. Run `sudo systemctl start homelab-tailnet-route` on svc-media and read its journal: it names the router and says whether it is offline or deaf. An offline router still shows the route in `PrimaryRoutes` |
 | One name is missing | The service is absent from `caddy_services`, proxy-enabled `download_apps`, or `extra_dns_records` |
 | All names resolve to `.30` although backends use `.31`/`.32` | Correct: Caddy fronts every HTTPS service |
-| Certificate is untrusted or names the wrong domain | Caddy is serving the old/internal certificate or the Certbot copy hook failed |
+| Certificate is untrusted or names the wrong domain | Caddy is serving the old/internal certificate or the Certbot copy hook failed. `homelab-certwatch` reports which: "different certificate" means Caddy kept the old one in memory, so run `sudo caddy reload --force --config /etc/caddy/Caddyfile` |
 | Renewal fails | Check token scope, `/etc/letsencrypt/cloudflare.ini` permissions, Certbot logs, and Cloudflare zone status |
 
 Diagnose from the authoritative server outward:
