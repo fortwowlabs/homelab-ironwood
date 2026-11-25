@@ -1,5 +1,5 @@
 [Unit]
-Description=Warn before the wildcard TLS certificate expires
+Description=Check the wildcard TLS certificate: expiry, and that Caddy serves the on-disk copy
 # caddy.service: the check connects to Caddy on :443, so at boot it must not
 # race Caddy's startup and alert on a listener that is merely not up yet.
 After=network-online.target caddy.service

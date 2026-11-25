@@ -137,9 +137,13 @@ or application data is already lost.
    `/etc/caddy/certs/fullchain.pem`, certbot renewed and the files are right but
    Caddy is still serving the old one from memory (2026-11-25: a plain reload
    logged "config is unchanged"). Run
-   `sudo caddy reload --force --config /etc/caddy/Caddyfile`, then re-run
-   `homelab-certwatch.sh`. If it says the deploy hook did not copy the renewal,
-   re-run `/etc/letsencrypt/renewal-hooks/deploy/caddy.sh` instead.
+   `sudo caddy reload --force --config /etc/caddy/Caddyfile` (if it still
+   differs, `sudo systemctl restart caddy`), then
+   `sudo systemctl start homelab-certwatch.service` — it re-checks and, on
+   success, clears the `failed` state, which stops homelab-failedunits'
+   "STILL FAILED" re-alerts every 6h (running the script by hand proves the fix
+   but leaves the unit failed). If it says the deploy hook did not copy the
+   renewal, re-run `/etc/letsencrypt/renewal-hooks/deploy/caddy.sh` instead.
 4. Regenerate the access layer with `make access`; never edit rendered DNS,
    Caddy, or Homepage files in place.
 5. Smoke-test every configured backend, not just the one first reported.

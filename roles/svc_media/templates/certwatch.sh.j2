@@ -33,14 +33,20 @@ set -uo pipefail
 # one. "Could not fetch" is a problem of its own, never a pass.
 LIVE_CERT={{ ('/etc/letsencrypt/live/' ~ service_domain ~ '/fullchain.pem') | quote }}
 CADDY_CERT=/etc/caddy/certs/fullchain.pem
-SERVED_HOST={{ ansible_host }}
+SERVED_HOST={{ ansible_host | quote }}
 SERVED_PORT=443
-SERVED_SNI=home.{{ service_domain }}
+SERVED_SNI={{ ('home.' ~ service_domain) | quote }}
 PROBE_TIMEOUT=10
+# Caddy restarting under a deploy handler or package upgrade can land in the daily
+# run; without one retry that costs a full day of alerts.
+PROBE_RETRY_DELAY=5
 CERTS=("$LIVE_CERT" "$CADDY_CERT")
 DAYS={{ cert_expiry_days | default(21) }}
 
 fp_file() { openssl x509 -noout -fingerprint -sha256 -in "$1" 2>/dev/null | cut -d= -f2; }
+probe_served() {
+    timeout "$PROBE_TIMEOUT" openssl s_client -connect "${SERVED_HOST}:${SERVED_PORT}" -servername "$SERVED_SNI" </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2
+}
 
 problems=""
 for cert in "${CERTS[@]}"; do
@@ -64,7 +70,11 @@ for cert in "${CERTS[@]}"; do
     fi
 done
 
-served_fp=$(timeout "$PROBE_TIMEOUT" openssl s_client -connect "${SERVED_HOST}:${SERVED_PORT}" -servername "$SERVED_SNI" </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)
+served_fp=$(probe_served)
+if [[ -z "$served_fp" ]]; then
+    sleep "$PROBE_RETRY_DELAY"
+    served_fp=$(probe_served)
+fi
 caddy_fp=$(fp_file "$CADDY_CERT")
 live_fp=$(fp_file "$LIVE_CERT")
 
@@ -73,7 +83,7 @@ if [[ -z "$served_fp" ]]; then
 else
     echo "Caddy is serving ${served_fp}"
     if [[ -n "$caddy_fp" && "$served_fp" != "$caddy_fp" ]]; then
-        problems+=$'\n'"Caddy is serving a different certificate than ${CADDY_CERT} — the reload after renewal did not take; run: caddy reload --force --config /etc/caddy/Caddyfile"
+        problems+=$'\n'"Caddy is serving a different certificate than ${CADDY_CERT} — the reload after renewal did not take; run: caddy reload --force --config /etc/caddy/Caddyfile (if it still differs, sudo systemctl restart caddy)"
     fi
 fi
 

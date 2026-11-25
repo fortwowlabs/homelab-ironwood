@@ -50,6 +50,8 @@ A fresh-context reviewer attacked v1 of this plan. Dispositions:
 | 11 | Name any failed units before the final verify. | **Accepted.** This is Task 3 Step 0. svc-media read 0 failed units at 05:52. |
 | 12 | Fetch and check ancestry before deploying and merging; push the branch after commits. | **Accepted.** |
 
+**Final review (2026-11-25).** The whole-branch review added: the runbook clears the failed unit with `systemctl start homelab-certwatch.service`; one probe retry (`PROBE_RETRY_DELAY`); a `systemctl restart caddy` fallback in every piece of advice; a first response for "could not read"; an accurate unit Description; a gate assertion of exactly one problem per failing case; quoted `SERVED_HOST`/`SERVED_SNI`; and the Task 3 Step 4 serial-to-serial comparison with a failure branch.
+
 ## Global Constraints
 
 - Caddy binds only `{{ ansible_host }}` (Caddyfile.j2:48). The probe must connect there, never to `127.0.0.1`.
@@ -191,7 +193,9 @@ git push
   - Then run `USE_VAULT_FILE=1 caffeinate -i make verify`. Expect it red on exactly `Assert the TLS certificate check passed…`, carrying that message.
   - If either check reads green, stop.
 - [ ] **Step 3: Run the fixed hook.** `ssh … 'sudo /etc/letsencrypt/renewal-hooks/deploy/caddy.sh; echo rc=$?'` should give rc=0. The caddy journal must show `/load` **without** `config is unchanged`.
-- [ ] **Step 4: Prove the rotation.** The fingerprint from `s_client` against `192.168.1.30:443` (SNI `chat.fortwow.dev`) must equal the on-disk serial `06A1FD…`. certwatch must give `rc=0`, and `systemctl reset-failed homelab-certwatch.service` if it went failed.
+- [ ] **Step 4: Prove the rotation.** The serial from `openssl s_client` against `192.168.1.30:443` (SNI `chat.fortwow.dev`) piped to `openssl x509 -noout -serial` must equal `openssl x509 -noout -serial -in /etc/caddy/certs/fullchain.pem` (on-disk serial `06A1FD…`). certwatch must give `rc=0`. Clear the certwatch unit with `sudo systemctl start homelab-certwatch.service` (re-checks and leaves `failed` on success).
+
+  **If Caddy still serves the old serial after the forced reload:** remediate with `sudo systemctl restart caddy` (the live expiry is 2026-12-25 01:24 GMT), do NOT merge, and re-plan the hook.
 - [ ] **Step 5: Final proof from a clean tree.**
   - `git status --porcelain` must be empty.
   - Run `make deploy-proof TARGET=media`. Expect `changed=0`.

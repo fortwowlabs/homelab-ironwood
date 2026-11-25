@@ -156,7 +156,7 @@ not complete.
 | LAN works but tailnet does not | Tailscale split-DNS domain or subnet route is missing. Run `sudo systemctl start homelab-tailnet-route` on svc-media and read its journal: it names the router and says whether it is offline or deaf. An offline router still shows the route in `PrimaryRoutes` |
 | One name is missing | The service is absent from `caddy_services`, proxy-enabled `download_apps`, or `extra_dns_records` |
 | All names resolve to `.30` although backends use `.31`/`.32` | Correct: Caddy fronts every HTTPS service |
-| Certificate is untrusted or names the wrong domain | Caddy is serving the old/internal certificate or the Certbot copy hook failed. `homelab-certwatch` reports which: "different certificate" means Caddy kept the old one in memory, so run `sudo caddy reload --force --config /etc/caddy/Caddyfile` |
+| Certificate is untrusted or names the wrong domain | Caddy is serving the old/internal certificate or the Certbot copy hook failed. `homelab-certwatch` reports which: "different certificate" means Caddy kept the old one in memory, so run `sudo caddy reload --force --config /etc/caddy/Caddyfile` (if it still differs, `sudo systemctl restart caddy`) |
 | Renewal fails | Check token scope, `/etc/letsencrypt/cloudflare.ini` permissions, Certbot logs, and Cloudflare zone status |
 
 Diagnose from the authoritative server outward:

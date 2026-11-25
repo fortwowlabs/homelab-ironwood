@@ -242,6 +242,7 @@ def main() -> int:
                 text = setvar(text, "SERVED_PORT", str(port))
                 text = setvar(text, "SERVED_SNI", "home.example.test")
                 text = setvar(text, "PROBE_TIMEOUT", str(probe))
+                text = setvar(text, "PROBE_RETRY_DELAY", "0")
                 script = tmp / f"certwatch-{name}.sh"
                 write_sh(script, text)
                 script.chmod(0o755)
@@ -262,6 +263,18 @@ def main() -> int:
                     failures.append(
                         f"{name}: expected rc={want_rc} containing {want_text!r}, "
                         f"got rc={result.returncode}\n{out.rstrip()}")
+                elif want_rc == 1:
+                    # Framing: "certificate problems:" then one newline-prefixed
+                    # line per problem. Exactly one, or a must-fail case is
+                    # passing for two reasons at once.
+                    lines = result.stderr.strip().splitlines()
+                    n = len(lines) - 1 if lines and lines[0].startswith("certificate problems:") else -1
+                    # `expiring` has all three copies equal, so BOTH files on
+                    # disk (live and caddy) expire: one line per file is correct.
+                    want_n = 2 if name == "expiring" else 1
+                    if n != want_n:
+                        failures.append(
+                            f"{name}: expected exactly {want_n} problem line(s), found {n}\n{result.stderr.rstrip()}")
             finally:
                 if listener is not None:
                     listener.close()
