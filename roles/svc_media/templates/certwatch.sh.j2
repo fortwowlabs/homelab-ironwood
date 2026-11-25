@@ -14,22 +14,33 @@
 # is exactly the failure mode worth catching.
 set -uo pipefail
 
-# BOTH copies are checked, and the second one is the point.
+# THREE copies of the certificate exist, and the one that matters is the one in
+# Caddy's memory.
 #
-# certbot writes to /etc/letsencrypt/live, but Caddy serves
-# /etc/caddy/certs/fullchain.pem — a copy placed there by the deploy hook at
-# /etc/letsencrypt/renewal-hooks/deploy/caddy.sh. Watching only the certbot side
-# misses the failure where the hook is gone (a certbot package transaction, a
-# restored /etc/letsencrypt, a hooks directory wiped): renewal then succeeds and
-# exits 0, certbot-renew.service never fails, the live cert looks perfect every
-# single day, and the certificate Caddy is actually serving quietly expires and
-# breaks HTTPS for every service. `make verify`'s cert gate would not catch it
-# either — it asserts issuer and SAN, both of which an expired cert still has.
-CERTS=(
-    {{ ('/etc/letsencrypt/live/' ~ service_domain ~ '/fullchain.pem') | quote }}
-    /etc/caddy/certs/fullchain.pem
-)
+# certbot writes to /etc/letsencrypt/live, a deploy hook at
+# /etc/letsencrypt/renewal-hooks/deploy/caddy.sh copies it to
+# /etc/caddy/certs/fullchain.pem, and Caddy serves whatever it last LOADED from
+# there. Each hop fails silently on its own: a missing hook leaves the copy
+# stale (certbot exits 0, the live cert looks perfect every day), and a reload
+# that does not take leaves Caddy serving the old certificate while both files
+# on disk are fine. The second is not hypothetical: on 2026-11-25 `caddy reload`
+# answered "config is unchanged" after a renewal and Caddy kept the old cert.
+# `make verify`'s cert gate asserts issuer and SAN, which an expired cert still
+# has, so none of this would be noticed until browsers refused the site.
+#
+# So the files are checked for expiry, the served certificate is fetched over
+# TLS and compared to the copy on disk, and that copy is compared to the live
+# one. "Could not fetch" is a problem of its own, never a pass.
+LIVE_CERT={{ ('/etc/letsencrypt/live/' ~ service_domain ~ '/fullchain.pem') | quote }}
+CADDY_CERT=/etc/caddy/certs/fullchain.pem
+SERVED_HOST={{ ansible_host }}
+SERVED_PORT=443
+SERVED_SNI=home.{{ service_domain }}
+PROBE_TIMEOUT=10
+CERTS=("$LIVE_CERT" "$CADDY_CERT")
 DAYS={{ cert_expiry_days | default(21) }}
+
+fp_file() { openssl x509 -noout -fingerprint -sha256 -in "$1" 2>/dev/null | cut -d= -f2; }
 
 problems=""
 for cert in "${CERTS[@]}"; do
@@ -52,6 +63,23 @@ for cert in "${CERTS[@]}"; do
         problems+=$'\n'"${cert} expires within ${DAYS} days and has not renewed — check certbot-renew.service, the Cloudflare API token, and the Caddy deploy hook"
     fi
 done
+
+served_fp=$(timeout "$PROBE_TIMEOUT" openssl s_client -connect "${SERVED_HOST}:${SERVED_PORT}" -servername "$SERVED_SNI" </dev/null 2>/dev/null | openssl x509 -noout -fingerprint -sha256 2>/dev/null | cut -d= -f2)
+caddy_fp=$(fp_file "$CADDY_CERT")
+live_fp=$(fp_file "$LIVE_CERT")
+
+if [[ -z "$served_fp" ]]; then
+    problems+=$'\n'"could not read the certificate Caddy is serving on ${SERVED_HOST}:${SERVED_PORT} (SNI ${SERVED_SNI})"
+else
+    echo "Caddy is serving ${served_fp}"
+    if [[ -n "$caddy_fp" && "$served_fp" != "$caddy_fp" ]]; then
+        problems+=$'\n'"Caddy is serving a different certificate than ${CADDY_CERT} — the reload after renewal did not take; run: caddy reload --force --config /etc/caddy/Caddyfile"
+    fi
+fi
+
+if [[ -n "$caddy_fp" && -n "$live_fp" && "$caddy_fp" != "$live_fp" ]]; then
+    problems+=$'\n'"${CADDY_CERT} differs from ${LIVE_CERT} — the certbot deploy hook did not copy the renewal"
+fi
 
 if [[ -n "$problems" ]]; then
     echo "certificate problems:${problems}" >&2

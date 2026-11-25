@@ -180,6 +180,8 @@ def main() -> int:
         "verify_runner_user": "svcops",
         "pve_scrub_max_age_days": 45,
         "service_domain": "example.test",
+        # certwatch.sh.j2 probes this host over TLS; documentation-range address.
+        "ansible_host": "192.0.2.30",
         "svc_uid": 10001,
         "download_apps": apps,
         "lan_dns": "192.0.2.1",
